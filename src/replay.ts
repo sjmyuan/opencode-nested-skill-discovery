@@ -1,8 +1,6 @@
 import type { Skill } from "@opencode/plugin"
-import type { RegistryEntry, RegistrySnapshot } from "./contracts.ts"
+import { compareText, type RegistryEntry, type RegistrySnapshot } from "./contracts.ts"
 import type { SkillEditor } from "./plugin.ts"
-
-const compareId = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -26,7 +24,7 @@ export function applyRegistry(
   const diagnostics: string[] = []
   const entries = snapshot.snapshots
     .flatMap((subproject) => subproject.skills)
-    .sort((left, right) => compareId(left.id, right.id))
+    .sort((left, right) => compareText(left.id, right.id))
 
   for (const entry of entries) {
     try {

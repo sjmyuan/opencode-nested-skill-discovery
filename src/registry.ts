@@ -4,19 +4,18 @@ import { join, resolve } from "node:path"
 import type { Plugin } from "@opencode/plugin"
 import {
   MAX_DESCRIPTION_LENGTH,
+  compareText,
   MAX_NAME_LENGTH,
   type RegistryEntry,
   type RegistrySnapshot,
   type Snapshot,
 } from "./contracts.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
-import { persistRegistry, type PersistResult } from "./manifest.ts"
+import { persistRegistry } from "./manifest.ts"
 import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { applyRegistry } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
-
-const compareId = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -35,6 +34,21 @@ function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
 
   const kept = diagnostics.slice(0, DIAGNOSTIC_LIMIT - 1)
   return [...kept, `truncated: ${diagnostics.length - kept.length} more diagnostics`]
+}
+
+type StageResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false }
+
+async function runStage<T>(
+  diagnostics: string[],
+  name: string,
+  run: () => Promise<T>,
+): Promise<StageResult<T>> {
+  try {
+    return { ok: true, value: await run() }
+  } catch (error) {
+    diagnostics.push(`${name}: ${reasonOf(error)}`)
+    return { ok: false }
+  }
 }
 
 export interface AssembledEntry extends RegistryEntry {
@@ -59,7 +73,7 @@ export function assembleEntries(skills: readonly IndexedSkill[]): readonly Assem
         subproject: skill.subproject,
       }
     })
-    .sort((left, right) => compareId(left.id, right.id))
+    .sort((left, right) => compareText(left.id, right.id))
 }
 
 export interface BuildSnapshotInput {
@@ -105,14 +119,14 @@ export async function buildRegistrySnapshot({
 
   const snapshots: readonly Snapshot[] = Object.freeze(
     [...groups.entries()]
-      .sort(([left], [right]) => compareId(left, right))
+      .sort(([left], [right]) => compareText(left, right))
       .map(([scopeToken, group]) =>
         Object.freeze({
           scopeToken,
           directory: group.directory,
           skills: Object.freeze(
             [...group.skills]
-              .sort((left, right) => compareId(left.id, right.id))
+              .sort((left, right) => compareText(left.id, right.id))
               .map((entry) => Object.freeze(entry)),
           ),
         }),
@@ -160,7 +174,7 @@ export function selectSuppressed(
   const suppressed: string[] = []
   const seenPaths = new Set<string>()
 
-  for (const entry of [...skills].sort((left, right) => compareId(left.id, right.id))) {
+  for (const entry of [...skills].sort((left, right) => compareText(left.id, right.id))) {
     if (foreignPaths.has(entry.canonicalPath) || seenPaths.has(entry.canonicalPath)) {
       suppressed.push(entry.id)
       continue
@@ -269,12 +283,8 @@ export function createRegistry(ctx: Plugin.Context): Registry {
 
       current = Object.freeze({ location: base, snapshots: Object.freeze([]) })
 
-      try {
-        await ctx.skill.reload()
-      } catch (error) {
-        diagnostics.push(`reload: ${reasonOf(error)}`)
-        return record(fail(diagnostics))
-      }
+      const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
+      if (!reloaded.ok) return record(fail(diagnostics))
 
       return record({
         ok: false,
@@ -286,65 +296,44 @@ export function createRegistry(ctx: Plugin.Context): Registry {
       })
     }
 
-    let scanned
-    try {
-      scanned = await scanSkills({ location: base, excludeRoots: nativeRoots })
-    } catch (error) {
-      diagnostics.push(`scan: ${reasonOf(error)}`)
-      return record(fail(diagnostics))
-    }
-    if (scanned.truncated) diagnostics.push("scan-truncated")
-    diagnostics.push(...scanned.diagnostics)
+    const scanned = await runStage(diagnostics, "scan", () =>
+      scanSkills({ location: base, excludeRoots: nativeRoots }),
+    )
+    if (!scanned.ok) return record(fail(diagnostics))
+    if (scanned.value.truncated) diagnostics.push("scan-truncated")
+    diagnostics.push(...scanned.value.diagnostics)
 
-    let indexed
-    try {
-      indexed = await indexCandidates(scanned.candidates, { location: base, nativeRoots })
-    } catch (error) {
-      diagnostics.push(`index: ${reasonOf(error)}`)
-      return record(fail(diagnostics))
-    }
-    diagnostics.push(...indexed.diagnostics)
+    const indexed = await runStage(diagnostics, "index", () =>
+      indexCandidates(scanned.value.candidates, { location: base, nativeRoots }),
+    )
+    if (!indexed.ok) return record(fail(diagnostics))
+    diagnostics.push(...indexed.value.diagnostics)
 
-    let built
-    try {
-      built = await buildRegistrySnapshot({ location: base, skills: assembleEntries(indexed.skills) })
-    } catch (error) {
-      diagnostics.push(`snapshot: ${reasonOf(error)}`)
-      return record(fail(diagnostics))
-    }
-    diagnostics.push(...built.diagnostics)
+    const built = await runStage(diagnostics, "snapshot", () =>
+      buildRegistrySnapshot({ location: base, skills: assembleEntries(indexed.value.skills) }),
+    )
+    if (!built.ok) return record(fail(diagnostics))
+    diagnostics.push(...built.value.diagnostics)
 
-    let persisted: PersistResult
-    try {
-      persisted = await persistRegistry(ctx.storage, { location: base, snapshots: built.snapshot.snapshots })
-    } catch (error) {
-      diagnostics.push(`manifest: ${reasonOf(error)}`)
-      return record(fail(diagnostics))
-    }
-    diagnostics.push(...persisted.diagnostics)
+    const persisted = await runStage(diagnostics, "manifest", () =>
+      persistRegistry(ctx.storage, { location: base, snapshots: built.value.snapshot.snapshots }),
+    )
     if (!persisted.ok) return record(fail(diagnostics))
+    diagnostics.push(...persisted.value.diagnostics)
+    if (!persisted.value.ok) return record(fail(diagnostics))
 
-    current = built.snapshot
+    current = built.value.snapshot
 
-    try {
-      await ctx.skill.reload()
-    } catch (error) {
-      diagnostics.push(`reload: ${reasonOf(error)}`)
-      return record(fail(diagnostics))
-    }
+    const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
+    if (!reloaded.ok) return record(fail(diagnostics))
 
     let reloads = 1
-    let listed
-    try {
-      listed = await ctx.skill.list()
-    } catch (error) {
-      diagnostics.push(`list: ${reasonOf(error)}`)
-      return record(fail(diagnostics, reloads))
-    }
+    const listed = await runStage(diagnostics, "list", () => ctx.skill.list())
+    if (!listed.ok) return record(fail(diagnostics, reloads))
 
     const ownedIds = new Set(current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)))
     const foreignPaths = new Set(
-      listed.data
+      listed.value.data
         .filter((entry) => !ownedIds.has(String(entry.id)))
         .map((entry) => String(entry.path)),
     )
@@ -360,7 +349,7 @@ export function createRegistry(ctx: Plugin.Context): Registry {
       const written = await persistRegistry(ctx.storage, {
         location: base,
         snapshots: corrected.snapshots,
-        version: persisted.version,
+        version: persisted.value.version,
       })
       diagnostics.push(...written.diagnostics)
       if (!written.ok) return record(fail(diagnostics, reloads))
@@ -368,19 +357,15 @@ export function createRegistry(ctx: Plugin.Context): Registry {
       current = corrected
       reloads += 1
 
-      try {
-        await ctx.skill.reload()
-      } catch (error) {
-        diagnostics.push(`reload: ${reasonOf(error)}`)
-        return record(fail(diagnostics, reloads - 1))
-      }
+      const correctedReload = await runStage(diagnostics, "reload", () => ctx.skill.reload())
+      if (!correctedReload.ok) return record(fail(diagnostics, reloads - 1))
     }
 
     return record({
       ok: true,
       skills: current.snapshots.reduce((total, subproject) => total + subproject.skills.length, 0),
       subprojects: current.snapshots.length,
-      version: persisted.version,
+      version: persisted.value.version,
       reloads,
       diagnostics: capDiagnostics(diagnostics),
     })

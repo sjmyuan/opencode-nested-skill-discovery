@@ -2,6 +2,7 @@ import { isAbsolute, relative, sep } from "node:path"
 import type { Schema } from "effect"
 import {
   STORAGE_KEYS,
+  compareText,
   type ManifestRecord,
   type RegistryEntry,
   type SkillEntry,
@@ -39,8 +40,6 @@ export interface PersistResult {
 }
 
 const PRUNE_PAGE_SIZE = 100
-
-const compareText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 

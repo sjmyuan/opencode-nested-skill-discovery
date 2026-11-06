@@ -72,6 +72,9 @@ export interface PluginConfig {
   readonly maxDescriptionLength: number
 }
 
+export const compareText = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0
+
 export const ID_PREFIX = "nested."
 export const MAX_ID_LENGTH = 96
 export const MAX_SCOPE_SLUG_LENGTH = 24

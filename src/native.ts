@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
+import { compareText } from "./contracts.ts"
 
 export interface NativeRootInput {
   readonly location: string
@@ -9,8 +10,6 @@ export interface NativeRootInput {
 
 const CONFIG_DIRECTORIES = [".opencode", ".claude", ".agents"] as const
 const SKILL_DIRECTORIES = ["skill", "skills"] as const
-
-const comparePath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
 function ancestorsOf(location: string): readonly string[] {
   const ancestors: string[] = []
@@ -46,5 +45,5 @@ export async function resolveNativeRoots(input: NativeRootInput): Promise<readon
     }
   }
 
-  return [...resolved].sort(comparePath)
+  return [...resolved].sort(compareText)
 }
