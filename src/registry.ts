@@ -3,19 +3,24 @@ import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import type { Plugin } from "@opencode/plugin"
 import {
+  DEBOUNCE_MS,
   MAX_DESCRIPTION_LENGTH,
   compareText,
   MAX_NAME_LENGTH,
+  PROMPT_THROTTLE_MS,
   type RegistryEntry,
   type RegistrySnapshot,
+  type ScanCandidate,
   type Snapshot,
 } from "./contracts.ts"
+import { createBackstop, type Backstop } from "./backstop.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
 import { persistRegistry } from "./manifest.ts"
 import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { applyRegistry } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
+import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory } from "./watch.ts"
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -157,6 +162,17 @@ export interface Registry {
   dispose(): Promise<void>
 }
 
+/**
+ * Trigger wiring (PD1): opt-in, so `createRegistry(ctx)` and every F5 test keep the
+ * exact no-trigger behaviour. `setup(ctx)` supplies `nodeWatchFactory` in production.
+ */
+export interface RegistryOptions {
+  readonly watchDirectory?: WatchFactory
+  readonly debounceMs?: number
+  readonly throttleMs?: number
+  readonly now?: () => number
+}
+
 type Registration = Awaited<ReturnType<Plugin.Context["skill"]["transform"]>>
 
 const EMPTY_OUTCOME: RefreshOutcome = Object.freeze({
@@ -202,7 +218,7 @@ function withoutEntries(
   return Object.freeze({ location: snapshot.location, snapshots: Object.freeze(snapshots) })
 }
 
-export function createRegistry(ctx: Plugin.Context): Registry {
+export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {}): Registry {
   let canonical: string | undefined
   let current: RegistrySnapshot = Object.freeze({
     location: resolve(ctx.location.directory),
@@ -213,7 +229,31 @@ export function createRegistry(ctx: Plugin.Context): Registry {
   let registering: Promise<void> | undefined
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
+  let followUp = false
   const replayDiagnostics: string[] = []
+  const watchDiagnostics: string[] = []
+
+  const now = options.now ?? (() => Date.now())
+
+  const debouncer =
+    options.watchDirectory === undefined
+      ? undefined
+      : createDebouncer({ delayMs: options.debounceMs ?? DEBOUNCE_MS, fire: () => queue() })
+
+  const watchers =
+    options.watchDirectory === undefined
+      ? undefined
+      : createWatchSet({
+          factory: options.watchDirectory,
+          onEvent: () => debouncer?.signal(),
+          onDiagnostic: (message) => {
+            watchDiagnostics.push(message)
+          },
+        })
+
+  let backstop: Backstop | undefined
+  let backstopRegistration: Registration | undefined
+  let registeringBackstop: Promise<void> | undefined
 
   const location = (): string => canonical ?? resolve(ctx.location.directory)
 
@@ -260,10 +300,66 @@ export function createRegistry(ctx: Plugin.Context): Registry {
     await registering
   }
 
+  /** Reconciles the watcher set from a successful scan. Never throws (PD7). */
+  const syncWatchers = async (base: string, candidates: readonly ScanCandidate[]): Promise<void> => {
+    if (disposed || watchers === undefined) return
+
+    try {
+      const derived = await deriveWatchTargets({ location: base, candidates })
+      watchDiagnostics.push(...derived.diagnostics)
+      watchers.sync(derived.targets)
+    } catch (error) {
+      watchDiagnostics.push(`watch: ${reasonOf(error)}`)
+    }
+  }
+
+  /**
+   * Registers the prompt backstop once (PD6). A rejected hook registration becomes a
+   * `hook: <reason>` diagnostic and leaves the instance without a backstop.
+   */
+  const ensureBackstop = async (): Promise<void> => {
+    if (backstop !== undefined || disposed || watchers === undefined) return
+    if (registeringBackstop !== undefined) {
+      await registeringBackstop
+      return
+    }
+
+    const created = createBackstop({
+      refresh: () => refresh(),
+      inFlight: () => inFlight,
+      throttleMs: options.throttleMs ?? PROMPT_THROTTLE_MS,
+      now,
+    })
+
+    registeringBackstop = ctx.session
+      .hook("prompt", () => created.prompt())
+      .then((registration) => {
+        backstop = created
+        backstopRegistration = registration
+      })
+      .catch((error) => {
+        watchDiagnostics.push(`hook: ${reasonOf(error)}`)
+      })
+      .finally(() => {
+        registeringBackstop = undefined
+      })
+
+    await registeringBackstop
+  }
+
+  const queue = (): void => {
+    if (disposed) return
+    if (inFlight !== undefined) {
+      followUp = true
+      return
+    }
+    void refresh().catch(() => undefined)
+  }
+
   const runRefresh = async (): Promise<RefreshOutcome> => {
     if (disposed) return record(fail(["disposed"]))
 
-    const diagnostics: string[] = [...replayDiagnostics.splice(0)]
+    const diagnostics: string[] = [...replayDiagnostics.splice(0), ...watchDiagnostics.splice(0)]
     const base = await canonicalDirectory(ctx.location.directory)
     canonical = base
     const nativeRoots = await resolveNativeRoots(nativeInput())
@@ -302,6 +398,8 @@ export function createRegistry(ctx: Plugin.Context): Registry {
     if (!scanned.ok) return record(fail(diagnostics))
     if (scanned.value.truncated) diagnostics.push("scan-truncated")
     diagnostics.push(...scanned.value.diagnostics)
+    // A good scan is a valid watcher set even if a later stage fails (PD7).
+    await syncWatchers(base, scanned.value.candidates)
 
     const indexed = await runStage(diagnostics, "index", () =>
       indexCandidates(scanned.value.candidates, { location: base, nativeRoots }),
@@ -389,6 +487,13 @@ export function createRegistry(ctx: Plugin.Context): Registry {
       return await run
     } finally {
       if (inFlight === run) inFlight = undefined
+      // Any completed refresh suppresses the next prompt backstop (PD6).
+      backstop?.observe(now())
+      // Exactly one follow-up: never a queue, and never a second concurrent scan (PD4).
+      if (followUp && !disposed) {
+        followUp = false
+        queue()
+      }
     }
   }
 
@@ -398,18 +503,36 @@ export function createRegistry(ctx: Plugin.Context): Registry {
     } catch (error) {
       return record(fail([`register: ${reasonOf(error)}`]))
     }
-    return refresh()
+    const activated = await refresh()
+    // Built after the first refresh so activation is already recorded, and regardless of its outcome.
+    await ensureBackstop()
+    backstop?.observe(now())
+    return activated
   }
 
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    followUp = false
+
+    debouncer?.clear()
+    watchers?.dispose()
+    if (inFlight !== undefined) await inFlight.catch(() => undefined)
+    if (registeringBackstop !== undefined) await registeringBackstop.catch(() => undefined)
+
+    const existingBackstop = backstopRegistration
+    backstopRegistration = undefined
+    if (existingBackstop !== undefined) await existingBackstop.dispose().catch(() => undefined)
+
+    const stopped = backstop
+    backstop = undefined
+    if (stopped !== undefined) await stopped.dispose().catch(() => undefined)
 
     if (registering !== undefined) await registering.catch(() => undefined)
 
     const created = registration
     registration = undefined
-    if (created !== undefined) await created.dispose()
+    if (created !== undefined) await created.dispose().catch(() => undefined)
   }
 
   return {

@@ -6,11 +6,13 @@ import type { Schema } from "effect"
 import type { SkillEditor } from "../../src/plugin.ts"
 
 type TransformCallback = (editor: SkillEditor) => void
+type HookCallback = (input: unknown) => Promise<void> | void
 
 export type FailureTarget =
   | "skill.transform"
   | "skill.reload"
   | "skill.list"
+  | "session.hook"
   | "storage.get"
   | "storage.set"
   | "storage.remove"
@@ -41,6 +43,8 @@ export interface FakeContext {
   readonly ctx: Plugin.Context
   readonly transforms: readonly TransformCallback[]
   readonly disposeCalls: number
+  readonly hookRegistrations: number
+  readonly hookDisposeCalls: number
   readonly editor: SkillEditor
   readonly location: FakeLocation
   readonly storage: Map<string, Schema.Json>
@@ -52,6 +56,7 @@ export interface FakeContext {
   fail(target: FailureTarget, error?: unknown): void
   failKey(key: string, error?: unknown): void
   clearFailures(): void
+  firePrompt(): Promise<void>
 }
 
 const NATIVE_PATH = "/tmp/native-skills/alpha/SKILL.md" as Skill.Info["path"]
@@ -70,7 +75,8 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const natives: Skill.Info[] = seed.map((skill) => ({ ...skill }))
   let entries: Skill.Info[] = natives.map((skill) => ({ ...skill }))
   const transforms: TransformCallback[] = []
-  const counters = { dispose: 0, reload: 0 }
+  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0 }
+  const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
   const keyFailures = new Map<string, unknown>()
   const values = new Map<string, Schema.Json>(options.storage ?? [])
@@ -119,7 +125,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
   } as unknown as SkillEditor
 
-  // Only the three faked domains exist: any other host capability in setup is a loud failure.
+  // Only the four faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
     skill: {
       transform: async (callback: TransformCallback) =>
@@ -142,6 +148,20 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         guarded("skill.list", () => ({ location: { directory: location.directory }, data: entries })),
     },
     location,
+    session: {
+      hook: async (name: string, callback: HookCallback) =>
+        guarded("session.hook", () => {
+          const registered = hookRegistry.get(name) ?? []
+          registered.push(callback)
+          hookRegistry.set(name, registered)
+          counters.hookRegistrations += 1
+          return {
+            dispose: async () => {
+              counters.hookDisposals += 1
+            },
+          }
+        }),
+    },
     storage: {
       get: async (key: string) =>
         guarded("storage.get", () => {
@@ -170,6 +190,12 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     storage: values,
     get disposeCalls() {
       return counters.dispose
+    },
+    get hookRegistrations() {
+      return counters.hookRegistrations
+    },
+    get hookDisposeCalls() {
+      return counters.hookDisposals
     },
     get reloadCalls() {
       return counters.reload
@@ -201,6 +227,12 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     clearFailures() {
       failures.clear()
       keyFailures.clear()
+    },
+    // Surfaces rejections on purpose: a "never rejects" test must be able to fail loudly.
+    async firePrompt() {
+      for (const callback of hookRegistry.get("prompt") ?? []) {
+        await callback({})
+      }
     },
   }
 }

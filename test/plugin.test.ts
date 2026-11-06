@@ -1,14 +1,38 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { RegistrySnapshot } from "../src/contracts.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
 import { createRegistryFixture } from "./support/registry-fixtures.ts"
+import { fakeWatch } from "./support/watch-fixtures.ts"
 
 vi.mock("@opencode/plugin", () => ({ Plugin: { define: (plugin: unknown) => plugin } }))
+
+// Only the factory is replaced: the real registry wiring stays, but no test here waits on a
+// real `fs.watch` event (PD12). `test/watch-node.test.ts` is the single factory smoke test.
+const watchControl = vi.hoisted(() => ({
+  factory: undefined as undefined | ((directory: string, onChange: () => void) => { close(): void }),
+}))
+
+vi.mock("../src/watch.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/watch.ts")>()
+  return {
+    ...actual,
+    nodeWatchFactory: (directory: string, onChange: () => void) => {
+      const factory = watchControl.factory
+      if (factory === undefined) return { close: () => undefined }
+      return factory(directory, onChange)
+    },
+  }
+})
 
 const entry = await import("../index.ts")
 const core = await import("../src/plugin.ts")
 
 const DOC = "---\nname: deploy\n---\n# Deploy\n"
+const EXTRA_DOC = "---\nname: extra\n---\n# Extra\n"
+
+beforeEach(() => {
+  watchControl.factory = undefined
+})
 
 describe("plugin definition", () => {
   it("default-exports only the id and setup", () => {
@@ -16,7 +40,7 @@ describe("plugin definition", () => {
     expect(entry.default.id).toBe("nested-skill-discovery")
   })
 
-  it("registers exactly one skill transform and disposes it once", async () => {
+  it("registers exactly one skill transform and one prompt hook, and disposes both once", async () => {
     const fixture = await createRegistryFixture()
 
     try {
@@ -24,11 +48,46 @@ describe("plugin definition", () => {
       const cleanup = await entry.default.setup(fake.ctx)
 
       expect(fake.transforms).toHaveLength(1)
+      expect(fake.hookRegistrations).toBe(1)
       expect(cleanup).toBeTypeOf("function")
       if (typeof cleanup !== "function") return
 
       await cleanup()
       expect(fake.disposeCalls).toBe(1)
+      expect(fake.hookDisposeCalls).toBe(1)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refreshes from a watcher event without a second transform or hook", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
+      const fake = fakeContext([], { directory: fixture.root })
+      const watch = fakeWatch()
+      watchControl.factory = watch.factory
+      const cleanup = await entry.default.setup(fake.ctx)
+      if (typeof cleanup !== "function") return
+
+      try {
+        expect(watch.active().length).toBeGreaterThan(0)
+        await fake.firePrompt()
+        await fixture.write("A/.opencode/skills/extra/SKILL.md", EXTRA_DOC)
+        watch.emit()
+
+        await vi.waitFor(
+          () => expect(fake.editor.list().map((skill) => String(skill.name))).toContain("A/extra"),
+          { timeout: 3000, interval: 20 },
+        )
+
+        expect(fake.transforms).toHaveLength(1)
+        expect(fake.hookRegistrations).toBe(1)
+        expect(fake.reloadCalls).toBeGreaterThan(1)
+      } finally {
+        await cleanup()
+      }
     } finally {
       await fixture.cleanup()
     }
