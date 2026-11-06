@@ -6,10 +6,19 @@ export interface SkillEntry {
   readonly autoinvoke?: boolean
 }
 
+export interface RegistryEntry extends SkillEntry {
+  readonly content: string
+}
+
 export interface Snapshot {
   readonly scopeToken: string
   readonly directory: string
-  readonly skills: readonly SkillEntry[]
+  readonly skills: readonly RegistryEntry[]
+}
+
+export interface RegistrySnapshot {
+  readonly location: string
+  readonly snapshots: readonly Snapshot[]
 }
 
 export interface ManifestRecord {
