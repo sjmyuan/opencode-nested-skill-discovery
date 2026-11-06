@@ -20,8 +20,12 @@ interface SnapshotHolder {
   snapshot: Snapshot | undefined
 }
 
+function createSnapshotHolder(initial: Snapshot | undefined): SnapshotHolder {
+  return { snapshot: initial }
+}
+
 export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
-  const state: SnapshotHolder = { snapshot: EMPTY_SNAPSHOT }
+  const state = createSnapshotHolder(EMPTY_SNAPSHOT)
   const registration = await ctx.skill.transform((editor) => applySnapshot(editor, state.snapshot))
 
   return async () => {
