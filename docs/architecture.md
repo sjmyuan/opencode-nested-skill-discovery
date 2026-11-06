@@ -12,9 +12,12 @@ result through the single `skill.transform` it registers, and leaves native, glo
 session skills exactly as they were (`src/registry.ts:242-261`, `src/replay.ts:18-45`). Every entry it adds carries an ID starting with `nested.`
 (`src/contracts.ts:78`).
 
-Native discovery of a subproject's own `.opencode/skills` (the workspace root's) is not
-disabled or shadowed; the plugin only contributes the subprojects *below* the location,
-minus the roots opencode already reads (`src/native.ts:28-49`, `src/indexer.ts:191`).
+opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` for the
+workspace, its ancestor config roots, and the global ones
+(`packages/core/src/config/plugin/skill.ts:77-88`). The plugin neither disables nor shadows
+those roots: it excludes them from its own scan by realpath (`src/native.ts:28-49`,
+`src/indexer.ts:191`) and contributes only what native discovery cannot reach — the
+subprojects *below* the location.
 
 ## Entry and lifecycle
 
