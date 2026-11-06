@@ -145,7 +145,7 @@ export async function poll(fn, { until, timeoutMs, intervalMs, onAttempt }) {
   return { ok: false, value, attempts, elapsedMs: Date.now() - started, error: lastError?.message }
 }
 
-export async function pollStable(fn, { timeoutMs, intervalMs, stableFor = 3, signature }) {
+export async function pollStable(fn, { timeoutMs, intervalMs, stableFor = 3, signature, ready }) {
   const started = Date.now()
   let attempts = 0
   let previous
@@ -158,7 +158,13 @@ export async function pollStable(fn, { timeoutMs, intervalMs, stableFor = 3, sig
     } catch {
       value = undefined
     }
-    const current = value === undefined ? `error-${attempts}` : signature(value)
+    if (value === undefined || (ready !== undefined && !ready(value))) {
+      previous = undefined
+      same = 0
+      await delay(intervalMs)
+      continue
+    }
+    const current = signature(value)
     if (current === previous) same += 1
     else {
       same = 1

@@ -398,6 +398,7 @@ async function settleAfterReload(fixture, server, name = "settle.json") {
     timeoutMs: 30_000,
     intervalMs: 250,
     stableFor: STABLE_FOR,
+    ready: (value) => FIXTURE_NATIVE_IDS.every((id) => value.data.some((entry) => entry.id === id)),
     signature: (value) =>
       withoutBuiltin(value)
         .map((entry) => `${entry.id}::${entry.path}`)
