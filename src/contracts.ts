@@ -82,6 +82,9 @@ export const MAX_SKILL_SLUG_LENGTH = 40
 export const MAX_NAME_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 500
 export const DEBOUNCE_MS = 250
+// Bounds the prompt backstop to one refresh per window; the measured full scan is ≈0.17 s,
+// so the worst case is ≤8.5 % of one core and a recent watcher refresh suppresses it entirely.
+export const PROMPT_THROTTLE_MS = 2_000
 
 export const DEFAULT_SCAN_LIMITS: ScanLimits = {
   maxDepth: 5,

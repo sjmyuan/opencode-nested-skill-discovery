@@ -10,6 +10,7 @@ import {
   MAX_SCOPE_SLUG_LENGTH,
   MAX_SKILL_SLUG_LENGTH,
   PRUNE_DIRECTORIES,
+  PROMPT_THROTTLE_MS,
   SKILL_ROOT_DIRECTORIES,
   STORAGE_KEYS,
   SUBPROJECT_MARKERS,
@@ -74,6 +75,12 @@ describe("scan budgets", () => {
   it("caps name and description length", () => {
     expect(MAX_NAME_LENGTH).toBe(80)
     expect(MAX_DESCRIPTION_LENGTH).toBe(500)
+  })
+
+  it("throttles the prompt backstop to one refresh per window", () => {
+    expect(PROMPT_THROTTLE_MS).toBe(2000)
+    // A backstop slower than the debounce: the watchers stay the fast path, never the fallback.
+    expect(PROMPT_THROTTLE_MS).toBeGreaterThan(DEBOUNCE_MS)
   })
 
   it("composes the default config from the ADR defaults", () => {
