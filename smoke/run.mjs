@@ -217,6 +217,28 @@ const byId = (left, right) => (String(left.id) < String(right.id) ? -1 : 1)
 const withoutBuiltin = (capture) => capture.data.filter((entry) => !BUILTIN(entry))
 const entryNamed = (capture, name) => capture.data.find((entry) => String(entry.name) === name)
 
+function canonicalKey(entry) {
+  try {
+    return realpathSync(String(entry.path))
+  } catch {
+    return String(entry.path)
+  }
+}
+
+function duplicatePaths(capture) {
+  const groups = new Map()
+  for (const entry of capture.data) {
+    let path
+    try {
+      path = realpathSync(String(entry.path))
+    } catch {
+      continue
+    }
+    groups.set(path, [...(groups.get(path) ?? []), String(entry.id)])
+  }
+  return [...groups.entries()].filter(([, ids]) => ids.length > 1)
+}
+
 async function suiteFixture(evidence, keep) {
   const fixture = buildAt()
   const tree = listTree(fixture.root)
@@ -398,18 +420,26 @@ async function settleAfterReload(fixture, server, name = "settle.json") {
     timeoutMs: 30_000,
     intervalMs: 250,
     stableFor: STABLE_FOR,
-    ready: (value) => FIXTURE_NATIVE_IDS.every((id) => value.data.some((entry) => entry.id === id)),
+    ready: (value) =>
+      FIXTURE_NATIVE_IDS.every((id) => value.data.some((entry) => entry.id === id)) &&
+      duplicatePaths(value).length === 0,
     signature: (value) =>
-      withoutBuiltin(value)
-        .map((entry) => `${entry.id}::${entry.path}`)
+      [...value.data]
+        .map((entry) => `${canonicalKey(entry)}::${String(entry.id)}`)
         .sort()
         .join("\n"),
   })
+  const duplicates = result.value === undefined ? [] : duplicatePaths(result.value)
   writeEvidence(name, {
     ok: result.ok,
     attempts: result.attempts,
     elapsedMs: result.elapsedMs,
     stableFor: STABLE_FOR,
+    duplicates: duplicates.length,
+    duplicateGroups: duplicates.map(([path, ids]) => ({ path, ids })),
+    nativesPresent:
+      result.value !== undefined &&
+      FIXTURE_NATIVE_IDS.every((id) => result.value.data.some((entry) => entry.id === id)),
     at: new Date().toISOString(),
   })
   return result
