@@ -16,10 +16,13 @@ list current while you work.
 ## Status
 
 Delivered and covered by the test suite: bounded discovery, stable IDs and qualified
-display names, add-only advertisement, manifest/cache persistence, and refresh — watchers
-derived from the last scan, a coalescing debounce, and a throttled prompt backstop.
-Outstanding: an end-to-end smoke run against a live opencode workspace; every behaviour is
-currently proven by unit and integration tests rather than by a manual session.
+display names, add-only advertisement, manifest/cache persistence, and refresh. Refresh
+means a watcher set derived from the last good scan, one coalescing timer at
+`DEBOUNCE_MS = 250` (`src/contracts.ts:84`), and a prompt backstop throttled to one refresh
+per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:87`); the implementation is `src/watch.ts`
+and `src/backstop.ts`. Outstanding: an end-to-end smoke run against a live opencode
+workspace — every behaviour is proven by the unit and integration suite rather than by a
+manual session.
 
 ## Requirements
 
@@ -35,7 +38,7 @@ Symlink this checkout into a workspace's plugin directory:
 
 ```sh
 mkdir -p <workspace>/.opencode/plugins
-ln -s /Users/ganggang/work/opencode-nested-skill-discovery \
+ln -s <path-to-this-checkout> \
       <workspace>/.opencode/plugins/nested-skill-discovery
 ```
 
@@ -148,10 +151,9 @@ npm test
 - [Installation](docs/installation.md) — loading, verifying, uninstalling
 - [Limits](docs/limits.md) — depth, budgets, caps, surfaces
 - [Permissions](docs/permissions.md) — correct `nested.*` rules
+- [Design](docs/design.md) — the decisions of record and known divergences
 
 ## Design
 
-- Solution: `/Users/ganggang/work/my-work/spikes/opencode-nested-context-plugin/solution.md`
-- Decisions: `/Users/ganggang/work/my-work/spikes/opencode-nested-context-plugin/adrs/`
-
-Both paths point outside this repository, into the workspace where the design was written.
+The accepted decisions, the ADR titles, and where the design artefacts have drifted from the
+shipped code are recorded in [docs/design.md](docs/design.md).

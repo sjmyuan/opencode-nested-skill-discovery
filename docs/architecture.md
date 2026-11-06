@@ -2,14 +2,17 @@
 
 How a workspace's nested subprojects become extra skill entries. Every claim below cites
 the merged source in `src/` or the opencode `v2.0.26` runtime it runs in. Limits are
-collected in [limits.md](limits.md), loading is in [installation.md](installation.md), and
-permission rules are in [permissions.md](permissions.md).
+collected in [limits.md](limits.md), loading is in [installation.md](installation.md),
+permission rules are in [permissions.md](permissions.md), and the decision of record is in
+[design.md](design.md).
 
 ## What the plugin changes
 
-The plugin adds entries and removes nothing. Each refresh scans the location, replays the
-result through the single `skill.transform` it registers, and leaves native, global, and
-session skills exactly as they were (`src/registry.ts:242-261`, `src/replay.ts:18-45`).
+The plugin adds entries and removes nothing native. Each refresh scans the location,
+replays the result through the single `skill.transform` it registers, and leaves native,
+global, and session skills exactly as they were (`src/registry.ts:282-301`,
+`src/replay.ts:18-45`). The only entry it ever drops is a duplicate of its own, suppressed
+after one rebuild ([Advertisement](#advertisement)).
 Every entry it adds carries an ID starting with `nested.` (`src/contracts.ts:78`).
 
 opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` for the
@@ -24,35 +27,37 @@ subprojects *below* the location.
 | Fact | Where |
 |---|---|
 | `index.ts` default-exports `Plugin.define(definition)` | `index.ts:1-4` |
-| Plugin ID is `nested-skill-discovery` | `src/plugin.ts:6` |
-| `setup` creates the registry, activates it, and returns a cleanup that disposes it | `src/plugin.ts:20-32` |
-| An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:23-27` |
+| Plugin ID is `nested-skill-discovery` | `src/plugin.ts:7` |
+| `setup` creates the registry, activates it, and returns a cleanup that disposes it | `src/plugin.ts:21-33` |
+| An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:24-28` |
 
-One registry exists per location instance. A move binds a new instance and a fresh
-activation, so the plugin registers no move hook of its own.
+One registry exists per location instance, and a plugin list is a birth argument that stays
+immutable for that instance's lifetime (`packages/core/src/plugin/instance.ts:9-19`). A
+different directory gets a fresh location context and a fresh activation
+(`packages/core/src/worktree.ts:121-126`), so the plugin registers no move hook of its own.
 
 ## Activation pipeline
 
-`runRefresh` (`src/registry.ts:263-372`) runs these stages in order. A stage that throws
+`runRefresh` (`src/registry.ts:359-470`) runs these stages in order. A stage that throws
 stops the run and keeps the previous snapshot (see [Failure model](#failure-model)).
 
 | # | Stage | Where |
 |---|---|---|
-| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:24-30`, `267-268` |
-| 2 | Resolve the native skill roots to exclude | `src/registry.ts:269`, `src/native.ts:37-49` |
-| 3 | Scan the location for skill candidates | `src/registry.ts:299-304`, `src/scan.ts:74-136` |
-| 4 | Read, parse, and dedupe candidates into indexed skills | `src/registry.ts:306-310`, `src/indexer.ts:180-231` |
-| 5 | Compose display names and assemble frozen entries | `src/registry.ts:312-316`, `58-77` |
-| 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:89-140` |
-| 7 | Persist manifest, cache, and version | `src/registry.ts:318-323`, `src/manifest.ts:110-187` |
-| 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:325-328` |
-| 9 | List the registry, suppress entries native discovery already owns, reload once more if anything was suppressed | `src/registry.ts:331-362`, `170-186` |
+| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:29-35`, `267-268` |
+| 2 | Resolve the native skill roots to exclude | `src/registry.ts:365`, `src/native.ts:37-49` |
+| 3 | Scan the location for skill candidates | `src/registry.ts:395-402`, `src/scan.ts:74-136` |
+| 4 | Read, parse, and dedupe candidates into indexed skills | `src/registry.ts:404-408`, `src/indexer.ts:180-231` |
+| 5 | Compose display names and assemble frozen entries | `src/registry.ts:410-414`, `58-77` |
+| 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:94-145` |
+| 7 | Persist manifest, cache, and version | `src/registry.ts:416-421`, `src/manifest.ts:110-187` |
+| 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:423-426` |
+| 9 | List the registry, suppress entries native discovery already owns, reload once more if anything was suppressed | `src/registry.ts:428-460`, `170-186` |
 
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
 the swap must be visible before the host rebuilds its skill list.
 
 Exactly one transform is registered per registry, guarded by a `registering` promise
-(`src/registry.ts:242-261`). Refreshes reuse it; they never add a second one and never
+(`src/registry.ts:282-301`). Refreshes reuse it; they never add a second one and never
 call `reload()` more than twice (the second only after a dedupe correction).
 
 ## Discovery bounds
@@ -64,7 +69,7 @@ never stop the walk, and the deepest marker owner wins (`src/scan.ts:147`, `165-
 Inside an opened skill root the walk has no depth cap (`src/scan.ts:216-246`).
 
 Pruned directory names are skipped before any classification, so a pruned symlink is as
-silent as a pruned directory (`src/scan.ts:153-158`, `src/contracts.ts:94-108`). The list
+silent as a pruned directory (`src/scan.ts:153-158`, `src/contracts.ts:97-111`). The list
 is in [limits.md](limits.md).
 
 ## Identity
@@ -96,10 +101,10 @@ step (`src/indexer.ts:170` builds the ID without cutting it).
 path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeText` removes
 `<`, `>`, `"`, `&`, and control characters, collapses whitespace, and trims
 (`src/names.ts:48-55`). The entry name is capped at 80 code points and the description at
-500 in `assembleEntries` (`src/registry.ts:61-70`, `src/contracts.ts:82-83`).
+500 in `assembleEntries` (`src/registry.ts:66-75`, `src/contracts.ts:82-83`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:76`, `178`, `src/indexer.ts:170`).
+canonical path, never on the name (`src/registry.ts:81`, `178`, `src/indexer.ts:170`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `166-168`).
@@ -117,16 +122,16 @@ description-less entries from the model's guidance block
 - nothing is removed, so native and session skills survive untouched
 - a failing `get`/`add` becomes a `replay:` diagnostic instead of an exception
   (`src/replay.ts:32-41`), which the next refresh drains into its outcome
-  (`src/registry.ts:266`)
+  (`src/registry.ts:362`)
 
 After the first reload the registry lists what the host actually holds, and a nested entry
-whose canonical path collides with a foreign entry is suppressed (`src/registry.ts:334-362`,
-`src/registry.ts:170-186`). A collision therefore survives exactly one rebuild: it is added,
+whose canonical path collides with a foreign entry is suppressed (`src/registry.ts:432-460`,
+`src/registry.ts:186-202`). A collision therefore survives exactly one rebuild: it is added,
 reloaded, detected, removed, and reloaded again, with a `dedupe: <id>` diagnostic.
 
 ## Storage model
 
-Three logical keys (`src/contracts.ts:138-142`):
+Three logical keys (`src/contracts.ts:141-145`):
 
 | Key | Contents |
 |---|---|
@@ -145,10 +150,12 @@ record only when its recorded `directory` is inside the location being scanned
 (`src/manifest.ts:79-108`, `178-184`). Another workspace's records are therefore never
 deleted, and a record whose token is still active is never touched.
 
-The cache is written but not read back in this release: no code path calls `storage.get` on
-`nested/subproject/<token>`, so nothing is served from storage. The manifest is likewise an
+The cache is written but not read back: no code path calls `storage.get` on
+`nested/subproject/<token>`, so nothing is served from storage. ADR R15 and solution §4.7
+describe that cache as reloaded on bind; those documents are stale on that point — the only
+storage read in the plugin is the version counter (`src/manifest.ts:114-126`). The manifest is likewise an
 audit and diagnostics artifact — it is never a filter for what gets advertised
-(`src/registry.ts:263-372` reads only live scan output).
+(`src/registry.ts:359-470` reads only live scan output).
 
 Raw keys are namespaced by the host as `plugin:<hex of the plugin id>:`; the plugin-visible
 key is the suffix (`packages/core/src/plugin/host.ts:609-616`). A raw-KV query therefore
@@ -157,22 +164,23 @@ matches `LIKE 'plugin:%:nested/%'`.
 ## Refresh model
 
 Three triggers feed one refresh path. `refresh()` joins an in-flight run instead of
-starting a second one, so concurrent triggers cost one scan (`src/registry.ts:374-393`).
+starting a second one, so concurrent triggers cost one scan (`src/registry.ts:472-498`).
 
 | Trigger | Mechanism | Bound |
 |---|---|---|
-| activation | `setup` → `activate()` (`src/plugin.ts:20-32`) | once per location instance |
+| activation | `setup` → `activate()` (`src/plugin.ts:21-33`) | once per location instance |
 | filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:84`) |
-| prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts`) | one refresh per 2000 ms, skipped when any refresh just finished |
+| prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts:23-53`) | `PROMPT_THROTTLE_MS = 2_000` (`src/contracts.ts:87`), skipped when any refresh just finished |
 
-The debounce is a single timer, not a per-event delay: the first event arms it, later events
-inside the window are swallowed, so a save burst is one refresh and a sustained stream yields
-at most four per second. The backstop awaits an in-flight refresh instead of starting a
-second one, so a prompt never waits for two scans.
+The debounce is a single timer (`src/registry.ts:238-241`), not a per-event delay: the first
+event arms it, later events inside the window are swallowed, so a save burst is one refresh
+and a sustained stream yields at most four per second. The backstop awaits an in-flight
+refresh instead of starting a second one, so a prompt never waits for two scans.
 
-The watcher set is derived from the **last good scan**: canonical, deduped, sorted, with
-pruned segments and symlinked directories dropped. Each reconciliation closes handles that
-are no longer in the set, so a deleted subproject does not leak a watcher.
+The watcher set is derived from the **last good scan** and reconciled immediately after it
+(`src/registry.ts:402`, `304-314`): canonical, deduped, sorted, with pruned segments and
+symlinked directories dropped. Each reconciliation closes handles that are no longer in the
+set, so a deleted subproject does not leak a watcher.
 
 A debounced event runs the **full** refresh, not a rescan of the changed directory. That is
 deliberate: subproject ownership and inherited markers come from the walk rooted at the
@@ -183,28 +191,29 @@ roughly 0.17 s on the reference workspace.
 Watch and hook failures never escape: they are buffered as `watch: <path>: <code>` or
 `hook: <reason>` and surface on the next outcome, and a failed refresh keeps both the
 previous snapshot and the previous watcher set. `dispose()` clears the timer, closes every
-handle, awaits any in-flight refresh with errors swallowed, and disposes the hook and the
-transform; it is idempotent.
+handle, awaits any in-flight refresh with errors swallowed, then disposes the hook and the
+transform; it is idempotent (`src/registry.ts:513-536`).
 
-Watcher, debounce, and backstop behaviour ships in `src/watch.ts` and `src/backstop.ts` and
-is covered by `test/watch-targets.test.ts`, `test/watch-triggers.test.ts`,
-`test/backstop.test.ts`, and `test/registry-refresh.test.ts`. The remaining sections cite
-code that predates that refresh work.
+Watcher, debounce, and backstop behaviour is implemented in `src/watch.ts` and
+`src/backstop.ts` (`deriveWatchTargets` at `src/watch.ts:246-283`, `createDebouncer` at
+`56-86`, `createWatchSet` at `101-153`, `createBackstop` at `src/backstop.ts:23-53`) and is
+covered by `test/watch-targets.test.ts`, `test/watch-triggers.test.ts`,
+`test/backstop.test.ts`, and `test/registry-refresh.test.ts`.
 
 ## Failure model
 
 | Case | Behaviour | Where |
 |---|---|---|
-| A stage throws | one `<stage>: <reason>` diagnostic, previous snapshot kept, `ok: false` returned | `src/registry.ts:41-52` |
-| The location is missing or not a directory | empty snapshot persisted, `scan: … is not a directory`, `ok: false` | `src/registry.ts:271-297` |
-| Diagnostics exceed 200 | truncated with `truncated: N more diagnostics` | `src/registry.ts:22-37` |
+| A stage throws | one `<stage>: <reason>` diagnostic, previous snapshot kept, `ok: false` returned | `src/registry.ts:46-57` |
+| The location is missing or not a directory | empty snapshot persisted, `scan: … is not a directory`, `ok: false` | `src/registry.ts:374-393` |
+| Diagnostics exceed 200 | truncated with `truncated: N more diagnostics` | `src/registry.ts:27-42` |
 | Scan diagnostics exceed 200 | truncated with `diagnostics-truncated` | `src/scan.ts:44`, `89-98` |
-| A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:303`, `src/scan.ts:323-355` |
-| `reload()` throws | diagnostic recorded, `ok: false`, previous snapshot already swapped | `src/registry.ts:325-328` |
-| Watch or hook registration fails | buffered diagnostic, other triggers still work, `setup` still resolves | `src/registry.ts:242-261`, `src/plugin.ts:23-27` |
+| A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:399`, `src/scan.ts:323-355` |
+| `reload()` throws | diagnostic recorded, `ok: false`, previous snapshot already swapped | `src/registry.ts:423-426` |
+| Watch or hook registration fails | buffered diagnostic, other triggers still work, `setup` still resolves | `src/registry.ts:282-301`, `src/plugin.ts:24-28` |
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
-(`src/registry.ts:142-149`). opencode `v2.0.26` renders no plugin log or diagnostic surface,
+(`src/registry.ts:147-154`). opencode `v2.0.26` renders no plugin log or diagnostic surface,
 so a user sees them only through a caller that inspects the outcome; the observable
 fallbacks are the guidance block, the `@` menu, and storage keys.
 

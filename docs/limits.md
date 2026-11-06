@@ -3,7 +3,7 @@
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The
 values are constants in `src/contracts.ts`; this release reads no plugin configuration, so
 none of them can be overridden from `opencode.json`
-(`src/registry.ts:299-301` calls the scanner without options).
+(`src/registry.ts:395-397` calls the scanner without options).
 
 ## Summary
 
@@ -24,7 +24,7 @@ none of them can be overridden from `opencode.json`
 
 Depth counts directories between the location and the **subproject** — a directory that
 carries a marker — not directories between the location and the skill file
-(`src/scan.ts:147`, `163-166`; `src/contracts.ts:86-92`).
+(`src/scan.ts:147`, `163-166`; `src/contracts.ts:89-95`).
 
 - a subproject at depth 5 is discovered, and its `SKILL.md` may sit many levels deeper
   (`test/scan.test.ts:213-224`)
@@ -41,7 +41,7 @@ The location itself is a depth-0 subproject: skills directly under
 
 The walk skips these names at every level, before classifying the entry, so a pruned symlink
 is skipped as silently as a pruned directory (`src/scan.ts:153-158`,
-`src/contracts.ts:94-108`):
+`src/contracts.ts:97-111`):
 
 `node_modules`, `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `target`, `dist`,
 `build`, `.next`, `.cache`, `vendor`
@@ -53,7 +53,7 @@ copied plugin checkout or an installed dependency from flooding the registry.
 ## Markers
 
 A marker makes a directory a subproject and gives it a scope token and a name prefix. The
-marker kinds are `src/contracts.ts:110-126`:
+marker kinds are `src/contracts.ts:113-129`:
 
 | Kind | Detected as |
 |---|---|
@@ -67,7 +67,7 @@ marker kinds are `src/contracts.ts:110-126`:
 | `hg` | a real `.hg` directory |
 
 Markers nest and never stop the walk: the deepest marker owner wins, and its relative path
-becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:69`). A symlinked
+becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:74`). A symlinked
 skill-root directory is not a marker and is not followed.
 
 ## Candidate files
@@ -92,17 +92,17 @@ Symlinks are inspected, never followed blindly (`src/scan.ts:196-214`, `269-300`
 ## Budgets and truncation
 
 The scan counts directories, accepted files, and bytes against the budgets in
-`src/contracts.ts:86-92`. Hitting a directory, file-count, or total-byte budget sets
+`src/contracts.ts:89-95`. Hitting a directory, file-count, or total-byte budget sets
 `truncated`, emits `budget-directories` / `budget-files` / `budget-total-bytes`, and stops
 the walk (`src/scan.ts:323-353`, `398-419`). A single file over 128 KiB is skipped with
 `budget-file-bytes` while the walk continues (`src/scan.ts:340-346`).
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:303`).
+(`src/registry.ts:399`).
 
 Diagnostics are capped at 200 in the scan (`src/scan.ts:44`, `89-98`) and again in the
-refresh outcome (`src/registry.ts:22-37`), where the overflow is summarised as
+refresh outcome (`src/registry.ts:27-42`), where the overflow is summarised as
 `truncated: N more diagnostics`. No opencode `v2.0.26` surface renders them — see
 [architecture.md](architecture.md#failure-model).
 
@@ -111,7 +111,7 @@ refresh outcome (`src/registry.ts:22-37`), where the overflow is summarised as
 | Field | Cap | Behaviour |
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
-| description | 500 code points | cut (`src/registry.ts:61-64`) |
+| description | 500 code points | cut (`src/registry.ts:66-69`) |
 | scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:45-47`) |
 | skill slug | 40 | cut, same (`src/indexer.ts:49-51`) |
 
@@ -127,7 +127,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | an entry whose canonical path equals a foreign entry's path is suppressed after one rebuild, with a `dedupe: <id>` diagnostic (`src/registry.ts:334-362`) |
+| Duplicate | an entry whose canonical path equals a foreign entry's path is suppressed after one rebuild, with a `dedupe: <id>` diagnostic (`src/registry.ts:432-460`) |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or

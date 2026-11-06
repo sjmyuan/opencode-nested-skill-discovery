@@ -42,7 +42,7 @@ Symlink (recommended — edit the checkout, reload opencode):
 
 ```sh
 mkdir -p <workspace>/.opencode/plugins
-ln -s /Users/ganggang/work/opencode-nested-skill-discovery \
+ln -s <path-to-this-checkout> \
       <workspace>/.opencode/plugins/nested-skill-discovery
 ```
 
@@ -50,7 +50,7 @@ Copy (independent snapshot of the code):
 
 ```sh
 mkdir -p <workspace>/.opencode/plugins
-cp -R /Users/ganggang/work/opencode-nested-skill-discovery \
+cp -R <path-to-this-checkout> \
       <workspace>/.opencode/plugins/nested-skill-discovery
 ```
 
