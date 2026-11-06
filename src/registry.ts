@@ -25,6 +25,9 @@ import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 const DIAGNOSTIC_LIMIT = 200
+const DEDUPE_SETTLE_INTERVAL_MS = 50
+const DEDUPE_SETTLE_MIN_MS = 750
+const DEDUPE_SETTLE_TIMEOUT_MS = 1000
 
 async function canonicalDirectory(target: string): Promise<string> {
   try {
@@ -40,6 +43,69 @@ async function canonicalPathOf(target: string): Promise<string> {
   } catch {
     return target
   }
+}
+
+type SkillList = Awaited<ReturnType<Plugin.Context["skill"]["list"]>>
+
+const delay = (ms: number): Promise<void> => new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
+
+const foreignIdsOf = (list: SkillList, ownedIds: ReadonlySet<string>): ReadonlySet<string> =>
+  new Set(list.data.filter((entry) => !ownedIds.has(String(entry.id))).map((entry) => String(entry.id)))
+
+const sameIds = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
+  left.size === right.size && [...left].every((id) => right.has(id))
+
+const containsAll = (superset: ReadonlySet<string>, subset: ReadonlySet<string>): boolean =>
+  [...subset].every((id) => superset.has(id))
+
+interface SettleInput {
+  readonly read: () => Promise<SkillList>
+  readonly ownedIds: ReadonlySet<string>
+  readonly expected: ReadonlySet<string> | undefined
+}
+
+interface SettleResult {
+  readonly list: SkillList
+  readonly timedOut: boolean
+  readonly elapsed: number
+}
+
+async function settleForeignTier({ read, ownedIds, expected }: SettleInput): Promise<SettleResult> {
+  const minReads = Math.ceil(DEDUPE_SETTLE_MIN_MS / DEDUPE_SETTLE_INTERVAL_MS)
+  const maxReads = Math.ceil(DEDUPE_SETTLE_TIMEOUT_MS / DEDUPE_SETTLE_INTERVAL_MS)
+  let reads = 0
+  let list = await read()
+  reads += 1
+  let ids = foreignIdsOf(list, ownedIds)
+
+  if (expected === undefined && ids.size === 0) return { list, timedOut: false, elapsed: 0 }
+
+  if (expected !== undefined && containsAll(ids, expected)) {
+    const confirmation = await read()
+    const confirmed = foreignIdsOf(confirmation, ownedIds)
+    if (sameIds(ids, confirmed)) return { list: confirmation, timedOut: false, elapsed: 0 }
+    list = confirmation
+    ids = confirmed
+  }
+
+  while (reads < maxReads) {
+    await delay(DEDUPE_SETTLE_INTERVAL_MS)
+
+    const next = await read()
+    reads += 1
+    const nextIds = foreignIdsOf(next, ownedIds)
+
+    const expectedPresent = expected === undefined || containsAll(nextIds, expected)
+
+    if (sameIds(ids, nextIds) && nextIds.size > 0 && expectedPresent && reads >= minReads) {
+      return { list: next, timedOut: false, elapsed: reads * DEDUPE_SETTLE_INTERVAL_MS }
+    }
+
+    list = next
+    ids = nextIds
+  }
+
+  return { list, timedOut: true, elapsed: reads * DEDUPE_SETTLE_INTERVAL_MS }
 }
 
 function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
@@ -238,6 +304,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
   let followUp = false
+  let settledForeignIds: ReadonlySet<string> | undefined
   const replayDiagnostics: string[] = []
   const watchDiagnostics: string[] = []
 
@@ -434,16 +501,32 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (!reloaded.ok) return record(fail(diagnostics))
 
     let reloads = 1
-    const listed = await runStage(diagnostics, "list", () => ctx.skill.list())
-    if (!listed.ok) return record(fail(diagnostics, reloads))
-
     const ownedIds = new Set(current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)))
+    const hasCandidates = current.snapshots.some((subproject) => subproject.skills.length > 0)
+
+    let foreign: SkillList["data"] = []
+
+    if (hasCandidates) {
+      const settled = await runStage(diagnostics, "list", () =>
+        settleForeignTier({
+          read: () => ctx.skill.list(),
+          ownedIds,
+          expected: settledForeignIds,
+        }),
+      )
+      if (!settled.ok) return record(fail(diagnostics, reloads))
+
+      if (settled.value.timedOut) {
+        diagnostics.push(`dedupe-settle-timeout: ${settled.value.elapsed}`)
+      } else {
+        settledForeignIds = foreignIdsOf(settled.value.list, ownedIds)
+      }
+
+      foreign = settled.value.list.data.filter((entry) => !ownedIds.has(String(entry.id)))
+    }
+
     const foreignPaths = new Set(
-      await Promise.all(
-        listed.value.data
-          .filter((entry) => !ownedIds.has(String(entry.id)))
-          .map((entry) => canonicalPathOf(String(entry.path))),
-      ),
+      await Promise.all(foreign.map((entry) => canonicalPathOf(String(entry.path)))),
     )
     const suppressed = selectSuppressed(
       current.snapshots.flatMap((subproject) => subproject.skills),
