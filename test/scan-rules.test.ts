@@ -273,3 +273,18 @@ describe("symlinked skill roots", () => {
     expect(result.candidates[0]?.subproject).toBe("A")
   })
 })
+
+describe("excludeRoots on an opened root", () => {
+  it("honours an excluded skill root instead of scanning it", async () => {
+    const f = await fixture()
+    await f.write(".opencode/skills/at-location.md")
+
+    const result = await scanSkills({
+      location: f.root,
+      excludeRoots: [join(f.realRoot, ".opencode/skills")],
+    })
+
+    expect(result.candidates).toEqual([])
+    expect(result.diagnostics).toEqual([])
+  })
+})

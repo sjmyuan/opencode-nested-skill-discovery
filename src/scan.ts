@@ -185,6 +185,7 @@ async function openRoots(
     // Claimed either way: a refused root must not also be re-walked as an ordinary directory.
     opened = true
     if (probe === "refused") continue
+    if (isExcluded(context, root)) continue
     await walkRoot(context, root, rootRel, kind, true, owner)
   }
   return opened
