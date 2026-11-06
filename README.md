@@ -73,8 +73,8 @@ offered to the model in that block.
 - the qualified name (`vscode/deploy`) in the guidance block, the tool result, and the
   loaded content
 - `@nested.vscode-1a2b3c4d.deploy-9f8e7d6c` in the composer's `@` menu
-- a generic permission prompt — `Call tool skill` / `Tool: skill` — that does not name the
-  skill
+- a permission prompt whose body is generic (`Call tool skill`); its **Always allow** option
+  lists the saved `nested.` ID
 
 Detail and the full limit list: [docs/limits.md](docs/limits.md).
 
@@ -86,7 +86,7 @@ Detail and the full limit list: [docs/limits.md](docs/limits.md).
 | Scan budgets | 20,000 directories · 5,000 skill files · 128 KiB per file · 16 MiB total |
 | Display caps | name 80 code points · description 500 |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
-| Composer and prompt | `@<id>` in the menu, `Call tool skill` on approval |
+| Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
 | Scale | around 50 nested entries is the point to revisit on-demand listing |
 
 A truncated scan still advertises what it found. No limit is configurable in this release.

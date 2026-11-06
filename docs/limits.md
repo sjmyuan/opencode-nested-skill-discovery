@@ -126,7 +126,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Guidance block | one `<skill>` per entry with id, name, description; `autoinvoke: false` hides the entry here **only** |
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
-| Permission prompt | generic: title `Call tool skill`, body `Tool: skill` — no name, no id (`packages/tui/src/util/permission.ts:139-143`) |
+| Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
 | Duplicate | an entry whose canonical path equals a foreign entry's path is suppressed after one rebuild, with a `dedupe: <id>` diagnostic (`src/registry.ts:334-362`) |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 

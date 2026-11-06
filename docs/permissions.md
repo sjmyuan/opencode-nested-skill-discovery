@@ -107,7 +107,7 @@ unless you want a rule to break on a move.
 | Effect | Result |
 |---|---|
 | `deny` | the entry is removed from the model's guidance block before the model ever sees it, and a direct load fails |
-| `ask` | the model can see the entry; loading it raises a permission prompt with a generic body |
+| `ask` | the model can see the entry; loading it raises a prompt whose body is generic and whose **Always allow** option shows the ID |
 | `allow` | the model can see the entry and loads it without a prompt |
 
 `deny` is applied when the guidance block is built: the block is
@@ -118,14 +118,17 @@ plugin's entries stay listed. A direct reference to it still goes through the to
 asserts the same rule and fails with `Unable to load skill …`
 (`packages/core/src/tool/plugin/skill.ts:46-60`).
 
-A prompt looks the same for every skill — title `Call tool skill`, body `Tool: skill` — so
-it does not tell you which ID is being requested
-(`packages/tui/src/util/permission.ts:139-143`). Check the `@` menu or the guidance block if
-you need to know which entry prompted.
+The prompt body is the same for every skill: title `Call tool skill`, line `Tool: skill`
+(`packages/tui/src/util/permission.ts:139-143`). The identity appears on the **Always
+allow** option: choosing it swaps the body for the patterns the click will save
+(`permissionAlwaysLines`, `packages/tui/src/util/permission.ts:154-160`; rendered at
+`packages/tui/src/routes/session/permission.tsx:223-231`). The skill tool asks to save
+exactly its ID (`save: [skill.id]`, `packages/core/src/tool/plugin/skill.ts:51-58`), so
+those lines read `- nested.<scope>.<skill>`. Read them before approving: that is the only
+place the prompt names the entry.
 
-Choosing **always** in that prompt saves an `allow` rule for exactly this ID
-(`save: [skill.id]`, `packages/core/src/tool/plugin/skill.ts:51-58`;
-`packages/core/src/permission.ts:299-305`). A configured `deny` is evaluated first and is
+Choosing **Always allow** saves an `allow` rule for exactly this ID
+(`packages/core/src/permission.ts:299-305`). A configured `deny` is evaluated first and is
 never overridden by a saved allow: the deny pass runs over the configured rulesets before
 saved rules are appended (`packages/core/src/permission.ts:165-176`). A saved allow does
 upgrade a configured `ask`.
