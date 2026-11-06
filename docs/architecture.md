@@ -105,7 +105,7 @@ A description falls back in three tiers: frontmatter `description`, then the fir
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `166-168`).
 The plugin therefore always supplies a description, which matters because opencode drops
 description-less entries from the model's guidance block
-(`packages/core/src/skill/instructions.ts:74-79`).
+(`packages/core/src/skill/instructions.ts:74-81`).
 
 ## Advertisement
 

@@ -72,7 +72,7 @@ with `configured plugin path must be a directory`
 ## Verify it loaded
 
 1. **The model's guidance block** lists one `<skill>` per advertised entry, with `<id>`,
-   `<name>`, and `<description>` (`packages/core/src/skill/instructions.ts:16-28`). Entries
+   `<name>`, and `<description>` (`packages/core/src/skill/instructions.ts:16-22`). Entries
    appear as `nested.<scope>.<skill>`; ids are listed in
    [permissions.md](permissions.md#finding-the-ids).
 2. **The `@` menu** in the composer shows `@<id>`, for example

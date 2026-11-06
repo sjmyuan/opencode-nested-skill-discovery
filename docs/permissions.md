@@ -32,7 +32,7 @@ match the code, so ignore it and key on IDs.
   the exception last.
 - **Patterns are anchored full matches.** `*` matches any run of characters, including
   `.`; `?` matches exactly one character
-  (`packages/core/src/util/wildcard.ts:3-19`). `nested.*` therefore also matches
+  (`packages/core/src/util/wildcard.ts:3-14`). `nested.*` therefore also matches
   `nested.a-0000aaaa.b-1111bbbb`, and `nested?x` matches `nested.x`.
 - **No matching rule falls back to `"ask"`** (`packages/core/src/permission.ts:91-95`). In
   practice the default agent already carries `{ "action": "*", "resource": "*", "effect":
@@ -112,7 +112,7 @@ unless you want a rule to break on a move.
 
 `deny` is applied when the guidance block is built: the block is
 `Skill.available(...)`, which filters out every skill whose evaluated effect is `deny`
-(`packages/core/src/skill/instructions.ts:74-79`, `packages/core/src/skill.ts:33-34`). A
+(`packages/core/src/skill/instructions.ts:74-81`, `packages/core/src/skill.ts:33-34`). A
 denied nested entry therefore disappears from `<available_skills>` while the rest of the
 plugin's entries stay listed. A direct reference to it still goes through the tool, which
 asserts the same rule and fails with `Unable to load skill …`
@@ -134,7 +134,7 @@ upgrade a configured `ask`.
 
 | Surface | What it shows |
 |---|---|
-| the model's guidance block | `<id>`, `<name>`, `<description>` per entry (`packages/core/src/skill/instructions.ts:16-28`) |
+| the model's guidance block | `<id>`, `<name>`, `<description>` per entry (`packages/core/src/skill/instructions.ts:16-22`) |
 | the composer's `@` menu | `@<id>` (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | storage | `nested/manifest/<scopeToken>` holds `entries[].id` for that subproject (`src/manifest.ts:138-143`) |
 
@@ -163,4 +163,4 @@ last-match-wins they override it (`packages/core/src/config/plugin/agent.ts:84-1
 
 Session-level rules, where a host or another plugin sets them, merge after the agent's and
 therefore win over both (`packages/core/src/permission.ts:158-164`,
-`packages/core/src/session/context.ts:129-131`).
+`packages/core/src/session/context.ts:130-131`).

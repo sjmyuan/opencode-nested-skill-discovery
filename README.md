@@ -51,7 +51,7 @@ Full instructions, including the `opencode.json` form and how to verify the load
 
 Once per refresh the plugin scans, replays its snapshot, and reloads the registry. The
 model's guidance block then lists one entry per skill
-(`packages/core/src/skill/instructions.ts:16-28`):
+(`packages/core/src/skill/instructions.ts:16-22`):
 
 ```xml
 <skill>

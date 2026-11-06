@@ -134,7 +134,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 from `disable-model-invocation: true` (`src/frontmatter.ts:129-137`,
 `src/indexer.ts:168`). Such an entry stays registered, stays user-invocable, and loads
 normally when you mention it — the guidance block simply does not offer it to the model
-(`packages/core/src/skill/instructions.ts:74-79`).
+(`packages/core/src/skill/instructions.ts:74-81`).
 
 ## Scale
 
