@@ -106,7 +106,7 @@ path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeTex
 500 in `assembleEntries` (`src/registry.ts:80-99`, `src/contracts.ts:82-83`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:98`, `211`, `src/indexer.ts:170`).
+canonical path, never on the name (`src/registry.ts:89-98`, `211`, `src/indexer.ts:170`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `166-168`).
@@ -129,9 +129,10 @@ description-less entries from the model's guidance block
 After the first reload the registry lists what the host actually holds, then compares each
 nested entry's `canonicalPath` with the **realpath** of every foreign entry's `path` and
 suppresses a match (`src/registry.ts:475-483`, `203-219`). Dedupe is two-phase: the immediate
-pass runs inside the refresh, and when the foreign tier still looks incomplete a deferred
-check runs at 1.5 s and again at 4 s (`src/registry.ts:28`, `502-511`, `569-635`), emitting a
-`dedupe: <id>` diagnostic.
+pass runs inside the refresh and emits one `dedupe: <id>` diagnostic per suppressed entry
+(`src/registry.ts:483`); when the foreign tier still looks incomplete a deferred check runs at
+1.5 s and again at 4 s (`src/registry.ts:28`, `502-511`, `569-635`). That check is silent on
+success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:630-631`).
 `refresh()` returns without waiting for that check (`src/registry.ts:523-549`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
 timeout that reports failure: the deferred check simply re-lists and re-filters.
@@ -154,8 +155,12 @@ markdown body with the frontmatter block removed (`src/manifest.ts:59-66`,
 Every successful refresh writes the three keys and then prunes. Pruning scans both prefixes
 page by page, keeps the tokens written in this run plus the version key, and removes a stale
 record only when its recorded `directory` is inside the location being scanned
-(`src/manifest.ts:79-108`, `178-184`). Another workspace's records are therefore never
-deleted, and a record whose token is still active is never touched.
+(`src/manifest.ts:79-108`, `178-184`). A non-nested location therefore never deletes another
+workspace's records, and a record whose token is still active is never touched. Nested
+locations share one plugin-id storage, so an outer location's refresh sees an inner location's
+records inside its own root and prunes them; a directory bound by two locations has one scope
+token, so its record is last-writer-wins on the same key — the record carries no location
+field (`src/contracts.ts:24-29`).
 
 The cache is written but not read back: no code path calls `storage.get` on
 `nested/subproject/<token>`, so nothing is served from storage. ADR R15 and solution §4.7
