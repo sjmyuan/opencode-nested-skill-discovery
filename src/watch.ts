@@ -1,3 +1,4 @@
+import { watch } from "node:fs"
 import { lstat, realpath } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
 import { PRUNE_DIRECTORIES, compareText } from "./contracts.ts"
@@ -15,6 +16,26 @@ export interface WatchHandle {
 }
 
 export type WatchFactory = (directory: string, onChange: () => void) => WatchHandle
+
+/**
+ * The production factory (PD10): one non-recursive `fs.watch` per directory.
+ * `persistent: false` keeps the host from being held open, and the `error` listener
+ * keeps a vanished directory from raising an unhandled `'error'` on the watcher.
+ */
+export const nodeWatchFactory: WatchFactory = (directory, onChange) => {
+  const watcher = watch(directory, { persistent: false }, () => onChange())
+  watcher.on("error", () => undefined)
+
+  return {
+    close: () => {
+      try {
+        watcher.close()
+      } catch {
+        // Already closed; disposal is idempotent by contract.
+      }
+    },
+  }
+}
 
 export interface Debouncer {
   signal(): void

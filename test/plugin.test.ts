@@ -9,6 +9,7 @@ const entry = await import("../index.ts")
 const core = await import("../src/plugin.ts")
 
 const DOC = "---\nname: deploy\n---\n# Deploy\n"
+const EXTRA_DOC = "---\nname: extra\n---\n# Extra\n"
 
 describe("plugin definition", () => {
   it("default-exports only the id and setup", () => {
@@ -16,7 +17,7 @@ describe("plugin definition", () => {
     expect(entry.default.id).toBe("nested-skill-discovery")
   })
 
-  it("registers exactly one skill transform and disposes it once", async () => {
+  it("registers exactly one skill transform and one prompt hook, and disposes both once", async () => {
     const fixture = await createRegistryFixture()
 
     try {
@@ -24,11 +25,42 @@ describe("plugin definition", () => {
       const cleanup = await entry.default.setup(fake.ctx)
 
       expect(fake.transforms).toHaveLength(1)
+      expect(fake.hookRegistrations).toBe(1)
       expect(cleanup).toBeTypeOf("function")
       if (typeof cleanup !== "function") return
 
       await cleanup()
       expect(fake.disposeCalls).toBe(1)
+      expect(fake.hookDisposeCalls).toBe(1)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refreshes from the production watcher without registering a second transform", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
+      const fake = fakeContext([], { directory: fixture.root })
+      const cleanup = await entry.default.setup(fake.ctx)
+      if (typeof cleanup !== "function") return
+
+      try {
+        const reloads = fake.reloadCalls
+        await fixture.write("A/.opencode/skills/extra/SKILL.md", EXTRA_DOC)
+
+        await vi.waitFor(() => expect(fake.reloadCalls).toBeGreaterThan(reloads), {
+          timeout: 5000,
+          interval: 50,
+        })
+
+        expect(fake.transforms).toHaveLength(1)
+        expect(fake.hookRegistrations).toBe(1)
+        expect(fake.editor.list().map((skill) => String(skill.name))).toContain("A/extra")
+      } finally {
+        await cleanup()
+      }
     } finally {
       await fixture.cleanup()
     }
