@@ -16,6 +16,54 @@ export interface WatchHandle {
 
 export type WatchFactory = (directory: string, onChange: () => void) => WatchHandle
 
+export interface Debouncer {
+  signal(): void
+  clear(): void
+  readonly armed: boolean
+}
+
+export interface CreateDebouncerInput {
+  readonly delayMs: number
+  readonly fire: () => void
+}
+
+/**
+ * One coalescing timer (PD3): the first event arms it, later events are dropped, so a
+ * burst yields exactly one refresh and latency is bounded by `delayMs` rather than
+ * reset by each event.
+ */
+export function createDebouncer({ delayMs, fire }: CreateDebouncerInput): Debouncer {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let armed = false
+
+  const settle = (): void => {
+    timer = undefined
+    armed = false
+  }
+
+  return {
+    signal() {
+      if (armed) return
+      armed = true
+      timer = setTimeout(() => {
+        settle()
+        try {
+          fire()
+        } catch {
+          // A failed refresh is reported by the registry; it must not become an unhandled rejection.
+        }
+      }, delayMs)
+    },
+    clear() {
+      if (timer !== undefined) clearTimeout(timer)
+      settle()
+    },
+    get armed() {
+      return armed
+    },
+  }
+}
+
 export interface WatchSet {
   sync(targets: readonly string[]): void
   active(): readonly string[]

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { createWatchSet } from "../src/watch.ts"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { createDebouncer, createWatchSet } from "../src/watch.ts"
 import { fakeWatch } from "./support/watch-fixtures.ts"
 
 function watchSet(fake = fakeWatch()) {
@@ -106,5 +106,102 @@ describe("watch set", () => {
 
     expect(fake.opened).toEqual(["a"])
     expect(set.active()).toEqual([])
+  })
+})
+
+describe("debouncer", () => {
+  const DEBOUNCE = 250
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function debouncer(delayMs = DEBOUNCE) {
+    const fired: number[] = []
+    const debounced = createDebouncer({
+      delayMs,
+      fire: () => {
+        fired.push(Date.now())
+      },
+    })
+    return { debounced, fired }
+  }
+
+  it("collapses a burst into one fire", () => {
+    vi.useFakeTimers()
+    const { debounced, fired } = debouncer()
+
+    for (let index = 0; index < 5; index += 1) debounced.signal()
+    expect(debounced.armed).toBe(true)
+    vi.advanceTimersByTime(DEBOUNCE)
+
+    expect(fired).toHaveLength(1)
+    expect(debounced.armed).toBe(false)
+  })
+
+  it("fires only after the full delay", () => {
+    vi.useFakeTimers()
+    const { debounced, fired } = debouncer()
+
+    debounced.signal()
+    vi.advanceTimersByTime(DEBOUNCE - 1)
+    expect(fired).toHaveLength(0)
+    expect(debounced.armed).toBe(true)
+
+    vi.advanceTimersByTime(1)
+    expect(fired).toHaveLength(1)
+    expect(debounced.armed).toBe(false)
+  })
+
+  it("lets the first event set the deadline instead of extending it", () => {
+    vi.useFakeTimers()
+    const { debounced, fired } = debouncer()
+
+    debounced.signal()
+    vi.advanceTimersByTime(200)
+    debounced.signal()
+    vi.advanceTimersByTime(DEBOUNCE - 200)
+
+    expect(fired).toHaveLength(1)
+  })
+
+  it("re-arms for the next burst", () => {
+    vi.useFakeTimers()
+    const { debounced, fired } = debouncer()
+
+    debounced.signal()
+    vi.advanceTimersByTime(DEBOUNCE)
+    debounced.signal()
+    vi.advanceTimersByTime(DEBOUNCE)
+
+    expect(fired).toHaveLength(2)
+  })
+
+  it("clears an armed timer without firing", () => {
+    vi.useFakeTimers()
+    const { debounced, fired } = debouncer()
+
+    debounced.signal()
+    debounced.clear()
+
+    expect(debounced.armed).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+    vi.advanceTimersByTime(DEBOUNCE * 4)
+    expect(fired).toHaveLength(0)
+  })
+
+  it("does not let a throwing refresh escape the timer callback", () => {
+    vi.useFakeTimers()
+    const debounced = createDebouncer({
+      delayMs: DEBOUNCE,
+      fire: () => {
+        throw new Error("refresh down")
+      },
+    })
+
+    debounced.signal()
+
+    expect(() => vi.advanceTimersByTime(DEBOUNCE)).not.toThrow()
+    expect(debounced.armed).toBe(false)
   })
 })
