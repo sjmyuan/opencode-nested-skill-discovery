@@ -188,9 +188,55 @@ describe("symlinked location dedupe", () => {
       expect(outcome.subprojects).toBe(1)
       expect(fake.editor.get("deploy")).toEqual(natives[0])
       expect(fake.editor.get("foo")).toEqual(natives[1])
+      const survivors = fake.editor.list().filter((entry) => String(entry.id).startsWith("nested."))
+      expect(survivors).toHaveLength(5)
+      expect(survivors.every((entry) => !String(entry.path).includes("-alias"))).toBe(true)
       expect(outcome.diagnostics.filter((entry) => entry.startsWith("dedupe:"))).toHaveLength(2)
     } finally {
       await unlink(alias)
+      await fixture.cleanup()
+    }
+  })
+})
+
+describe("dedupe path canonicalisation edges", () => {
+  it("leaves a native entry outside the location untouched", async () => {
+    const fixture = await deployedFixture()
+    const outside = await createRegistryFixture()
+
+    try {
+      await outside.write("skills/outside/SKILL.md", DOC)
+      const native = nativeSkill("outside", await outside.realpathOf("skills/outside/SKILL.md"))
+      const fake = fakeContext([native], { directory: fixture.root })
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(1)
+      expect(fake.editor.get("outside")).toEqual(native)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
+      expect(fake.editor.list()).toHaveLength(2)
+    } finally {
+      await outside.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  it("falls back to the raw path when realpath fails", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const ghost = nativeSkill("ghost", join(fixture.root, "ghost", "SKILL.md"))
+      const fake = fakeContext([ghost], { directory: fixture.root })
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(1)
+      expect(fake.editor.get("ghost")).toEqual(ghost)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
+      expect(fake.editor.list()).toHaveLength(2)
+    } finally {
       await fixture.cleanup()
     }
   })
