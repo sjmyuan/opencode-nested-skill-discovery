@@ -48,6 +48,20 @@ export function buildFixture(options = {}) {
   return { root, real, alias, config, entries: MATRIX.length, globalEntries: GLOBAL_MATRIX.length }
 }
 
+export function buildIsolation(fixture) {
+  const home = join(fixture.root, "home")
+  mkdirSync(home, { recursive: true })
+
+  return {
+    home,
+    env: {
+      ...process.env,
+      OPENCODE_TEST_HOME: home,
+      OPENCODE_CONFIG_DIR: fixture.config,
+    },
+  }
+}
+
 export function installPlugin(fixture, repo) {
   const plugins = join(fixture.real, ".opencode/plugins")
   mkdirSync(plugins, { recursive: true })

@@ -145,6 +145,31 @@ export async function poll(fn, { until, timeoutMs, intervalMs, onAttempt }) {
   return { ok: false, value, attempts, elapsedMs: Date.now() - started, error: lastError?.message }
 }
 
+export async function pollStable(fn, { timeoutMs, intervalMs, stableFor = 3, signature }) {
+  const started = Date.now()
+  let attempts = 0
+  let previous
+  let same = 0
+  let value
+  while (Date.now() - started <= timeoutMs) {
+    attempts += 1
+    try {
+      value = await fn(attempts)
+    } catch {
+      value = undefined
+    }
+    const current = value === undefined ? `error-${attempts}` : signature(value)
+    if (current === previous) same += 1
+    else {
+      same = 1
+      previous = current
+    }
+    if (same >= stableFor) return { ok: true, value, attempts, elapsedMs: Date.now() - started }
+    await delay(intervalMs)
+  }
+  return { ok: false, value, attempts, elapsedMs: Date.now() - started }
+}
+
 export function removeTree(path) {
   rmSync(path, { recursive: true, force: true })
   return !existsSync(path)
