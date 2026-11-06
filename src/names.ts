@@ -16,11 +16,17 @@ function cutTo(value: string, budget: number): string {
 }
 
 export function composeName(
-  _relativeSubprojectPath: string,
-  _nativeName: string,
-  _maxLength: number = MAX_NAME_LENGTH,
+  relativeSubprojectPath: string,
+  nativeName: string,
+  maxLength: number = MAX_NAME_LENGTH,
 ): string {
-  throw new Error("not implemented")
+  const relative = relativeSubprojectPath
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .join("/")
+  const base = relative.length > 0 ? `${relative}/${nativeName}` : nativeName
+
+  return sanitizeText(truncateName(base, maxLength), maxLength)
 }
 
 export function truncateName(name: string, maxLength: number = MAX_NAME_LENGTH): string {
