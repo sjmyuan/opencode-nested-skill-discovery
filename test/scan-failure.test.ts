@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { join } from "node:path"
 import { DEFAULT_SCAN_LIMITS } from "../src/contracts.ts"
 import { scanSkills } from "../src/scan.ts"
-import { createFixture, type ScanFixture } from "./support/scan-fixtures.ts"
+import { createFixture, createOutside, type ScanFixture } from "./support/scan-fixtures.ts"
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -70,5 +70,44 @@ describe("filesystem failures", () => {
     expect(result.diagnostics).toHaveLength(201)
     expect(result.diagnostics.slice(0, 200).every((line) => line.includes("file-symlink-broken"))).toBe(true)
     expect(result.diagnostics[200]).toContain("diagnostics-truncated")
+  })
+})
+
+describe("diagnostic grammar", () => {
+  it("keeps every diagnostic path-free and pinned to the frozen grammar", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    await outside.write("dir/.opencode/skills/x/SKILL.md")
+    await f.symlink("A/link", join(outside.root, "dir"))
+    await f.symlink("A/.opencode/skills/outside.md", await outside.write("real.md"))
+    await f.symlink("A/.opencode/skills/broken.md", join(f.root, "missing.md"))
+    await f.write("A/.opencode/skills/big/SKILL.md", "x".repeat(50))
+
+    const scanned = await scanSkills({
+      location: f.root,
+      limits: { ...DEFAULT_SCAN_LIMITS, maxFileBytes: 10 },
+    })
+    const absent = await scanSkills({ location: join(f.root, "absent") })
+    const diagnostics = [...scanned.diagnostics, ...absent.diagnostics]
+
+    for (const line of diagnostics) {
+      expect(line).toMatch(/^[a-z-]+: /)
+      expect(line).not.toContain(f.root)
+      expect(line).not.toContain(f.realRoot)
+      expect(line).not.toContain(outside.root)
+      expect(line).not.toContain(outside.realRoot)
+      expect(line).not.toContain("ENOENT: no such")
+    }
+
+    expect(diagnostics).toContain("directory-symlink: A/link")
+    expect(diagnostics).toContain("file-symlink-broken: A/.opencode/skills/broken.md")
+    expect(diagnostics).toContain("location-unreadable: ENOENT")
+    expect(scanned.diagnostics.find((line) => line.startsWith("budget-file-bytes"))).toBe(
+      "budget-file-bytes: A/.opencode/skills/big/SKILL.md size=50 maxFileBytes=10",
+    )
+    expect(scanned.diagnostics.filter((line) => line.startsWith("file-symlink-outside"))).toEqual([
+      "file-symlink-outside: A/.opencode/skills/outside.md",
+    ])
   })
 })

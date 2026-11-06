@@ -115,7 +115,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     const info = await stat(location)
     if (!info.isDirectory()) throw new Error("not a directory")
   } catch (error) {
-    emit(`location-unreadable: ${describe(error)}`)
+    emit(`location-unreadable: ${errorCode(error)}`)
     return finish()
   }
 
@@ -290,7 +290,7 @@ async function acceptLink(
     return
   }
   if (!isInside(context.location, link.realPath)) {
-    context.emit(`file-symlink-outside: ${rel} -> ${link.realPath}`)
+    context.emit(`file-symlink-outside: ${rel}`)
     return
   }
   if (!eligible(basename(path), atRoot)) return
@@ -329,7 +329,7 @@ async function accept(
   try {
     info = await stat(path)
   } catch (error) {
-    context.emit(`unreadable-file: ${relativeToLocation(context, path)} (${describe(error)})`)
+    context.emit(`unreadable-file: ${relativeToLocation(context, path)} (${errorCode(error)})`)
     return
   }
   context.state.files += 1
@@ -411,7 +411,7 @@ async function openDirectory(
     entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
     return entries
   } catch (error) {
-    context.emit(`unreadable-directory: ${rel === "" ? "." : rel} (${describe(error)})`)
+    context.emit(`unreadable-directory: ${rel === "" ? "." : rel} (${errorCode(error)})`)
     return null
   }
 }
@@ -460,6 +460,11 @@ function compareCandidates(left: ScanCandidate, right: ScanCandidate): number {
   return 0
 }
 
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/** D3: diagnostics carry `error.code`, never `Error.message` (which embeds absolute paths). */
+function errorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { readonly code?: unknown }).code
+    if (typeof code === "string") return code
+  }
+  return "UNKNOWN"
 }
