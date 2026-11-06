@@ -594,26 +594,28 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     deferredRunning = true
 
     try {
+      const before = current
       const listed = await ctx.skill.list()
       const ownedIds = new Set(
-        current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)),
+        before.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)),
       )
       settledForeignIds = foreignIdsOf(listed, ownedIds)
 
       if (!allowCorrection || deferredCorrected) return
-      if (disposed || generation !== dedupeGeneration || inFlight !== undefined) return
+      if (disposed || generation !== dedupeGeneration || inFlight !== undefined || current !== before) return
 
       const foreign = listed.data.filter((entry) => !ownedIds.has(String(entry.id)))
       const foreignPaths = new Set(
         await Promise.all(foreign.map((entry) => canonicalPathOf(String(entry.path)))),
       )
+      if (disposed || generation !== dedupeGeneration || inFlight !== undefined || current !== before) return
       const suppressed = selectSuppressed(
-        current.snapshots.flatMap((subproject) => subproject.skills),
+        before.snapshots.flatMap((subproject) => subproject.skills),
         foreignPaths,
       )
       if (suppressed.length === 0) return
 
-      const corrected = withoutEntries(current, new Set(suppressed))
+      const corrected = withoutEntries(before, new Set(suppressed))
       const written = await persistRegistry(ctx.storage, {
         location: base,
         snapshots: corrected.snapshots,
@@ -623,6 +625,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
         deferredDiagnostics.push(...written.diagnostics)
         return
       }
+      if (disposed || generation !== dedupeGeneration || inFlight !== undefined || current !== before) return
 
       current = corrected
       deferredCorrected = true
