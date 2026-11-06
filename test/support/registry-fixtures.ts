@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import type { IndexedSkill } from "../../src/indexer.ts"
+import type { AssembledEntry } from "../../src/registry.ts"
 
 export function indexedSkill(overrides: Partial<IndexedSkill> = {}): IndexedSkill {
   return {
@@ -11,6 +12,18 @@ export function indexedSkill(overrides: Partial<IndexedSkill> = {}): IndexedSkil
     nativeName: "deploy",
     description: "Deploys releases.",
     content: "# Deploy\n\nDeploys releases.\n",
+    ...overrides,
+  }
+}
+
+export function registryEntry(overrides: Partial<AssembledEntry> = {}): AssembledEntry {
+  return {
+    id: "nested.scope.deploy-00000000",
+    canonicalPath: "/tmp/root/.opencode/skills/deploy/SKILL.md",
+    name: "deploy",
+    description: "Deploys releases.",
+    content: "# Deploy\n\nDeploys releases.\n",
+    subproject: "",
     ...overrides,
   }
 }
