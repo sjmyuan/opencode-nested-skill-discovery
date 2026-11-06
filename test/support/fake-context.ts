@@ -51,7 +51,7 @@ export interface FakeContext {
   readonly reloadCalls: number
   onReload: (() => void) | undefined
   setLocation(directory: string): void
-  hideNatives(reads: number): void
+  hideNatives(reads: number, keep?: readonly string[]): void
   addNative(skill: Skill.Info): void
   removeNative(id: string): void
   fail(target: FailureTarget, error?: unknown): void
@@ -76,6 +76,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const natives: Skill.Info[] = seed.map((skill) => ({ ...skill }))
   let entries: Skill.Info[] = natives.map((skill) => ({ ...skill }))
   let hiddenListReads = 0
+  let hiddenKeep: ReadonlySet<string> = new Set()
   const transforms: TransformCallback[] = []
   const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
@@ -150,7 +151,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         guarded("skill.list", () => {
           const data =
             hiddenListReads > 0
-              ? entries.filter((entry) => String(entry.id).startsWith("nested."))
+              ? entries.filter(
+                  (entry) => String(entry.id).startsWith("nested.") || hiddenKeep.has(String(entry.id)),
+                )
               : entries
           if (hiddenListReads > 0) hiddenListReads -= 1
           return { location: { directory: location.directory }, data }
@@ -220,8 +223,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       location.project.directory = next
       location.project.canonical = next
     },
-    hideNatives(reads: number) {
+    hideNatives(reads: number, keep: readonly string[] = []) {
       hiddenListReads = reads
+      hiddenKeep = new Set(keep)
     },
     addNative(skill: Skill.Info) {
       natives.push({ ...skill })

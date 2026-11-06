@@ -207,10 +207,13 @@ describe("symlinked location dedupe", () => {
 
   it("suppresses on the same refresh when the host tier arrives late", async () => {
     const { fixture, alias, natives } = await buildAliasFixture()
+    const globals = await createRegistryFixture()
 
     try {
-      const fake = fakeContext(natives, { directory: alias })
-      fake.hideNatives(8)
+      await globals.write("skills/global-demo/SKILL.md", DOC)
+      const globalNative = nativeSkill("global-demo", await globals.realpathOf("skills/global-demo/SKILL.md"))
+      const fake = fakeContext([globalNative, ...natives], { directory: alias })
+      fake.hideNatives(8, ["global-demo"])
       const sizes: number[] = []
       fake.onReload = () => sizes.push(fake.editor.list().length)
 
@@ -222,17 +225,19 @@ describe("symlinked location dedupe", () => {
         owners.set(canonical, [...(owners.get(canonical) ?? []), String(entry.id)])
       }
 
-      expect(sizes).toEqual([9, 7])
+      expect(sizes).toEqual([10, 8])
       expect(outcome.reloads).toBe(2)
-      expect(fake.editor.list()).toHaveLength(7)
-      expect(owners.size).toBe(7)
+      expect(fake.editor.list()).toHaveLength(8)
+      expect(owners.size).toBe(8)
       expect([...owners.values()].every((ids) => ids.length === 1)).toBe(true)
       expect(fake.editor.get("deploy")).toEqual(natives[0])
       expect(fake.editor.get("foo")).toEqual(natives[1])
+      expect(fake.editor.get("global-demo")).toEqual(globalNative)
       expect(outcome.diagnostics.filter((entry) => entry.startsWith("dedupe:"))).toHaveLength(2)
       expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe-settle-timeout:"))).toBe(false)
     } finally {
       await unlink(alias)
+      await globals.cleanup()
       await fixture.cleanup()
     }
   })
@@ -284,17 +289,20 @@ describe("dedupe path canonicalisation edges", () => {
 describe("dedupe settle timing", () => {
   async function primedRegistry() {
     const fixture = await deployedFixture()
+    const globals = await createRegistryFixture()
+    await globals.write("skills/global-demo/SKILL.md", DOC)
+    const globalNative = nativeSkill("global-demo", await globals.realpathOf("skills/global-demo/SKILL.md"))
     const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
     const native = nativeSkill("native-deploy", skillPath)
-    const fake = fakeContext([native], { directory: fixture.root })
+    const fake = fakeContext([globalNative, native], { directory: fixture.root })
     const registry = createRegistry(fake.ctx)
     await registry.activate()
 
-    return { fixture, fake, registry, native }
+    return { fixture, globals, fake, registry, native, globalNative }
   }
 
   it("settles immediately when the first read already holds the expected tier", async () => {
-    const { fixture, fake, registry, native } = await primedRegistry()
+    const { fixture, globals, fake, registry, native } = await primedRegistry()
 
     try {
       const list = vi.spyOn(fake.ctx.skill, "list")
@@ -307,15 +315,16 @@ describe("dedupe settle timing", () => {
       expect(outcome.reloads).toBe(2)
       expect(fake.editor.get("native-deploy")).toEqual(native)
     } finally {
+      await globals.cleanup()
       await fixture.cleanup()
     }
   })
 
   it("proceeds with the last read and diagnoses when the tier never appears", async () => {
-    const { fixture, fake, registry } = await primedRegistry()
+    const { fixture, globals, fake, registry } = await primedRegistry()
 
     try {
-      fake.hideNatives(Number.MAX_SAFE_INTEGER)
+      fake.hideNatives(Number.MAX_SAFE_INTEGER, ["global-demo"])
 
       const outcome = await registry.refresh()
 
@@ -324,6 +333,7 @@ describe("dedupe settle timing", () => {
       expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe-settle-timeout: "))).toBe(true)
       expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
     } finally {
+      await globals.cleanup()
       await fixture.cleanup()
     }
   })
@@ -332,10 +342,14 @@ describe("dedupe settle timing", () => {
     const fixture = await deployedFixture()
 
     try {
-      const fake = fakeContext([], { directory: fixture.root })
-      fake.hideNatives(Number.MAX_SAFE_INTEGER)
+      const globals = await createRegistryFixture()
+      await globals.write("skills/global-demo/SKILL.md", DOC)
+      const globalNative = nativeSkill("global-demo", await globals.realpathOf("skills/global-demo/SKILL.md"))
+      const fake = fakeContext([globalNative], { directory: fixture.root })
+      fake.hideNatives(Number.MAX_SAFE_INTEGER, ["global-demo"])
 
       const cleanup = await setup(fake.ctx)
+      await globals.cleanup()
 
       expect(cleanup).toBeTypeOf("function")
       if (typeof cleanup === "function") await cleanup()
