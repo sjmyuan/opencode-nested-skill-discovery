@@ -189,6 +189,25 @@ describe("dedupe", () => {
     expect(result.diagnostics).toEqual([`duplicate: ${link} (kept ${real})`])
   })
 
+  it("hashes the realpath when the winning candidate is a symlink", async () => {
+    const ws = await workspace()
+    const real = await ws.write("a/.claude/skills/actual/SKILL.md", doc("name: alias"))
+    const link = await ws.link("a/.opencode/skills/alias/SKILL.md", real)
+
+    const result = await indexCandidates(
+      await Promise.all([
+        ws.candidate("a/.opencode/skills/alias/SKILL.md", "a"),
+        ws.candidate("a/.claude/skills/actual/SKILL.md", "a"),
+      ]),
+      { location: ws.root },
+    )
+    const entry = only(result.skills)
+
+    expect(entry.canonicalPath).toBe(real)
+    expect(entry.id.endsWith(`-${hex8(real)}`)).toBe(true)
+    expect(entry.id.endsWith(`-${hex8(link)}`)).toBe(false)
+  })
+
   it("keeps the same skill in two subprojects", async () => {
     const ws = await workspace()
     await ws.write("a/.opencode/skills/deploy/SKILL.md", doc("name: deploy"))

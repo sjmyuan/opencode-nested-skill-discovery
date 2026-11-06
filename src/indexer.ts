@@ -134,27 +134,14 @@ const resolveSubproject = async (
   return resolved
 }
 
-const dedupeByRealPath = (entries: readonly Prepared[], diagnostics: string[]): Prepared[] => {
+const dedupe = (
+  entries: readonly Prepared[],
+  keyOf: (entry: Prepared) => string,
+  diagnostics: string[],
+): Prepared[] => {
   const winners = new Map<string, Prepared>()
   for (const entry of entries) {
-    const current = winners.get(entry.candidate.realPath)
-    if (current === undefined) {
-      winners.set(entry.candidate.realPath, entry)
-      continue
-    }
-    const challengerWins = compareRank(entry.rank, current.rank) < 0
-    const winner = challengerWins ? entry : current
-    const loser = challengerWins ? current : entry
-    winners.set(entry.candidate.realPath, winner)
-    diagnostics.push(`duplicate: ${loser.candidate.path} (kept ${winner.candidate.realPath})`)
-  }
-  return [...winners.values()]
-}
-
-const dedupeByNativeId = (entries: readonly Prepared[], diagnostics: string[]): Prepared[] => {
-  const winners = new Map<string, Prepared>()
-  for (const entry of entries) {
-    const key = `${entry.subprojectRealPath}\u0000${entry.nativeId}`
+    const key = keyOf(entry)
     const current = winners.get(key)
     if (current === undefined) {
       winners.set(key, entry)
@@ -168,6 +155,12 @@ const dedupeByNativeId = (entries: readonly Prepared[], diagnostics: string[]): 
   }
   return [...winners.values()]
 }
+
+const dedupeByRealPath = (entries: readonly Prepared[], diagnostics: string[]): Prepared[] =>
+  dedupe(entries, (entry) => entry.candidate.realPath, diagnostics)
+
+const dedupeByNativeId = (entries: readonly Prepared[], diagnostics: string[]): Prepared[] =>
+  dedupe(entries, (entry) => `${entry.subprojectRealPath}\u0000${entry.nativeId}`, diagnostics)
 
 const toIndexedSkill = (entry: Prepared): IndexedSkill => {
   const nativeName = entry.frontmatter.name ?? slug(entry.nativeId, MAX_SKILL_SLUG_LENGTH)
@@ -229,6 +222,7 @@ export async function indexCandidates(
     })
   }
 
+  // Dedupe after parsing: a malformed winner must not shadow a valid sibling.
   const skills = dedupeByNativeId(dedupeByRealPath(prepared, diagnostics), diagnostics)
     .map(toIndexedSkill)
     .sort((left, right) => comparePath(left.id, right.id))
