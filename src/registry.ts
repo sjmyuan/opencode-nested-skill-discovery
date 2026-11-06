@@ -62,7 +62,6 @@ interface SettleInput {
   readonly read: () => Promise<SkillList>
   readonly ownedIds: ReadonlySet<string>
   readonly expected: ReadonlySet<string> | undefined
-  readonly now: () => number
 }
 
 interface SettleResult {
@@ -71,36 +70,42 @@ interface SettleResult {
   readonly elapsed: number
 }
 
-async function settleForeignTier({ read, ownedIds, expected, now }: SettleInput): Promise<SettleResult> {
-  const started = now()
+async function settleForeignTier({ read, ownedIds, expected }: SettleInput): Promise<SettleResult> {
+  const minReads = Math.ceil(DEDUPE_SETTLE_MIN_MS / DEDUPE_SETTLE_INTERVAL_MS)
+  const maxReads = Math.ceil(DEDUPE_SETTLE_TIMEOUT_MS / DEDUPE_SETTLE_INTERVAL_MS)
+  let reads = 0
   let list = await read()
+  reads += 1
   let ids = foreignIdsOf(list, ownedIds)
+
+  if (expected === undefined && ids.size === 0) return { list, timedOut: false, elapsed: 0 }
 
   if (expected !== undefined && containsAll(ids, expected)) {
     const confirmation = await read()
     const confirmed = foreignIdsOf(confirmation, ownedIds)
-    if (sameIds(ids, confirmed)) return { list: confirmation, timedOut: false, elapsed: now() - started }
+    if (sameIds(ids, confirmed)) return { list: confirmation, timedOut: false, elapsed: 0 }
     list = confirmation
     ids = confirmed
   }
 
-  for (;;) {
-    const elapsed = now() - started
-    if (elapsed >= DEDUPE_SETTLE_TIMEOUT_MS) return { list, timedOut: true, elapsed }
-
+  while (reads < maxReads) {
     await delay(DEDUPE_SETTLE_INTERVAL_MS)
 
     const next = await read()
+    reads += 1
     const nextIds = foreignIdsOf(next, ownedIds)
-    const settledAt = now() - started
 
-    if (sameIds(ids, nextIds) && nextIds.size > 0 && settledAt >= DEDUPE_SETTLE_MIN_MS) {
-      return { list: next, timedOut: false, elapsed: settledAt }
+    const expectedPresent = expected === undefined || containsAll(nextIds, expected)
+
+    if (sameIds(ids, nextIds) && nextIds.size > 0 && expectedPresent && reads >= minReads) {
+      return { list: next, timedOut: false, elapsed: reads * DEDUPE_SETTLE_INTERVAL_MS }
     }
 
     list = next
     ids = nextIds
   }
+
+  return { list, timedOut: true, elapsed: reads * DEDUPE_SETTLE_INTERVAL_MS }
 }
 
 function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
@@ -507,7 +512,6 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           read: () => ctx.skill.list(),
           ownedIds,
           expected: settledForeignIds,
-          now,
         }),
       )
       if (!settled.ok) return record(fail(diagnostics, reloads))
