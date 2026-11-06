@@ -1,8 +1,9 @@
 import { realpathSync } from "node:fs"
 import { symlink, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { nativeIdFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { setup } from "../src/plugin.ts"
 import { createRegistry, selectSuppressed } from "../src/registry.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
 import { createRegistryFixture, registryEntry } from "./support/registry-fixtures.ts"
@@ -274,6 +275,87 @@ describe("dedupe path canonicalisation edges", () => {
       expect(fake.editor.get("ghost")).toEqual(ghost)
       expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
       expect(fake.editor.list()).toHaveLength(2)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+})
+
+describe("dedupe settle timing", () => {
+  async function primedRegistry() {
+    const fixture = await deployedFixture()
+    const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+    const native = nativeSkill("native-deploy", skillPath)
+    const fake = fakeContext([native], { directory: fixture.root })
+    const registry = createRegistry(fake.ctx)
+    await registry.activate()
+
+    return { fixture, fake, registry, native }
+  }
+
+  it("settles immediately when the first read already holds the expected tier", async () => {
+    const { fixture, fake, registry, native } = await primedRegistry()
+
+    try {
+      const list = vi.spyOn(fake.ctx.skill, "list")
+      list.mockClear()
+
+      const outcome = await registry.refresh()
+
+      expect(list.mock.calls).toHaveLength(2)
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(2)
+      expect(fake.editor.get("native-deploy")).toEqual(native)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("proceeds with the last read and diagnoses when the tier never appears", async () => {
+    const { fixture, fake, registry } = await primedRegistry()
+
+    try {
+      fake.hideNatives(Number.MAX_SAFE_INTEGER)
+
+      const outcome = await registry.refresh()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(1)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe-settle-timeout: "))).toBe(true)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("resolves setup when the tier never appears", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const fake = fakeContext([], { directory: fixture.root })
+      fake.hideNatives(Number.MAX_SAFE_INTEGER)
+
+      const cleanup = await setup(fake.ctx)
+
+      expect(cleanup).toBeTypeOf("function")
+      if (typeof cleanup === "function") await cleanup()
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("never reads the host list when there are no nested candidates", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      const fake = fakeContext([], { directory: fixture.root })
+      fake.fail("skill.list", new Error("list down"))
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(1)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("list:"))).toBe(false)
     } finally {
       await fixture.cleanup()
     }
