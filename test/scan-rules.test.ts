@@ -215,3 +215,61 @@ describe("excludeRoots", () => {
     ])
   })
 })
+
+const LINKED_ROOTS = [
+  ["opencode-skills", ".opencode/skills"],
+  ["opencode-skill", ".opencode/skill"],
+  ["claude-skills", ".claude/skills"],
+  ["agents-skills", ".agents/skills"],
+] as const
+
+describe("symlinked skill roots", () => {
+  for (const [kind, dir] of LINKED_ROOTS) {
+    it(`refuses a ${kind} root that links outside the location`, async () => {
+      const f = await fixture()
+      const outside = await createOutside()
+      cleanups.push(() => outside.cleanup())
+      await outside.write("skills/SKILL.md")
+      await outside.write("skills/x.md")
+      await f.symlink(`A/${dir}`, join(outside.root, "skills"))
+
+      const result = await scanSkills({ location: f.root })
+
+      expect(result.candidates).toEqual([])
+      expect(result.diagnostics).toEqual([`directory-symlink: A/${dir}`])
+    })
+
+    it(`refuses a ${kind} root that links inside the location`, async () => {
+      const f = await fixture()
+      await f.write("shared/real-root/SKILL.md")
+      await f.write("shared/real-root/x.md")
+      await f.symlink(`A/${dir}`, join(f.root, "shared/real-root"))
+
+      const result = await scanSkills({ location: f.root })
+
+      expect(result.candidates).toEqual([])
+      expect(result.diagnostics).toEqual([`directory-symlink: A/${dir}`])
+      expect(
+        result.candidates.every(
+          (candidate) =>
+            candidate.realPath === f.realRoot || candidate.realPath.startsWith(`${f.realRoot}/`),
+        ),
+      ).toBe(true)
+    })
+  }
+
+  it("never marks a directory through a refused root", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    await outside.write("skills/SKILL.md")
+    await f.symlink("A/.opencode/skills", join(outside.root, "skills"))
+    await f.write("A/.claude/skills/deep/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.markers).toEqual(["claude-skills"])
+    expect(result.candidates[0]?.subproject).toBe("A")
+  })
+})

@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs"
-import { readdir, realpath, stat } from "node:fs/promises"
+import { lstat, readdir, realpath, stat } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 import {
   DEFAULT_SCAN_LIMITS,
@@ -179,11 +179,36 @@ async function openRoots(
     const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
     if (leading !== name) continue
     const root = join(dir, leaf)
-    if (!(await isDirectory(root))) continue
+    const rootRel = joinRel(rel, leaf)
+    const probe = await probeRoot(context, root, rootRel)
+    if (probe === "missing") continue
+    // Claimed either way: a refused root must not also be re-walked as an ordinary directory.
     opened = true
-    await walkRoot(context, root, joinRel(rel, leaf), kind, true, owner)
+    if (probe === "refused") continue
+    await walkRoot(context, root, rootRel, kind, true, owner)
   }
   return opened
+}
+
+/** A skill root must be a real directory inside the location; a symlinked or escaping root is refused (D2). */
+async function probeRoot(context: Context, root: string, rel: string): Promise<"missing" | "refused" | "ready"> {
+  let info
+  try {
+    info = await lstat(root)
+  } catch {
+    return "missing"
+  }
+  if (info.isSymbolicLink()) {
+    context.emit(`directory-symlink: ${rel}`)
+    return "refused"
+  }
+  if (!info.isDirectory()) return "missing"
+  const real = await canonical(root)
+  if (real === null || !isInside(context.location, real)) {
+    context.emit(`root-refused: ${rel}`)
+    return "refused"
+  }
+  return "ready"
 }
 
 async function walkRoot(
@@ -359,10 +384,10 @@ async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> 
     case "git":
       return exists(join(dir, ".git"))
     case "hg":
-      return isDirectory(join(dir, ".hg"))
+      return isRealDirectory(join(dir, ".hg"))
     default: {
       const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
-      return isDirectory(join(dir, leading, leaf))
+      return isRealDirectory(join(dir, leading, leaf))
     }
   }
 }
@@ -407,9 +432,10 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-async function isDirectory(path: string): Promise<boolean> {
+/** lstat, so a symlinked path is never accepted as a real directory (D2). */
+async function isRealDirectory(path: string): Promise<boolean> {
   try {
-    return (await stat(path)).isDirectory()
+    return (await lstat(path)).isDirectory()
   } catch {
     return false
   }
