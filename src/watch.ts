@@ -16,6 +16,73 @@ export interface WatchHandle {
 
 export type WatchFactory = (directory: string, onChange: () => void) => WatchHandle
 
+export interface WatchSet {
+  sync(targets: readonly string[]): void
+  active(): readonly string[]
+  dispose(): void
+}
+
+export interface CreateWatchSetInput {
+  readonly factory: WatchFactory
+  readonly onEvent: () => void
+  readonly onDiagnostic: (message: string) => void
+}
+
+/** Owns the live handles: opens what the scan derived, closes what it no longer covers. */
+export function createWatchSet({ factory, onEvent, onDiagnostic }: CreateWatchSetInput): WatchSet {
+  const handles = new Map<string, WatchHandle>()
+  let disposed = false
+
+  const open = (directory: string): void => {
+    try {
+      handles.set(
+        directory,
+        factory(directory, () => {
+          try {
+            onEvent()
+          } catch {
+            // A throwing handler must not escape into the fs.watch callback.
+          }
+        }),
+      )
+    } catch (error) {
+      onDiagnostic(`watch: ${directory}: ${errorCode(error)}`)
+    }
+  }
+
+  const close = (directory: string, handle: WatchHandle): void => {
+    handles.delete(directory)
+    try {
+      handle.close()
+    } catch (error) {
+      onDiagnostic(`watch: ${directory}: ${errorCode(error)}`)
+    }
+  }
+
+  return {
+    sync(targets) {
+      if (disposed) return
+      const wanted = new Set(targets)
+
+      for (const [directory, handle] of [...handles]) {
+        if (!wanted.has(directory)) close(directory, handle)
+      }
+      for (const directory of wanted) {
+        if (!handles.has(directory)) open(directory)
+      }
+    },
+    active() {
+      return [...handles.keys()].sort(compareText)
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      for (const [directory, handle] of [...handles]) close(directory, handle)
+      handles.clear()
+    },
+  }
+}
+
 /** Kind → the two directory segments that make a directory a skill root (mirrors `src/scan.ts`). */
 export const WATCH_ROOT_SEGMENTS: Record<SkillRootKind, readonly [string, string]> = {
   "opencode-skills": [".opencode", "skills"],
