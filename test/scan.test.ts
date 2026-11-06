@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { DEFAULT_SCAN_LIMITS } from "../src/contracts.ts"
+import type { ScanResult } from "../src/contracts.ts"
 import { scanSkills } from "../src/scan.ts"
 import { createFixture, type ScanFixture } from "./support/scan-fixtures.ts"
 
@@ -291,5 +292,63 @@ describe("depth boundary on subprojects", () => {
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("")
     expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "git"])
+  })
+})
+
+describe("determinism and stats contract", () => {
+  function withoutTiming(result: ScanResult) {
+    return { ...result, stats: { ...result.stats, elapsedMs: 0 } }
+  }
+
+  async function populated(): Promise<ScanFixture> {
+    const f = await fixture()
+    await f.write("B/.opencode/skills/b.md")
+    await f.write("A/.claude/skills/a/SKILL.md")
+    await f.write("A/AGENTS.md")
+    await f.write(".opencode/skills/root.md")
+    await f.write("C/.agents/skills/c/SKILL.md")
+    return f
+  }
+
+  it("returns identical results for two runs over the same tree", async () => {
+    const f = await populated()
+
+    const first = await scanSkills({ location: f.root })
+    const second = await scanSkills({ location: f.root })
+
+    expect(withoutTiming(first)).toEqual(withoutTiming(second))
+    expect(first.stats.directories).toBe(second.stats.directories)
+    expect(first.stats.files).toBe(second.stats.files)
+    expect(first.stats.bytes).toBe(second.stats.bytes)
+    expect(Number.isInteger(first.stats.elapsedMs)).toBe(true)
+    expect(first.stats.elapsedMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it("orders candidates strictly ascending by real path", async () => {
+    const f = await populated()
+
+    const result = await scanSkills({ location: f.root })
+    const realPaths = result.candidates.map((candidate) => candidate.realPath)
+
+    expect(realPaths).toEqual([...realPaths].sort())
+    expect(new Set(realPaths).size).toBe(realPaths.length)
+  })
+
+  it("does not depend on creation order", async () => {
+    const forward = await fixture()
+    const backward = await fixture()
+    for (const rel of [".opencode/skills/root.md", "A/.claude/skills/a/SKILL.md", "B/.opencode/skills/b.md"]) {
+      await forward.write(rel)
+    }
+    for (const rel of ["B/.opencode/skills/b.md", "A/.claude/skills/a/SKILL.md", ".opencode/skills/root.md"]) {
+      await backward.write(rel)
+    }
+
+    const left = await scanSkills({ location: forward.root })
+    const right = await scanSkills({ location: backward.root })
+
+    expect(left.candidates.map((candidate) => forward.rel(candidate.realPath))).toEqual(
+      right.candidates.map((candidate) => backward.rel(candidate.realPath)),
+    )
   })
 })
