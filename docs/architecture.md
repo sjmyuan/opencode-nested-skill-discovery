@@ -9,8 +9,8 @@ permission rules are in [permissions.md](permissions.md).
 
 The plugin adds entries and removes nothing. Each refresh scans the location, replays the
 result through the single `skill.transform` it registers, and leaves native, global, and
-session skills exactly as they were (`src/registry.ts:242-261`, `src/replay.ts:18-45`). Every entry it adds carries an ID starting with `nested.`
-(`src/contracts.ts:78`).
+session skills exactly as they were (`src/registry.ts:242-261`, `src/replay.ts:18-45`).
+Every entry it adds carries an ID starting with `nested.` (`src/contracts.ts:78`).
 
 opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` for the
 workspace, its ancestor config roots, and the global ones
@@ -139,9 +139,9 @@ A manifest entry is `{ id, canonicalPath, name, description?, autoinvoke? }` and
 markdown body with the frontmatter block removed (`src/manifest.ts:59-66`,
 `src/indexer.ts:176`).
 
-Every successful refresh writes the three keys and then prunes. Pruning scans both prefixes page by
-page, keeps the tokens written in this run plus the version key, and removes a stale record
-only when its recorded `directory` is inside the location being scanned
+Every successful refresh writes the three keys and then prunes. Pruning scans both prefixes
+page by page, keeps the tokens written in this run plus the version key, and removes a stale
+record only when its recorded `directory` is inside the location being scanned
 (`src/manifest.ts:79-108`, `178-184`). Another workspace's records are therefore never
 deleted, and a record whose token is still active is never touched.
 
@@ -162,8 +162,13 @@ starting a second one, so concurrent triggers cost one scan (`src/registry.ts:37
 | Trigger | Mechanism | Bound |
 |---|---|---|
 | activation | `setup` → `activate()` (`src/plugin.ts:20-32`) | once per location instance |
-| filesystem change | one non-recursive `fs.watch` per location root, per subproject directory that holds candidates, per skill-root directory, and per skill's own directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:84`): the first event arms it, later events are swallowed, so a save burst is one refresh and a sustained stream yields at most four per second |
-| prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts`) | one refresh per 2000 ms window; skipped entirely when any refresh finished inside the window, and an in-flight refresh is awaited rather than duplicated |
+| filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:84`) |
+| prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts`) | one refresh per 2000 ms, skipped when any refresh just finished |
+
+The debounce is a single timer, not a per-event delay: the first event arms it, later events
+inside the window are swallowed, so a save burst is one refresh and a sustained stream yields
+at most four per second. The backstop awaits an in-flight refresh instead of starting a
+second one, so a prompt never waits for two scans.
 
 The watcher set is derived from the **last good scan**: canonical, deduped, sorted, with
 pruned segments and symlinked directories dropped. Each reconciliation closes handles that
