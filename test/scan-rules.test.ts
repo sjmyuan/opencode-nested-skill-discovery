@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest"
+import { realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { PRUNE_DIRECTORIES } from "../src/contracts.ts"
 import { scanSkills } from "../src/scan.ts"
-import { createFixture, type ScanFixture } from "./support/scan-fixtures.ts"
+import { createFixture, createOutside, type ScanFixture } from "./support/scan-fixtures.ts"
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -79,5 +80,71 @@ describe("prune rules", () => {
     expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
       "A/.opencode/skills/keep/SKILL.md",
     ])
+  })
+})
+
+describe("symlink policy", () => {
+  it("follows an in-location file symlink and reports both paths", async () => {
+    const f = await fixture()
+    const target = await f.write("shared/real.md")
+    await f.symlink("A/.opencode/skills/linked.md", target)
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.path).toBe(join(f.realRoot, "A/.opencode/skills/linked.md"))
+    expect(result.candidates[0]?.realPath).toBe(await realpath(target))
+  })
+
+  it("skips a file symlink whose target leaves the location", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    await f.symlink("A/.opencode/skills/linked.md", await outside.write("real.md"))
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toEqual([])
+    expect(result.diagnostics.filter((line) => line.includes("file-symlink-outside"))).toHaveLength(1)
+  })
+
+  it("never follows a directory symlink", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    await outside.write("dir/.opencode/skills/x/SKILL.md")
+    await f.symlink("A/link", join(outside.root, "dir"))
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toEqual([])
+    expect(result.diagnostics.filter((line) => line.includes("directory-symlink"))).toHaveLength(1)
+  })
+
+  it("reports a broken file symlink without throwing", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/keep.md")
+    await f.symlink("A/.opencode/skills/broken.md", join(f.root, "missing.md"))
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/keep.md",
+    ])
+    expect(result.diagnostics).toHaveLength(1)
+    expect(result.diagnostics[0]).toContain("file-symlink-broken")
+  })
+
+  it("rejects a target that is only a string prefix of the location", async () => {
+    const f = await fixture()
+    const sibling = await f.siblings("-sibling")
+    await writeFile(join(sibling, "real.md"), "outside\n")
+    await f.symlink("A/.opencode/skills/sib.md", join(sibling, "real.md"))
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toEqual([])
+    expect(result.diagnostics.filter((line) => line.includes("file-symlink-outside"))).toHaveLength(1)
   })
 })

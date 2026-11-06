@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { basename, join, resolve, sep } from "node:path"
 import {
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
@@ -50,6 +50,7 @@ interface Ownership {
 }
 
 interface Context {
+  readonly location: string
   readonly limits: ScanLimits
   readonly prune: ReadonlySet<string>
   readonly markers: ReadonlySet<SubprojectMarker>
@@ -82,15 +83,6 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     }
   }
 
-  const context: Context = {
-    limits,
-    prune: new Set(options.prune ?? PRUNE_DIRECTORIES),
-    markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
-    roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
-    state,
-    emit,
-  }
-
   const finish = (): ScanResult => ({
     candidates: [...state.candidates].sort(compareCandidates),
     stats: {
@@ -113,6 +105,16 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     return finish()
   }
 
+  const context: Context = {
+    location,
+    limits,
+    prune: new Set(options.prune ?? PRUNE_DIRECTORIES),
+    markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
+    roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
+    state,
+    emit,
+  }
+
   await walk(context, location, "", null, 0)
 
   return finish()
@@ -132,6 +134,10 @@ async function walk(
   // PD3: the cap measures subproject distance from the location, not skill-file depth.
   const childDepth = depth + 1
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      await inspectLink(context, join(dir, entry.name), joinRel(rel, entry.name))
+      continue
+    }
     if (!entry.isDirectory()) continue
     if (context.prune.has(entry.name)) continue
     const child = join(dir, entry.name)
@@ -177,16 +183,76 @@ async function walkRoot(
   const owner = (await probeMarkers(context, dir, rel)) ?? parent
 
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      await acceptLink(context, join(dir, entry.name), joinRel(rel, entry.name), kind, atRoot, owner)
+      continue
+    }
     if (entry.isDirectory()) {
       if (context.prune.has(entry.name)) continue
       await walkRoot(context, join(dir, entry.name), joinRel(rel, entry.name), kind, false, owner)
       continue
     }
     if (!entry.isFile()) continue
-    const eligible = atRoot ? entry.name.endsWith(".md") : entry.name === "SKILL.md"
-    if (!eligible) continue
+    if (!eligible(entry.name, atRoot)) continue
     await accept(context, join(dir, entry.name), kind, owner)
   }
+}
+
+function eligible(name: string, atRoot: boolean): boolean {
+  return atRoot ? name.endsWith(".md") : name === "SKILL.md"
+}
+
+// Native glob parity (PD4): dot-md directly under the root, SKILL.md at any level below it.
+type LinkTarget =
+  | { readonly type: "directory" }
+  | { readonly type: "file"; readonly realPath: string }
+  | { readonly type: "broken" }
+
+async function resolveLink(path: string): Promise<LinkTarget> {
+  try {
+    const info = await stat(path)
+    if (info.isDirectory()) return { type: "directory" }
+    if (!info.isFile()) return { type: "broken" }
+    return { type: "file", realPath: await realpath(path) }
+  } catch {
+    return { type: "broken" }
+  }
+}
+
+/** Outside an open root no file is a candidate: only the skip is reported. */
+async function inspectLink(context: Context, path: string, rel: string): Promise<void> {
+  const link = await resolveLink(path)
+  if (link.type === "directory") context.emit(`directory-symlink: ${rel}`)
+  else if (link.type === "broken") context.emit(`file-symlink-broken: ${rel}`)
+}
+
+async function acceptLink(
+  context: Context,
+  path: string,
+  rel: string,
+  kind: SkillRootKind,
+  atRoot: boolean,
+  owner: Ownership | null,
+): Promise<void> {
+  const link = await resolveLink(path)
+  if (link.type === "directory") {
+    context.emit(`directory-symlink: ${rel}`)
+    return
+  }
+  if (link.type === "broken") {
+    context.emit(`file-symlink-broken: ${rel}`)
+    return
+  }
+  if (!isInside(context.location, link.realPath)) {
+    context.emit(`file-symlink-outside: ${rel} -> ${link.realPath}`)
+    return
+  }
+  if (!eligible(basename(path), atRoot)) return
+  await accept(context, path, kind, owner, link.realPath)
+}
+
+function isInside(location: string, target: string): boolean {
+  return target === location || target.startsWith(`${location}${sep}`)
 }
 
 async function accept(
@@ -194,11 +260,12 @@ async function accept(
   path: string,
   kind: SkillRootKind,
   owner: Ownership | null,
+  realPath?: string,
 ): Promise<void> {
   context.state.files += 1
   context.state.candidates.push({
     path,
-    realPath: (await canonical(path)) ?? path,
+    realPath: realPath ?? (await canonical(path)) ?? path,
     subproject: owner?.rel ?? "",
     root: kind,
     markers: owner === null ? [] : [...owner.markers],
