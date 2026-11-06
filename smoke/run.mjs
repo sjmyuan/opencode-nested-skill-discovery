@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { buildFixture, buildIsolation, installPlugin, MATRIX, removeTree } from "./fixture.mjs"
@@ -138,14 +138,16 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   })
 }
 
-function serve(fixture, env, name) {
-  return startServe({ cwd: fixture.real, env, logFile: join(state.scratch, `${name}.log`) }).then((server) => {
+function serveAt(cwd, env, name) {
+  return startServe({ cwd, env, logFile: join(state.scratch, `${name}.log`) }).then((server) => {
     state.servers.push(server)
     state.secrets.push(server.password)
     state.logs.push({ name: `${name}.log`, file: server.logFile })
     return server
   })
 }
+
+const serve = (fixture, env, name) => serveAt(fixture.real, env, name)
 
 const nestedOf = (capture) => capture.data.filter((entry) => String(entry.id).startsWith("nested."))
 const nativeOf = (capture) => capture.data.filter((entry) => !String(entry.id).startsWith("nested."))
@@ -528,8 +530,104 @@ async function suiteSmoke(evidence, keep) {
   }
 }
 
+const REAL_ROOT = "/Users/ganggang/work"
+
 async function suiteReal(evidence) {
-  throw new Error("suite real is not implemented yet")
+  const opencodeDir = join(REAL_ROOT, ".opencode")
+  const pluginLink = join(opencodeDir, "plugins/nested-skill-discovery")
+  if (existsSync(opencodeDir)) {
+    record("REAL", "unproven", `${opencodeDir} already exists; refusing to merge`, "real-workspace-rollback.txt")
+    return false
+  }
+
+  const repo = realpathSync(worktree().root)
+  let server
+  try {
+    mkdirSync(join(opencodeDir, "plugins"), { recursive: true })
+    symlinkSync(repo, pluginLink, "dir")
+    server = await serveAt(REAL_ROOT, process.env, "serve-real")
+
+    const isActive = (value) =>
+      value.data.some(
+        (plugin) =>
+          plugin.source.type === "local" &&
+          plugin.state.status === "active" &&
+          realpathSync(plugin.source.path).startsWith(`${repo}/`),
+      )
+    const plugins = await poll(() => api(server.base, server.password, "/api/plugin"), {
+      until: isActive,
+      timeoutMs: 60_000,
+      intervalMs: 250,
+    })
+    const skills = await poll(() => api(server.base, server.password, "/api/skill"), {
+      until: (value) => value.data.some((entry) => String(entry.id).startsWith("nested.")),
+      timeoutMs: 60_000,
+      intervalMs: 250,
+    })
+
+    writeEvidence("plugin-real-workspace.json", plugins.value ?? { settled: false })
+    writeEvidence("skill-real-workspace.json", skills.value ?? { settled: false })
+    return claimReal(skills.value)
+  } finally {
+    if (server !== undefined) await server.stop()
+    try {
+      unlinkSync(pluginLink)
+    } catch {
+      // already gone
+    }
+    removeTree(opencodeDir)
+    const absent = !existsSync(opencodeDir)
+    writeEvidence(
+      "real-workspace-rollback.txt",
+      `transient=${opencodeDir}\nbefore=absent\nafter=${absent ? "absent" : "present"}\nserver_pid=${server?.pid ?? "none"}\n`,
+    )
+    if (!absent) console.error(`${opencodeDir} still present after rollback`)
+  }
+}
+
+function claimReal(capture) {
+  if (capture === undefined || capture.data === undefined) {
+    return record("REAL", "unproven", "real workspace did not settle", "skill-real-workspace.json")
+  }
+  const nested = capture.data.filter((entry) => String(entry.id).startsWith("nested."))
+  const groups = new Map()
+  for (const entry of capture.data) {
+    let path
+    try {
+      path = realpathSync(String(entry.path))
+    } catch {
+      continue
+    }
+    groups.set(path, [...(groups.get(path) ?? []), String(entry.id)])
+  }
+  const collisions = [...groups].filter(([, ids]) => ids.length > 1)
+  const names = nested.map((entry) => String(entry.name))
+  const subprojects = [...new Set(names.map((name) => name.split("/").slice(0, -1).join("/")))].sort()
+  const problems = []
+
+  if (nested.length < 15) problems.push(`nested count ${nested.length} < 15`)
+  for (const entry of nested) {
+    if (!ID_SHAPE.test(String(entry.id))) problems.push(`id shape ${entry.id}`)
+    if (!String(entry.name).includes("/")) problems.push(`unqualified name ${entry.name}`)
+    if (realpathSync(String(entry.path)) !== String(entry.path)) problems.push(`non-canonical ${entry.path}`)
+  }
+  if (collisions.length > 0) problems.push(`${collisions.length} canonical collisions`)
+
+  writeEvidence("real-workspace-count.json", {
+    nested: nested.length,
+    total: capture.data.length,
+    subprojects,
+    collisions,
+  })
+
+  return record(
+    "REAL",
+    problems.length === 0 ? "pass" : "fail",
+    problems.length === 0
+      ? `${nested.length} nested across ${subprojects.length} subprojects; names qualified; paths canonical`
+      : problems.slice(0, 4).join("; "),
+    "skill-real-workspace.json, real-workspace-rollback.txt",
+  )
 }
 
 async function main() {
