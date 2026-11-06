@@ -123,15 +123,15 @@ description-less entries from the model's guidance block
 - an entry whose ID is already present is skipped, never replaced (`src/replay.ts:29-35`)
 - nothing is removed, so native and session skills survive untouched
 - a failing `get`/`add` becomes a `replay:` diagnostic instead of an exception
-  (`src/replay.ts:32-41`), which three buffer arrays drain into the next outcome
-  (`src/registry.ts:388-392`)
+  (`src/replay.ts:32-41`); the buffered diagnostics are drained at the start of the next
+  refresh (`src/registry.ts:388-392`)
 
 After the first reload the registry lists what the host actually holds, then compares each
 nested entry's `canonicalPath` with the **realpath** of every foreign entry's `path` and
 suppresses a match (`src/registry.ts:475-483`, `203-219`). Dedupe is two-phase: the immediate
 pass runs inside the refresh, and when the foreign tier still looks incomplete a deferred
-check runs at 1.5 s and again at 4 s
-(`src/registry.ts:28`, `502-511`, `569-635`), emitting a `dedupe: <id>` diagnostic.
+check runs at 1.5 s and again at 4 s (`src/registry.ts:28`, `502-511`, `569-635`), emitting a
+`dedupe: <id>` diagnostic.
 `refresh()` returns without waiting for that check (`src/registry.ts:523-549`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
 timeout that reports failure: the deferred check simply re-lists and re-filters.
