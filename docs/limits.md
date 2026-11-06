@@ -128,7 +128,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:475-483`, `203-219`); the check is re-run at 1.5 s and 4 s (`src/registry.ts:28`, `569-635`), so a duplicate can survive up to about 4 s |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:475-483`, `203-219`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:28`, `587-638`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
