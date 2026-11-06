@@ -41,6 +41,7 @@ interface State {
   files: number
   bytes: number
   truncated: boolean
+  stopped: boolean
   diagnosticsTruncated: boolean
 }
 
@@ -70,6 +71,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     files: 0,
     bytes: 0,
     truncated: false,
+    stopped: false,
     diagnosticsTruncated: false,
   }
 
@@ -136,6 +138,7 @@ async function walk(
   // PD3: the cap measures subproject distance from the location, not skill-file depth.
   const childDepth = depth + 1
   for (const entry of entries) {
+    if (context.state.stopped) return
     if (entry.isSymbolicLink()) {
       await inspectLink(context, join(dir, entry.name), joinRel(rel, entry.name))
       continue
@@ -186,6 +189,7 @@ async function walkRoot(
   const owner = (await probeMarkers(context, dir, rel)) ?? parent
 
   for (const entry of entries) {
+    if (context.state.stopped) return
     if (entry.isSymbolicLink()) {
       await acceptLink(context, join(dir, entry.name), joinRel(rel, entry.name), kind, atRoot, owner)
       continue
@@ -319,8 +323,10 @@ async function openDirectory(
   dir: string,
   rel: string,
 ): Promise<Dirent<string>[] | null> {
+  if (context.state.stopped) return null
   if (context.state.directories >= context.limits.maxDirectories) {
     context.state.truncated = true
+    context.state.stopped = true
     context.emit(`budget-directories: maxDirectories=${context.limits.maxDirectories}`)
     return null
   }
