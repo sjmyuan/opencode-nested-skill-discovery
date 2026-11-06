@@ -40,3 +40,6 @@ code: the cache is written with each entry's content, and nothing reads it back 
   reads `nested/subproject/<token>`, so the cache is write-only today.
 - The upstream permissions page says a `skill` rule matches the skill name; at the pinned
   runtime it matches the ID ([permissions.md](permissions.md)).
+- The discovery ADR's R10 manifest shape is `{ id, canonicalPath, name, autoinvoke }`; the
+  code writes `{ id, canonicalPath, name, description?, autoinvoke? }` — `description` is
+  optional and present whenever the indexer derived one (`src/manifest.ts:51-57`).
