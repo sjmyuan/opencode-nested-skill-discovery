@@ -375,3 +375,111 @@ describe("dedupe settle timing", () => {
     }
   })
 })
+
+describe("deferred dedupe", () => {
+  const CONFIG_ROOT = "pkg-a/.opencode/skills"
+  const CONFIGURED = ["deploy/SKILL.md", "foo.md"]
+  const OTHER = [
+    "pkg-b/.opencode/skills/a/SKILL.md",
+    "pkg-b/.opencode/skills/b/SKILL.md",
+    "pkg-b/.opencode/skills/c/SKILL.md",
+    "pkg-b/.opencode/skills/d/SKILL.md",
+    "pkg-b/.opencode/skills/e/SKILL.md",
+  ]
+
+  async function aliasFixture() {
+    const fixture = await createRegistryFixture()
+    const alias = `${fixture.root}-alias`
+    await symlink(fixture.root, alias, "dir")
+    const globals = await createRegistryFixture()
+    await globals.write("skills/global-demo/SKILL.md", DOC)
+    await fixture.write("opencode.json", JSON.stringify({ skills: [`./${CONFIG_ROOT}`] }))
+    for (const rel of [...CONFIGURED.map((entry) => `${CONFIG_ROOT}/${entry}`), ...OTHER]) {
+      await fixture.write(rel, DOC)
+    }
+    const natives = CONFIGURED.map((rel) =>
+      nativeSkill(nativeIdFor(rel), join(alias, CONFIG_ROOT, rel)),
+    )
+    const globalNative = nativeSkill(
+      "global-demo",
+      await globals.realpathOf("skills/global-demo/SKILL.md"),
+    )
+
+    return { fixture, alias, globals, natives, globalNative }
+  }
+
+  it("returns immediately and collapses the twins on a deferred check", async () => {
+    const { fixture, alias, globals, natives, globalNative } = await aliasFixture()
+    vi.useFakeTimers()
+
+    try {
+      const fake = fakeContext([globalNative, ...natives], { directory: alias })
+      fake.hideNatives(2, ["global-demo"])
+      const sizes: number[] = []
+      fake.onReload = () => sizes.push(fake.editor.list().length)
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.reloads).toBe(1)
+      expect(fake.editor.list()).toHaveLength(10)
+      expect(vi.getTimerCount()).toBe(2)
+
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(fake.editor.list()).toHaveLength(10)
+
+      await vi.advanceTimersByTimeAsync(2500)
+
+      expect(sizes).toEqual([10, 8])
+      expect(fake.editor.list()).toHaveLength(8)
+      expect(fake.editor.get("deploy")).toEqual(natives[0])
+      expect(fake.editor.get("foo")).toEqual(natives[1])
+      expect(fake.editor.get("global-demo")).toEqual(globalNative)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      await unlink(alias)
+      await globals.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  it("re-learns the tier after a native disappears", async () => {
+    const fixture = await deployedFixture()
+    const globals = await createRegistryFixture()
+    await globals.write("skills/global-demo/SKILL.md", DOC)
+    const globalNative = nativeSkill(
+      "global-demo",
+      await globals.realpathOf("skills/global-demo/SKILL.md"),
+    )
+    const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+    const native = nativeSkill("native-deploy", skillPath)
+    const fake = fakeContext([globalNative, native], { directory: fixture.root })
+    const registry = createRegistry(fake.ctx)
+    await registry.activate()
+    vi.useFakeTimers()
+
+    try {
+      const nestedId = await expectedIdOf(fixture)
+      const reloadsBefore = fake.reloadCalls
+      fake.removeNative("native-deploy")
+
+      const outcome = await registry.refresh()
+
+      expect(outcome.reloads).toBe(1)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe-settle-timeout"))).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1500)
+
+      expect(fake.editor.get("native-deploy")).toBeUndefined()
+      expect(fake.editor.get(nestedId)).toBeDefined()
+      expect(fake.reloadCalls).toBe(reloadsBefore + 1)
+
+      await registry.refresh()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      await globals.cleanup()
+      await fixture.cleanup()
+    }
+  })
+})
