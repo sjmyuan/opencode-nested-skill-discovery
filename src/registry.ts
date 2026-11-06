@@ -25,6 +25,9 @@ import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 const DIAGNOSTIC_LIMIT = 200
+const DEDUPE_SETTLE_INTERVAL_MS = 50
+const DEDUPE_SETTLE_MIN_MS = 750
+const DEDUPE_SETTLE_TIMEOUT_MS = 1000
 
 async function canonicalDirectory(target: string): Promise<string> {
   try {
@@ -39,6 +42,64 @@ async function canonicalPathOf(target: string): Promise<string> {
     return await realpath(target)
   } catch {
     return target
+  }
+}
+
+type SkillList = Awaited<ReturnType<Plugin.Context["skill"]["list"]>>
+
+const delay = (ms: number): Promise<void> => new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
+
+const foreignIdsOf = (list: SkillList, ownedIds: ReadonlySet<string>): ReadonlySet<string> =>
+  new Set(list.data.filter((entry) => !ownedIds.has(String(entry.id))).map((entry) => String(entry.id)))
+
+const sameIds = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
+  left.size === right.size && [...left].every((id) => right.has(id))
+
+const containsAll = (superset: ReadonlySet<string>, subset: ReadonlySet<string>): boolean =>
+  [...subset].every((id) => superset.has(id))
+
+interface SettleInput {
+  readonly read: () => Promise<SkillList>
+  readonly ownedIds: ReadonlySet<string>
+  readonly expected: ReadonlySet<string> | undefined
+  readonly now: () => number
+}
+
+interface SettleResult {
+  readonly list: SkillList
+  readonly timedOut: boolean
+  readonly elapsed: number
+}
+
+async function settleForeignTier({ read, ownedIds, expected, now }: SettleInput): Promise<SettleResult> {
+  const started = now()
+  let list = await read()
+  let ids = foreignIdsOf(list, ownedIds)
+
+  if (expected !== undefined && containsAll(ids, expected)) {
+    const confirmation = await read()
+    const confirmed = foreignIdsOf(confirmation, ownedIds)
+    if (sameIds(ids, confirmed)) return { list: confirmation, timedOut: false, elapsed: now() - started }
+    list = confirmation
+    ids = confirmed
+  }
+
+  for (;;) {
+    const elapsed = now() - started
+    if (elapsed >= DEDUPE_SETTLE_TIMEOUT_MS) return { list, timedOut: true, elapsed }
+
+    await delay(DEDUPE_SETTLE_INTERVAL_MS)
+
+    const next = await read()
+    const nextIds = foreignIdsOf(next, ownedIds)
+    const settledAt = now() - started
+
+    if (sameIds(ids, nextIds) && nextIds.size > 0 && settledAt >= DEDUPE_SETTLE_MIN_MS) {
+      return { list: next, timedOut: false, elapsed: settledAt }
+    }
+
+    list = next
+    ids = nextIds
   }
 }
 
@@ -238,6 +299,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
   let followUp = false
+  let settledForeignIds: ReadonlySet<string> | undefined
   const replayDiagnostics: string[] = []
   const watchDiagnostics: string[] = []
 
@@ -434,16 +496,33 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (!reloaded.ok) return record(fail(diagnostics))
 
     let reloads = 1
-    const listed = await runStage(diagnostics, "list", () => ctx.skill.list())
-    if (!listed.ok) return record(fail(diagnostics, reloads))
-
     const ownedIds = new Set(current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)))
+    const hasCandidates = current.snapshots.some((subproject) => subproject.skills.length > 0)
+
+    let foreign: SkillList["data"] = []
+
+    if (hasCandidates) {
+      const settled = await runStage(diagnostics, "list", () =>
+        settleForeignTier({
+          read: () => ctx.skill.list(),
+          ownedIds,
+          expected: settledForeignIds,
+          now,
+        }),
+      )
+      if (!settled.ok) return record(fail(diagnostics, reloads))
+
+      if (settled.value.timedOut) {
+        diagnostics.push(`dedupe-settle-timeout: ${settled.value.elapsed}`)
+      } else {
+        settledForeignIds = foreignIdsOf(settled.value.list, ownedIds)
+      }
+
+      foreign = settled.value.list.data.filter((entry) => !ownedIds.has(String(entry.id)))
+    }
+
     const foreignPaths = new Set(
-      await Promise.all(
-        listed.value.data
-          .filter((entry) => !ownedIds.has(String(entry.id)))
-          .map((entry) => canonicalPathOf(String(entry.path))),
-      ),
+      await Promise.all(foreign.map((entry) => canonicalPathOf(String(entry.path)))),
     )
     const suppressed = selectSuppressed(
       current.snapshots.flatMap((subproject) => subproject.skills),
