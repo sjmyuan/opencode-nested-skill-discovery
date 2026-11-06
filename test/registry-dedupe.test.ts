@@ -154,19 +154,25 @@ describe("symlinked location dedupe", () => {
     "pkg-b/.opencode/skills/e/SKILL.md",
   ]
 
-  it("settles to one entry per canonical path for an aliased location", async () => {
+  const buildAliasFixture = async () => {
     const fixture = await createRegistryFixture()
     const alias = `${fixture.root}-alias`
     await symlink(fixture.root, alias, "dir")
+    await fixture.write("opencode.json", JSON.stringify({ skills: [`./${CONFIG_ROOT}`] }))
+    for (const rel of [...CONFIGURED.map((entry) => `${CONFIG_ROOT}/${entry}`), ...OTHER]) {
+      await fixture.write(rel, DOC)
+    }
+    const natives = CONFIGURED.map((rel) =>
+      nativeSkill(nativeIdFor(rel), join(alias, CONFIG_ROOT, rel)),
+    )
+
+    return { fixture, alias, natives }
+  }
+
+  it("settles to one entry per canonical path for an aliased location", async () => {
+    const { fixture, alias, natives } = await buildAliasFixture()
 
     try {
-      await fixture.write("opencode.json", JSON.stringify({ skills: [`./${CONFIG_ROOT}`] }))
-      for (const rel of [...CONFIGURED.map((entry) => `${CONFIG_ROOT}/${entry}`), ...OTHER]) {
-        await fixture.write(rel, DOC)
-      }
-      const natives = CONFIGURED.map((rel) =>
-        nativeSkill(nativeIdFor(rel), join(alias, CONFIG_ROOT, rel)),
-      )
       const fake = fakeContext(natives, { directory: alias })
       const sizes: number[] = []
       fake.onReload = () => sizes.push(fake.editor.list().length)
@@ -192,6 +198,38 @@ describe("symlinked location dedupe", () => {
       expect(survivors).toHaveLength(5)
       expect(survivors.every((entry) => !String(entry.path).includes("-alias"))).toBe(true)
       expect(outcome.diagnostics.filter((entry) => entry.startsWith("dedupe:"))).toHaveLength(2)
+    } finally {
+      await unlink(alias)
+      await fixture.cleanup()
+    }
+  })
+
+  it("suppresses on the same refresh when the host tier arrives late", async () => {
+    const { fixture, alias, natives } = await buildAliasFixture()
+
+    try {
+      const fake = fakeContext(natives, { directory: alias })
+      fake.hideNatives(8)
+      const sizes: number[] = []
+      fake.onReload = () => sizes.push(fake.editor.list().length)
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      const owners = new Map<string, string[]>()
+      for (const entry of fake.editor.list()) {
+        const canonical = realpathSync(String(entry.path))
+        owners.set(canonical, [...(owners.get(canonical) ?? []), String(entry.id)])
+      }
+
+      expect(sizes).toEqual([9, 7])
+      expect(outcome.reloads).toBe(2)
+      expect(fake.editor.list()).toHaveLength(7)
+      expect(owners.size).toBe(7)
+      expect([...owners.values()].every((ids) => ids.length === 1)).toBe(true)
+      expect(fake.editor.get("deploy")).toEqual(natives[0])
+      expect(fake.editor.get("foo")).toEqual(natives[1])
+      expect(outcome.diagnostics.filter((entry) => entry.startsWith("dedupe:"))).toHaveLength(2)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe-settle-timeout:"))).toBe(false)
     } finally {
       await unlink(alias)
       await fixture.cleanup()
