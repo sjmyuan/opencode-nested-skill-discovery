@@ -1,5 +1,6 @@
+import type { Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
-import { resolve } from "node:path"
+import { join, resolve } from "node:path"
 import {
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
@@ -23,6 +24,14 @@ export interface ScanOptions {
   readonly excludeRoots?: readonly string[]
 }
 
+/** Kind → the two directory segments that make a directory a skill root (PD1). */
+const SKILL_ROOT_SEGMENTS: Record<SkillRootKind, readonly [string, string]> = {
+  "opencode-skills": [".opencode", "skills"],
+  "opencode-skill": [".opencode", "skill"],
+  "claude-skills": [".claude", "skills"],
+  "agents-skills": [".agents", "skills"],
+}
+
 const DIAGNOSTIC_LIMIT = 200
 
 interface State {
@@ -35,12 +44,18 @@ interface State {
   diagnosticsTruncated: boolean
 }
 
+interface Context {
+  readonly limits: ScanLimits
+  readonly prune: ReadonlySet<string>
+  readonly markers: readonly SubprojectMarker[]
+  readonly roots: readonly SkillRootKind[]
+  readonly state: State
+  readonly emit: (message: string) => void
+}
+
 export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const started = performance.now()
   const limits = options.limits ?? DEFAULT_SCAN_LIMITS
-  const prune = new Set(options.prune ?? PRUNE_DIRECTORIES)
-  const markers = options.markers ?? SUBPROJECT_MARKERS
-  const roots = options.skillRoots ?? SKILL_ROOT_DIRECTORIES
   const state: State = {
     candidates: [],
     diagnostics: [],
@@ -60,6 +75,15 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
       state.diagnosticsTruncated = true
       state.diagnostics.push("diagnostics-truncated: further diagnostics omitted")
     }
+  }
+
+  const context: Context = {
+    limits,
+    prune: new Set(options.prune ?? PRUNE_DIRECTORIES),
+    markers: options.markers ?? SUBPROJECT_MARKERS,
+    roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
+    state,
+    emit,
   }
 
   const finish = (): ScanResult => ({
@@ -84,33 +108,110 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     return finish()
   }
 
-  void prune
-  void markers
-  void roots
-
-  await visit(location, "")
-
-  async function visit(dir: string, rel: string): Promise<void> {
-    if (state.directories >= limits.maxDirectories) {
-      state.truncated = true
-      emit(`budget-directories: maxDirectories=${limits.maxDirectories}`)
-      return
-    }
-    state.directories += 1
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch (error) {
-      emit(`unreadable-directory: ${rel === "" ? "." : rel} (${describe(error)})`)
-      return
-    }
-    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
-    for (const entry of entries) {
-      void entry
-    }
-  }
+  await walk(context, location, "")
 
   return finish()
+}
+
+async function walk(context: Context, dir: string, rel: string): Promise<void> {
+  const entries = await openDirectory(context, dir, rel)
+  if (entries === null) return
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const child = join(dir, entry.name)
+    const childRel = joinRel(rel, entry.name)
+    if (await openRoots(context, entry.name, child, childRel)) continue
+    await walk(context, child, childRel)
+  }
+}
+
+/** Opens every configured skill root whose leading segment is `name` (PD3). */
+async function openRoots(context: Context, name: string, dir: string, rel: string): Promise<boolean> {
+  let opened = false
+  for (const kind of context.roots) {
+    const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
+    if (leading !== name) continue
+    const root = join(dir, leaf)
+    if (!(await isDirectory(root))) continue
+    opened = true
+    await walkRoot(context, root, joinRel(rel, leaf), kind, true)
+  }
+  return opened
+}
+
+async function walkRoot(
+  context: Context,
+  dir: string,
+  rel: string,
+  kind: SkillRootKind,
+  atRoot: boolean,
+): Promise<void> {
+  const entries = await openDirectory(context, dir, rel)
+  if (entries === null) return
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      await walkRoot(context, join(dir, entry.name), joinRel(rel, entry.name), kind, false)
+      continue
+    }
+    if (!entry.isFile()) continue
+    const eligible = atRoot ? entry.name.endsWith(".md") : entry.name === "SKILL.md"
+    if (!eligible) continue
+    await accept(context, join(dir, entry.name), kind)
+  }
+}
+
+async function accept(context: Context, path: string, kind: SkillRootKind): Promise<void> {
+  context.state.files += 1
+  context.state.candidates.push({
+    path,
+    realPath: (await canonical(path)) ?? path,
+    subproject: "",
+    root: kind,
+    markers: [],
+  })
+}
+
+async function openDirectory(
+  context: Context,
+  dir: string,
+  rel: string,
+): Promise<Dirent<string>[] | null> {
+  if (context.state.directories >= context.limits.maxDirectories) {
+    context.state.truncated = true
+    context.emit(`budget-directories: maxDirectories=${context.limits.maxDirectories}`)
+    return null
+  }
+  context.state.directories += 1
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+    return entries
+  } catch (error) {
+    context.emit(`unreadable-directory: ${rel === "" ? "." : rel} (${describe(error)})`)
+    return null
+  }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function canonical(path: string): Promise<string | null> {
+  try {
+    return await realpath(path)
+  } catch {
+    return null
+  }
+}
+
+function joinRel(rel: string, name: string): string {
+  return rel === "" ? name : `${rel}/${name}`
 }
 
 function compareCandidates(left: ScanCandidate, right: ScanCandidate): number {
