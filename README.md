@@ -28,7 +28,7 @@ and scores its claims C1–C5, reporting an unmet timing claim as `unproven` rat
 
 ## Requirements
 
-- opencode `v2.0.26` (`@opencode/plugin` is pinned to `2.0.26`, `package.json:12-16`)
+- opencode `v2.0.26` (`@opencode/plugin` is pinned to `2.0.26`, `package.json:14`)
 - Bun, provided by opencode — the plugin runs inside the host
 - Node `v25.2.1` + npm for the development toolchain only
 
@@ -92,7 +92,7 @@ Detail and the full limit list: [docs/limits.md](docs/limits.md).
 | Display caps | name 80 code points · description 500 |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
-| Duplicate | a nested entry duplicating a native skill's path is suppressed, at the latest about 4 s after a refresh |
+| Duplicate | a nested entry duplicating a native skill's path is suppressed on the refresh that sees it; when the foreign tier still looks incomplete, at the latest about 4 s after that refresh — otherwise on the next refresh |
 | Scale | around 50 nested entries is the point to revisit on-demand listing |
 
 A truncated scan still advertises what it found. No limit is configurable in this release.
