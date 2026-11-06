@@ -25,9 +25,7 @@ import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 const DIAGNOSTIC_LIMIT = 200
-const DEDUPE_SETTLE_INTERVAL_MS = 50
-const DEDUPE_SETTLE_MIN_MS = 750
-const DEDUPE_SETTLE_TIMEOUT_MS = 1000
+const DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000] as const
 
 async function canonicalDirectory(target: string): Promise<string> {
   try {
@@ -47,66 +45,11 @@ async function canonicalPathOf(target: string): Promise<string> {
 
 type SkillList = Awaited<ReturnType<Plugin.Context["skill"]["list"]>>
 
-const delay = (ms: number): Promise<void> => new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
-
 const foreignIdsOf = (list: SkillList, ownedIds: ReadonlySet<string>): ReadonlySet<string> =>
   new Set(list.data.filter((entry) => !ownedIds.has(String(entry.id))).map((entry) => String(entry.id)))
 
-const sameIds = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
-  left.size === right.size && [...left].every((id) => right.has(id))
-
 const containsAll = (superset: ReadonlySet<string>, subset: ReadonlySet<string>): boolean =>
   [...subset].every((id) => superset.has(id))
-
-interface SettleInput {
-  readonly read: () => Promise<SkillList>
-  readonly ownedIds: ReadonlySet<string>
-  readonly expected: ReadonlySet<string> | undefined
-}
-
-interface SettleResult {
-  readonly list: SkillList
-  readonly timedOut: boolean
-  readonly elapsed: number
-}
-
-async function settleForeignTier({ read, ownedIds, expected }: SettleInput): Promise<SettleResult> {
-  const minReads = Math.ceil(DEDUPE_SETTLE_MIN_MS / DEDUPE_SETTLE_INTERVAL_MS)
-  const maxReads = Math.ceil(DEDUPE_SETTLE_TIMEOUT_MS / DEDUPE_SETTLE_INTERVAL_MS)
-  let reads = 0
-  let list = await read()
-  reads += 1
-  let ids = foreignIdsOf(list, ownedIds)
-
-  if (expected === undefined && ids.size === 0) return { list, timedOut: false, elapsed: 0 }
-
-  if (expected !== undefined && containsAll(ids, expected)) {
-    const confirmation = await read()
-    const confirmed = foreignIdsOf(confirmation, ownedIds)
-    if (sameIds(ids, confirmed)) return { list: confirmation, timedOut: false, elapsed: 0 }
-    list = confirmation
-    ids = confirmed
-  }
-
-  while (reads < maxReads) {
-    await delay(DEDUPE_SETTLE_INTERVAL_MS)
-
-    const next = await read()
-    reads += 1
-    const nextIds = foreignIdsOf(next, ownedIds)
-
-    const expectedPresent = expected === undefined || containsAll(nextIds, expected)
-
-    if (sameIds(ids, nextIds) && nextIds.size > 0 && expectedPresent && reads >= minReads) {
-      return { list: next, timedOut: false, elapsed: reads * DEDUPE_SETTLE_INTERVAL_MS }
-    }
-
-    list = next
-    ids = nextIds
-  }
-
-  return { list, timedOut: true, elapsed: reads * DEDUPE_SETTLE_INTERVAL_MS }
-}
 
 function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
   if (diagnostics.length <= DIAGNOSTIC_LIMIT) return diagnostics
@@ -305,6 +248,11 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let disposed = false
   let followUp = false
   let settledForeignIds: ReadonlySet<string> | undefined
+  let dedupeGeneration = 0
+  let deferredTimers: ReturnType<typeof setTimeout>[] = []
+  let deferredRunning = false
+  let deferredCorrected = false
+  const deferredDiagnostics: string[] = []
   const replayDiagnostics: string[] = []
   const watchDiagnostics: string[] = []
 
@@ -434,7 +382,14 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const runRefresh = async (): Promise<RefreshOutcome> => {
     if (disposed) return record(fail(["disposed"]))
 
-    const diagnostics: string[] = [...replayDiagnostics.splice(0), ...watchDiagnostics.splice(0)]
+    dedupeGeneration += 1
+    clearDeferredTimers()
+
+    const diagnostics: string[] = [
+      ...replayDiagnostics.splice(0),
+      ...deferredDiagnostics.splice(0),
+      ...watchDiagnostics.splice(0),
+    ]
     const base = await canonicalDirectory(ctx.location.directory)
     canonical = base
     const nativeRoots = await resolveNativeRoots(nativeInput())
@@ -502,27 +457,19 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     let reloads = 1
     const ownedIds = new Set(current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)))
-    const hasCandidates = current.snapshots.some((subproject) => subproject.skills.length > 0)
+    const hadCandidates = current.snapshots.some((subproject) => subproject.skills.length > 0)
+    const previousExpected = settledForeignIds
 
     let foreign: SkillList["data"] = []
+    let foreignIds: ReadonlySet<string> | undefined
 
-    if (hasCandidates) {
-      const settled = await runStage(diagnostics, "list", () =>
-        settleForeignTier({
-          read: () => ctx.skill.list(),
-          ownedIds,
-          expected: settledForeignIds,
-        }),
-      )
-      if (!settled.ok) return record(fail(diagnostics, reloads))
+    if (hadCandidates) {
+      const listed = await runStage(diagnostics, "list", () => ctx.skill.list())
+      if (!listed.ok) return record(fail(diagnostics, reloads))
 
-      if (settled.value.timedOut) {
-        diagnostics.push(`dedupe-settle-timeout: ${settled.value.elapsed}`)
-      } else {
-        settledForeignIds = foreignIdsOf(settled.value.list, ownedIds)
-      }
-
-      foreign = settled.value.list.data.filter((entry) => !ownedIds.has(String(entry.id)))
+      foreignIds = foreignIdsOf(listed.value, ownedIds)
+      settledForeignIds = foreignIds
+      foreign = listed.value.data.filter((entry) => !ownedIds.has(String(entry.id)))
     }
 
     const foreignPaths = new Set(
@@ -550,6 +497,17 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
       const correctedReload = await runStage(diagnostics, "reload", () => ctx.skill.reload())
       if (!correctedReload.ok) return record(fail(diagnostics, reloads - 1))
+    }
+
+    const hasNested = current.snapshots.some((subproject) => subproject.skills.length > 0)
+    const incomplete =
+      foreignIds !== undefined &&
+      (foreignIds.size === 0
+        ? (previousExpected?.size ?? 0) > 0
+        : previousExpected === undefined || !containsAll(foreignIds, previousExpected))
+
+    if (hasNested && incomplete) {
+      scheduleDeferredDedupe(dedupeGeneration, base, persisted.value.version, reloads === 1)
     }
 
     return record({
@@ -603,10 +561,85 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     return activated
   }
 
+  function clearDeferredTimers(): void {
+    for (const timer of deferredTimers) clearTimeout(timer)
+    deferredTimers = []
+  }
+
+  function scheduleDeferredDedupe(
+    generation: number,
+    base: string,
+    version: number,
+    allowCorrection: boolean,
+  ): void {
+    deferredCorrected = false
+
+    for (const delayMs of DEDUPE_DEFERRED_DELAYS_MS) {
+      const timer = setTimeout(
+        () => runDeferredCheck(generation, base, version, allowCorrection).catch(() => undefined),
+        delayMs,
+      )
+      timer.unref?.()
+      deferredTimers.push(timer)
+    }
+  }
+
+  async function runDeferredCheck(
+    generation: number,
+    base: string,
+    version: number,
+    allowCorrection: boolean,
+  ): Promise<void> {
+    if (disposed || generation !== dedupeGeneration || inFlight !== undefined || deferredRunning) return
+    deferredRunning = true
+
+    try {
+      const listed = await ctx.skill.list()
+      const ownedIds = new Set(
+        current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)),
+      )
+      settledForeignIds = foreignIdsOf(listed, ownedIds)
+
+      if (!allowCorrection || deferredCorrected) return
+      if (disposed || generation !== dedupeGeneration || inFlight !== undefined) return
+
+      const foreign = listed.data.filter((entry) => !ownedIds.has(String(entry.id)))
+      const foreignPaths = new Set(
+        await Promise.all(foreign.map((entry) => canonicalPathOf(String(entry.path)))),
+      )
+      const suppressed = selectSuppressed(
+        current.snapshots.flatMap((subproject) => subproject.skills),
+        foreignPaths,
+      )
+      if (suppressed.length === 0) return
+
+      const corrected = withoutEntries(current, new Set(suppressed))
+      const written = await persistRegistry(ctx.storage, {
+        location: base,
+        snapshots: corrected.snapshots,
+        version,
+      })
+      if (!written.ok) {
+        deferredDiagnostics.push(...written.diagnostics)
+        return
+      }
+
+      current = corrected
+      deferredCorrected = true
+      await ctx.skill.reload()
+    } catch (error) {
+      deferredDiagnostics.push(`dedupe-deferred: ${reasonOf(error)}`)
+    } finally {
+      deferredRunning = false
+    }
+  }
+
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
     followUp = false
+    dedupeGeneration += 1
+    clearDeferredTimers()
 
     debouncer?.clear()
     watchers?.dispose()
