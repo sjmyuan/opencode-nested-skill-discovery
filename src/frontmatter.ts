@@ -86,13 +86,16 @@ export function parseSkillFrontmatter(text: string, filePath: string): Frontmatt
 
     const indent = indentOf(line)
     const content = line.trim()
+    if (indent > 0 && parent !== "metadata") continue
+
     const separator = content.indexOf(":")
-    if (separator < 0) return { ok: false, reason: `unparsable line ${index + 1}: ${content}` }
+    if (separator < 0) {
+      if (indent > 0) continue
+      return { ok: false, reason: `unparsable line ${index + 1}: ${content}` }
+    }
 
     const key = content.slice(0, separator).trim()
     const value = content.slice(separator + 1).trim()
-
-    if (indent > 0 && parent !== "metadata") continue
 
     const target = indent > 0 ? metadata : scalars
     if (indent === 0) parent = ""
@@ -120,7 +123,6 @@ export function parseSkillFrontmatter(text: string, filePath: string): Frontmatt
       continue
     }
 
-    if (metadata.has(key)) continue
     metadata.set(key, unquote(value))
   }
 

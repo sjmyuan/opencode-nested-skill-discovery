@@ -55,6 +55,21 @@ describe("supported frontmatter", () => {
     if (!result.ok) return
     expect(result.frontmatter).toEqual({ name: "deploy" })
   })
+  it("ignores list values under unknown keys", () => {
+    const result = parse(["name: deploy", "allowed-tools:", "  - Read", "  - Grep"])
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.frontmatter).toEqual({ name: "deploy" })
+  })
+
+  it("ignores a list nested inside metadata", () => {
+    const result = parse(["metadata:", "  opencode/autoinvoke: true", "  tags:", "    - a"])
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.frontmatter).toEqual({ autoinvoke: true })
+  })
 })
 
 describe("autoinvoke coercion", () => {
