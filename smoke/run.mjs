@@ -208,7 +208,7 @@ async function phaseUnion(fixture, isolation) {
         realpathSync(plugin.source.path).includes(realpathSync(worktree().root)),
     )
 
-  const first = await poll(() => api(server.base, server.password, "/api/plugin", { location: fixture.alias }), {
+  await poll(() => api(server.base, server.password, "/api/plugin", { location: fixture.alias }), {
     until: active,
     timeoutMs: 30_000,
     intervalMs: 250,
@@ -227,7 +227,7 @@ async function phaseUnion(fixture, isolation) {
     },
   )
 
-  return { server, location, first, plugins: settledPlugins.value, skills: settledSkills.value, settledSkills }
+  return { server, location, plugins: settledPlugins.value, skills: settledSkills.value }
 }
 
 function claimC1(fixture, union) {
