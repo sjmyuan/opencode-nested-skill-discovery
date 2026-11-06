@@ -100,7 +100,7 @@ describe("discovery rules", () => {
     expect([...PRUNE_DIRECTORIES].sort()).toEqual(ADR_PRUNE_DIRECTORIES)
   })
 
-  it("detects exactly the R6 subproject markers", () => {
+  it("enumerates the eight R6 subproject marker kinds", () => {
     expect([...SUBPROJECT_MARKERS].sort()).toEqual(ADR_SUBPROJECT_MARKERS)
   })
 

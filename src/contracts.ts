@@ -102,6 +102,9 @@ export const SKILL_ROOT_DIRECTORIES: readonly SkillRootKind[] = [
   "agents-skills",
 ]
 
+// Symbolic kinds, not file names; F2 owns the kind → R6 name map:
+// .opencode/skills, .opencode/skill, .claude/skills, .agents/skills,
+// AGENTS.md, CLAUDE.md, .git (directory or file), .hg
 export const SUBPROJECT_MARKERS: readonly SubprojectMarker[] = [
   ...SKILL_ROOT_DIRECTORIES,
   "agents-md",
