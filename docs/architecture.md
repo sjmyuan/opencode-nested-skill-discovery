@@ -43,15 +43,15 @@ stops the run and keeps the previous snapshot (see [Failure model](#failure-mode
 
 | # | Stage | Where |
 |---|---|---|
-| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:29-35`, `267-268` |
+| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:29-35`, `363-364` |
 | 2 | Resolve the native skill roots to exclude | `src/registry.ts:365`, `src/native.ts:37-49` |
 | 3 | Scan the location for skill candidates | `src/registry.ts:395-402`, `src/scan.ts:74-136` |
 | 4 | Read, parse, and dedupe candidates into indexed skills | `src/registry.ts:404-408`, `src/indexer.ts:180-231` |
-| 5 | Compose display names and assemble frozen entries | `src/registry.ts:410-414`, `58-77` |
+| 5 | Compose display names and assemble frozen entries | `src/registry.ts:410-414`, `63-82` |
 | 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:94-145` |
 | 7 | Persist manifest, cache, and version | `src/registry.ts:416-421`, `src/manifest.ts:110-187` |
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:423-426` |
-| 9 | List the registry, suppress entries native discovery already owns, reload once more if anything was suppressed | `src/registry.ts:428-460`, `170-186` |
+| 9 | List the registry, suppress entries native discovery already owns, reload once more if anything was suppressed | `src/registry.ts:428-460`, `186-202` |
 
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
 the swap must be visible before the host rebuilds its skill list.
@@ -104,7 +104,7 @@ path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeTex
 500 in `assembleEntries` (`src/registry.ts:66-75`, `src/contracts.ts:82-83`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:81`, `178`, `src/indexer.ts:170`).
+canonical path, never on the name (`src/registry.ts:81`, `194`, `src/indexer.ts:170`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `166-168`).
