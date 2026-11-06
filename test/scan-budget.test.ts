@@ -72,3 +72,55 @@ describe("directory budget", () => {
     expect(result.candidates).toHaveLength(6)
   })
 })
+
+describe("file budget", () => {
+  async function threeCandidates(): Promise<ScanFixture> {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a.md")
+    await f.write("B/.opencode/skills/b.md")
+    await f.write("C/.opencode/skills/c.md")
+    return f
+  }
+
+  it("stops collecting candidates at maxFiles and reports it", async () => {
+    const f = await threeCandidates()
+    const limits = { ...DEFAULT_SCAN_LIMITS, maxFiles: 2 }
+
+    const limited = await scanSkills({ location: f.root, limits })
+    const again = await scanSkills({ location: f.root, limits })
+
+    expect(limited.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/a.md",
+      "B/.opencode/skills/b.md",
+    ])
+    expect(limited.stats.files).toBe(2)
+    expect(limited.truncated).toBe(true)
+    expect(limited.diagnostics).toHaveLength(1)
+    expect(limited.diagnostics[0]).toContain("maxFiles")
+    expect(limited.diagnostics[0]).toContain("2")
+    expect(again.candidates).toEqual(limited.candidates)
+  })
+
+  it("honours a budget of one file", async () => {
+    const f = await threeCandidates()
+
+    const result = await scanSkills({
+      location: f.root,
+      limits: { ...DEFAULT_SCAN_LIMITS, maxFiles: 1 },
+    })
+
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/a.md",
+    ])
+    expect(result.truncated).toBe(true)
+  })
+
+  it("keeps every candidate under the default budget", async () => {
+    const f = await threeCandidates()
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toHaveLength(3)
+    expect(result.truncated).toBe(false)
+  })
+})

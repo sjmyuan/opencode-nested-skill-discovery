@@ -39,6 +39,7 @@ interface State {
   readonly diagnostics: string[]
   directories: number
   files: number
+  accepted: number
   bytes: number
   truncated: boolean
   stopped: boolean
@@ -69,6 +70,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     diagnostics: [],
     directories: 0,
     files: 0,
+    accepted: 0,
     bytes: 0,
     truncated: false,
     stopped: false,
@@ -281,7 +283,14 @@ async function accept(
   owner: Ownership | null,
   realPath?: string,
 ): Promise<void> {
+  if (context.state.accepted >= context.limits.maxFiles) {
+    context.state.truncated = true
+    context.state.stopped = true
+    context.emit(`budget-files: maxFiles=${context.limits.maxFiles}`)
+    return
+  }
   context.state.files += 1
+  context.state.accepted += 1
   context.state.candidates.push({
     path,
     realPath: realPath ?? (await canonical(path)) ?? path,
