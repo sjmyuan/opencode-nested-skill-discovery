@@ -105,3 +105,104 @@ describe("skill root enumeration", () => {
     expect(candidate?.realPath).toBe(await realpath(candidate!.path))
   })
 })
+
+describe("markers and subproject attribution", () => {
+  it("attributes a candidate to the location itself when the location carries the root", async () => {
+    const f = await fixture()
+    await f.write(".opencode/skills/x/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.subproject).toBe("")
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+  })
+
+  it("attributes a candidate to its nearest marker-carrying ancestor", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/x/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates[0]?.subproject).toBe("A")
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+  })
+
+  it("nests subprojects and never stops the walk at the first marker", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/z/SKILL.md")
+    await f.write("A/A.1/CLAUDE.md")
+    await f.write("A/A.1/.claude/skills/y/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+    const found = result.candidates.map((candidate) => ({
+      rel: f.rel(candidate.path),
+      subproject: candidate.subproject,
+      markers: candidate.markers,
+    }))
+
+    expect(found).toEqual([
+      { rel: "A/.opencode/skills/z/SKILL.md", subproject: "A", markers: ["opencode-skills"] },
+      {
+        rel: "A/A.1/.claude/skills/y/SKILL.md",
+        subproject: "A/A.1",
+        markers: ["claude-skills", "claude-md"],
+      },
+    ])
+    expect(result.candidates.map((candidate) => candidate.subproject)).toContain("A")
+    expect(result.candidates.map((candidate) => candidate.subproject)).toContain("A/A.1")
+  })
+
+  it("treats .git as a marker whether it is a directory or a file", async () => {
+    const f = await fixture()
+    await f.mkdir("A/.git/objects")
+    await f.write("A/.opencode/skills/x/SKILL.md")
+    await f.write("B/.git", "gitdir: /tmp/elsewhere\n")
+    await f.write("B/.opencode/skills/y/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+    const bySubproject = new Map(result.candidates.map((c) => [c.subproject, c.markers]))
+
+    expect(bySubproject.get("A")).toEqual(["opencode-skills", "git"])
+    expect(bySubproject.get("B")).toEqual(["opencode-skills", "git"])
+  })
+
+  it("detects hg and agents-md markers", async () => {
+    const f = await fixture()
+    await f.mkdir("C/.hg/store")
+    await f.write("C/.opencode/skills/z/SKILL.md")
+    await f.write("D/AGENTS.md")
+    await f.write("D/.opencode/skills/w/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+    const bySubproject = new Map(result.candidates.map((c) => [c.subproject, c.markers]))
+
+    expect(bySubproject.get("C")).toEqual(["opencode-skills", "hg"])
+    expect(bySubproject.get("D")).toEqual(["opencode-skills", "agents-md"])
+  })
+
+  it("honours a replaced marker set when attributing candidates", async () => {
+    const f = await fixture()
+    await f.write("P/AGENTS.md")
+    await f.write("P/Q/.opencode/skills/s.md")
+
+    const replaced = await scanSkills({ location: f.root, markers: ["agents-md"] })
+    const fallback = await scanSkills({ location: f.root })
+
+    expect(replaced.candidates[0]?.subproject).toBe("P")
+    expect(replaced.candidates[0]?.markers).toEqual(["agents-md"])
+    expect(fallback.candidates[0]?.subproject).toBe("P/Q")
+    expect(fallback.candidates[0]?.markers).toEqual(["opencode-skills"])
+  })
+
+  it("joins nested subproject segments with forward slashes", async () => {
+    const f = await fixture()
+    await f.write("one/two/three/CLAUDE.md")
+    await f.write("one/two/three/.claude/skills/deep/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates[0]?.subproject).toBe("one/two/three")
+    expect(result.candidates[0]?.subproject).not.toContain("\\")
+  })
+})

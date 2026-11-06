@@ -44,10 +44,15 @@ interface State {
   diagnosticsTruncated: boolean
 }
 
+interface Ownership {
+  readonly rel: string
+  readonly markers: readonly SubprojectMarker[]
+}
+
 interface Context {
   readonly limits: ScanLimits
   readonly prune: ReadonlySet<string>
-  readonly markers: readonly SubprojectMarker[]
+  readonly markers: ReadonlySet<SubprojectMarker>
   readonly roots: readonly SkillRootKind[]
   readonly state: State
   readonly emit: (message: string) => void
@@ -80,7 +85,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const context: Context = {
     limits,
     prune: new Set(options.prune ?? PRUNE_DIRECTORIES),
-    markers: options.markers ?? SUBPROJECT_MARKERS,
+    markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
     roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
     state,
     emit,
@@ -108,26 +113,33 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     return finish()
   }
 
-  await walk(context, location, "")
+  await walk(context, location, "", null)
 
   return finish()
 }
 
-async function walk(context: Context, dir: string, rel: string): Promise<void> {
+async function walk(context: Context, dir: string, rel: string, parent: Ownership | null): Promise<void> {
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
+  const owner = (await probeMarkers(context, dir, rel)) ?? parent
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const child = join(dir, entry.name)
     const childRel = joinRel(rel, entry.name)
-    if (await openRoots(context, entry.name, child, childRel)) continue
-    await walk(context, child, childRel)
+    if (await openRoots(context, entry.name, child, childRel, owner)) continue
+    await walk(context, child, childRel, owner)
   }
 }
 
 /** Opens every configured skill root whose leading segment is `name` (PD3). */
-async function openRoots(context: Context, name: string, dir: string, rel: string): Promise<boolean> {
+async function openRoots(
+  context: Context,
+  name: string,
+  dir: string,
+  rel: string,
+  owner: Ownership | null,
+): Promise<boolean> {
   let opened = false
   for (const kind of context.roots) {
     const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
@@ -135,7 +147,7 @@ async function openRoots(context: Context, name: string, dir: string, rel: strin
     const root = join(dir, leaf)
     if (!(await isDirectory(root))) continue
     opened = true
-    await walkRoot(context, root, joinRel(rel, leaf), kind, true)
+    await walkRoot(context, root, joinRel(rel, leaf), kind, true, owner)
   }
   return opened
 }
@@ -146,31 +158,66 @@ async function walkRoot(
   rel: string,
   kind: SkillRootKind,
   atRoot: boolean,
+  parent: Ownership | null,
 ): Promise<void> {
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
+  // Markers nest inside an open root too: only the walk is unbounded, not the marker probe (PD3).
+  const owner = (await probeMarkers(context, dir, rel)) ?? parent
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      await walkRoot(context, join(dir, entry.name), joinRel(rel, entry.name), kind, false)
+      await walkRoot(context, join(dir, entry.name), joinRel(rel, entry.name), kind, false, owner)
       continue
     }
     if (!entry.isFile()) continue
     const eligible = atRoot ? entry.name.endsWith(".md") : entry.name === "SKILL.md"
     if (!eligible) continue
-    await accept(context, join(dir, entry.name), kind)
+    await accept(context, join(dir, entry.name), kind, owner)
   }
 }
 
-async function accept(context: Context, path: string, kind: SkillRootKind): Promise<void> {
+async function accept(
+  context: Context,
+  path: string,
+  kind: SkillRootKind,
+  owner: Ownership | null,
+): Promise<void> {
   context.state.files += 1
   context.state.candidates.push({
     path,
     realPath: (await canonical(path)) ?? path,
-    subproject: "",
+    subproject: owner?.rel ?? "",
     root: kind,
-    markers: [],
+    markers: owner === null ? [] : [...owner.markers],
   })
+}
+
+/** The marker kinds observed on `dir`, in SUBPROJECT_MARKERS order; null when none (PD8). */
+async function probeMarkers(context: Context, dir: string, rel: string): Promise<Ownership | null> {
+  const found: SubprojectMarker[] = []
+  for (const kind of SUBPROJECT_MARKERS) {
+    if (!context.markers.has(kind)) continue
+    if (await hasMarker(dir, kind)) found.push(kind)
+  }
+  return found.length === 0 ? null : { rel, markers: found }
+}
+
+async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> {
+  switch (kind) {
+    case "agents-md":
+      return isFile(join(dir, "AGENTS.md"))
+    case "claude-md":
+      return isFile(join(dir, "CLAUDE.md"))
+    case "git":
+      return exists(join(dir, ".git"))
+    case "hg":
+      return isDirectory(join(dir, ".hg"))
+    default: {
+      const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
+      return isDirectory(join(dir, leading, leaf))
+    }
+  }
 }
 
 async function openDirectory(
@@ -191,6 +238,23 @@ async function openDirectory(
   } catch (error) {
     context.emit(`unreadable-directory: ${rel === "" ? "." : rel} (${describe(error)})`)
     return null
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch {
+    return false
   }
 }
 
