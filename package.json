@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
+  "devDependencies": {
     "@opencode/plugin": "2.0.26",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
