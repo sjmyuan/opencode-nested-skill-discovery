@@ -133,6 +133,7 @@ async function walk(
   const childDepth = depth + 1
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
+    if (context.prune.has(entry.name)) continue
     const child = join(dir, entry.name)
     const childRel = joinRel(rel, entry.name)
     // A root of a visited directory is opened without a depth check; only ordinary descent is capped.
@@ -177,6 +178,7 @@ async function walkRoot(
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
+      if (context.prune.has(entry.name)) continue
       await walkRoot(context, join(dir, entry.name), joinRel(rel, entry.name), kind, false, owner)
       continue
     }
