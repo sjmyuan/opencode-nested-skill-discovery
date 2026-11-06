@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
-import { basename, join, resolve, sep } from "node:path"
+import { basename, join, relative, resolve, sep } from "node:path"
 import {
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
@@ -289,7 +289,26 @@ async function accept(
     context.emit(`budget-files: maxFiles=${context.limits.maxFiles}`)
     return
   }
+
+  let info
+  try {
+    info = await stat(path)
+  } catch (error) {
+    context.emit(`unreadable-file: ${relativeToLocation(context, path)} (${describe(error)})`)
+    return
+  }
   context.state.files += 1
+
+  const relPath = relativeToLocation(context, path)
+  if (info.size > context.limits.maxFileBytes) {
+    context.state.truncated = true
+    context.emit(
+      `budget-file-bytes: ${relPath} size=${info.size} maxFileBytes=${context.limits.maxFileBytes}`,
+    )
+    return
+  }
+
+  context.state.bytes += info.size
   context.state.accepted += 1
   context.state.candidates.push({
     path,
@@ -298,6 +317,11 @@ async function accept(
     root: kind,
     markers: owner === null ? [] : [...owner.markers],
   })
+}
+
+function relativeToLocation(context: Context, path: string): string {
+  const rel = relative(context.location, path)
+  return rel === "" ? "." : rel.split(sep).join("/")
 }
 
 /** The marker kinds observed on `dir`, in SUBPROJECT_MARKERS order; null when none (PD8). */

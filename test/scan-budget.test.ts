@@ -124,3 +124,47 @@ describe("file budget", () => {
     expect(result.truncated).toBe(false)
   })
 })
+
+describe("per-file byte budget", () => {
+  it("excludes an oversized candidate and reports it", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/big/SKILL.md", "x".repeat(50))
+
+    const result = await scanSkills({
+      location: f.root,
+      limits: { ...DEFAULT_SCAN_LIMITS, maxFileBytes: 10 },
+    })
+
+    expect(result.candidates).toEqual([])
+    expect(result.truncated).toBe(true)
+    expect(result.diagnostics).toHaveLength(1)
+    expect(result.diagnostics[0]).toContain("A/.opencode/skills/big/SKILL.md")
+    expect(result.diagnostics[0]).toContain("10")
+  })
+
+  it("accepts a candidate inside the per-file budget and sums its size", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/small.md", "12345")
+
+    const result = await scanSkills({
+      location: f.root,
+      limits: { ...DEFAULT_SCAN_LIMITS, maxFileBytes: 10 },
+    })
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.stats.bytes).toBe(5)
+    expect(result.truncated).toBe(false)
+  })
+
+  it("stats without reading content, so an unreadable file is still a candidate", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/locked.md", "123456789012")
+    await f.chmod("A/.opencode/skills/locked.md", 0o000)
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.stats.bytes).toBe(12)
+    expect(result.diagnostics).toEqual([])
+  })
+})
