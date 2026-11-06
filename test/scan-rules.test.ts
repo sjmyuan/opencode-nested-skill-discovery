@@ -288,3 +288,37 @@ describe("excludeRoots on an opened root", () => {
     expect(result.diagnostics).toEqual([])
   })
 })
+
+describe("symlinks that could never be candidates", () => {
+  it("stays silent for a pruned directory symlink", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    await outside.write("dir/.opencode/skills/x/SKILL.md")
+    await f.write("A/.opencode/skills/keep.md")
+    await f.symlink("A/dist", join(outside.root, "dir"))
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/keep.md",
+    ])
+  })
+
+  it("stays silent for an ineligible file symlink", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    const target = await outside.write("real.md")
+    await f.write("A/.opencode/skills/keep.md")
+    await f.symlink("A/.opencode/skills/sub/notes.md", target)
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/keep.md",
+    ])
+  })
+})

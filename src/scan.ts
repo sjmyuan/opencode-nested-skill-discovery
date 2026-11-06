@@ -150,12 +150,13 @@ async function walk(
   const childDepth = depth + 1
   for (const entry of entries) {
     if (context.state.stopped) return
+    // Pruning precedes every classification, so a pruned link is as silent as a pruned directory (F-5).
+    if (context.prune.has(entry.name)) continue
     if (entry.isSymbolicLink()) {
       await inspectLink(context, join(dir, entry.name), joinRel(rel, entry.name))
       continue
     }
     if (!entry.isDirectory()) continue
-    if (context.prune.has(entry.name)) continue
     const child = join(dir, entry.name)
     if (isExcluded(context, child)) continue
     const childRel = joinRel(rel, entry.name)
@@ -285,6 +286,8 @@ async function acceptLink(
     context.emit(`directory-symlink: ${rel}`)
     return
   }
+  // An ineligible link could never be a candidate, so its target or brokenness is not worth a diagnostic (F-5).
+  if (!eligible(basename(path), atRoot)) return
   if (link.type === "broken") {
     context.emit(`file-symlink-broken: ${rel}`)
     return
@@ -293,7 +296,6 @@ async function acceptLink(
     context.emit(`file-symlink-outside: ${rel}`)
     return
   }
-  if (!eligible(basename(path), atRoot)) return
   await accept(context, path, kind, owner, link.realPath)
 }
 
