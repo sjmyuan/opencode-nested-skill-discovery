@@ -113,22 +113,32 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     return finish()
   }
 
-  await walk(context, location, "", null)
+  await walk(context, location, "", null, 0)
 
   return finish()
 }
 
-async function walk(context: Context, dir: string, rel: string, parent: Ownership | null): Promise<void> {
+async function walk(
+  context: Context,
+  dir: string,
+  rel: string,
+  parent: Ownership | null,
+  depth: number,
+): Promise<void> {
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
   const owner = (await probeMarkers(context, dir, rel)) ?? parent
 
+  // PD3: the cap measures subproject distance from the location, not skill-file depth.
+  const childDepth = depth + 1
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const child = join(dir, entry.name)
     const childRel = joinRel(rel, entry.name)
+    // A root of a visited directory is opened without a depth check; only ordinary descent is capped.
     if (await openRoots(context, entry.name, child, childRel, owner)) continue
-    await walk(context, child, childRel, owner)
+    if (childDepth > context.limits.maxDepth) continue
+    await walk(context, child, childRel, owner, childDepth)
   }
 }
 

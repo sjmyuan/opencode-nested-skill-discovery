@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { realpath } from "node:fs/promises"
 import { join } from "node:path"
+import { DEFAULT_SCAN_LIMITS } from "../src/contracts.ts"
 import { scanSkills } from "../src/scan.ts"
 import { createFixture, type ScanFixture } from "./support/scan-fixtures.ts"
 
@@ -204,5 +205,91 @@ describe("markers and subproject attribution", () => {
 
     expect(result.candidates[0]?.subproject).toBe("one/two/three")
     expect(result.candidates[0]?.subproject).not.toContain("\\")
+  })
+})
+
+describe("depth boundary on subprojects", () => {
+  it("discovers a depth-5 subproject whose skill file sits at depth 7", async () => {
+    const f = await fixture()
+    await f.write("L1/L2/L3/L4/L5/.opencode/skills/deep/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.truncated).toBe(false)
+    expect(result.diagnostics).toEqual([])
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.subproject).toBe("L1/L2/L3/L4/L5")
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+  })
+
+  it("hides a subproject that sits at depth 6", async () => {
+    const f = await fixture()
+    await f.write("L1/L2/L3/L4/L5/L6/.opencode/skills/six/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toEqual([])
+    expect(result.truncated).toBe(false)
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("moves the boundary with maxDepth", async () => {
+    const f = await fixture()
+    await f.write("L1/L2/L3/L4/.opencode/skills/four/SKILL.md")
+    await f.write("L1/L2/L3/L4/L5/.opencode/skills/five/SKILL.md")
+
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 4 } })
+
+    expect(result.truncated).toBe(false)
+    expect(result.candidates.map((candidate) => candidate.subproject).sort()).toEqual(["L1/L2/L3/L4"])
+  })
+
+  it("descent inside an open skill root is not depth-limited and visits the root once", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a/b/c/d/e/f/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.truncated).toBe(false)
+    expect(result.diagnostics).toEqual([])
+    expect(result.candidates).toHaveLength(1)
+    expect(result.stats.files).toBe(1)
+    expect(result.stats.directories).toBe(9)
+  })
+
+  it("opens a skill root found at the depth boundary", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a/b/SKILL.md")
+
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 1 } })
+
+    expect(result.truncated).toBe(false)
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.subproject).toBe("A")
+  })
+
+  it("treats maxDepth 0 as the location only", async () => {
+    const f = await fixture()
+    await f.write(".opencode/skills/root.md")
+    await f.write("A/.opencode/skills/x.md")
+
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 0 } })
+
+    expect(result.truncated).toBe(false)
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.subproject).toBe("")
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+  })
+
+  it("treats the location as a depth-0 subproject", async () => {
+    const f = await fixture()
+    await f.mkdir(".git/objects")
+    await f.write(".opencode/skills/x/SKILL.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]?.subproject).toBe("")
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "git"])
   })
 })
