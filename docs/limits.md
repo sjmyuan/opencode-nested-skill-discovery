@@ -1,9 +1,9 @@
 # Limits
 
-Every bound the plugin accepts, what triggers it, and what you see when it bites. The
-values are constants in `src/contracts.ts`; this release reads no plugin configuration, so
-none of them can be overridden from `opencode.json`
-(`src/registry.ts:395-397` calls the scanner without options).
+Every bound the plugin accepts, what triggers it, and what you see when it bites. The values
+are constants in `src/contracts.ts`: the refresh passes no `limits` override, so
+`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:395-397`), and this release reads no
+plugin configuration, so none of them can be changed from `opencode.json`.
 
 ## Summary
 
@@ -29,7 +29,7 @@ carries a marker — not directories between the location and the skill file
 - a subproject at depth 5 is discovered, and its `SKILL.md` may sit many levels deeper
   (`test/scan.test.ts:213-224`)
 - a subproject at depth 6 is invisible, silently and without a diagnostic
-  (`test/scan.test.ts:226-238`)
+  (`test/scan.test.ts:226-236`)
 - inside an opened skill root the walk is unbounded, so
   `A/.opencode/skills/a/b/c/d/e/f/SKILL.md` is still found (`test/scan.test.ts:248-260`)
 

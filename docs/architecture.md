@@ -32,7 +32,7 @@ subprojects *below* the location.
 | An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:24-28` |
 
 One registry exists per location instance, and a plugin list is a birth argument that stays
-immutable for that instance's lifetime (`packages/core/src/plugin/instance.ts:9-19`). A
+immutable for that instance's lifetime (`packages/core/src/plugin/instance.ts:9-17`). A
 different directory gets a fresh location context and a fresh activation
 (`packages/core/src/worktree.ts:121-126`), so the plugin registers no move hook of its own.
 

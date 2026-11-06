@@ -8,9 +8,9 @@ directory.
 
 | Requirement | Detail |
 |---|---|
-| opencode `v2.0.26` | the runtime this release targets; `@opencode/plugin` is pinned to `2.0.26` as a devDependency for types only (`package.json:12-16`) |
+| opencode `v2.0.26` | the runtime this release targets; `@opencode/plugin` is a `2.0.26` devDependency for compile-time types and the `Plugin.define` value (`index.ts:1`, `package.json:12-16`) |
 | Bun | opencode hosts plugins on Bun; the module resolution quoted below is Bun's (`packages/util/src/runtime/import.bun.ts:7-10`) |
-| Node 25 + npm | only for the development toolchain (`tsc`, `vitest`); not needed to run the plugin |
+| Node `v25.2.1` + npm | only for the development toolchain (`tsc`, `vitest`); not needed to run the plugin |
 
 Only the repository directory is required at runtime. Its `node_modules` is **not** loaded:
 opencode supplies `@opencode/plugin` and `effect` itself
@@ -82,8 +82,11 @@ with `configured plugin path must be a directory`
    `nested/subproject/<scopeToken>` — see
    [architecture.md](architecture.md#storage-model) for the raw-key namespace.
 
-If nothing appears, work through [limits.md](limits.md) first: most "missing skill" reports
-are a marker, depth, or prune boundary rather than a loading failure.
+If nothing appears, work through [limits.md](limits.md) first: confirm the subproject carries
+a marker, that it is within the depth bound, and that no directory in the path is pruned.
+Only a skill root that the plugin never discovered can be missing for those reasons; a
+discovered entry that is denied by a permission rule is absent from the guidance block for a
+different reason ([permissions.md](permissions.md)).
 
 ## Upgrading
 

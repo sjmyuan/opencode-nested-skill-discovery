@@ -10,7 +10,8 @@ the guidance-block filter calls `Permission.evaluate("skill", skill.id, …)`
 `action: "skill"`, `resources: [skill.id]` (`packages/core/src/tool/plugin/skill.ts:51-58`).
 The opencode docs page still says `skill` "matches the skill name"
 (`packages/web/src/content/docs/permissions.mdx:162`); at `v2.0.26` that sentence does not
-match the code, so ignore it and key on IDs.
+match the code, so ignore it and key on IDs. No upstream issue has been filed for the
+discrepancy.
 
 ## Rule shape
 
@@ -141,28 +142,47 @@ upgrade a configured `ask`.
 | the composer's `@` menu | `@<id>` (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | storage | `nested/manifest/<scopeToken>` holds `entries[].id` for that subproject (`src/manifest.ts:138-143`) |
 
-The storage records are namespaced by the host, so list them with the plugin prefix
-(`packages/core/src/plugin/host.ts:609-616`):
+The records live in opencode's SQLite database `opencode.db`, in the global data directory —
+`~/.local/share/opencode/opencode.db`, or `$XDG_DATA_HOME/opencode/opencode.db`, with
+`OPENCODE_DB` overriding the file and a channel suffix on non-release builds
+(`packages/cli/src/database-path.ts:4-13`, `packages/util/src/global-roots.ts:5-13`). They are
+namespaced by the host (`packages/core/src/plugin/host.ts:609-616`), so filter on the plugin
+prefix:
 
-```sql
-select key, value from kv where key like 'plugin:%:nested/manifest/%';
+```sh
+sqlite3 ~/.local/share/opencode/opencode.db \
+  "select key from kv where key like 'plugin:%:nested/manifest/%';"
 ```
+
+Everything after `plugin:<hex of the plugin id>:` is the logical key, so the listed rows read
+`nested/manifest/<scopeToken>`.
 
 ## Per-agent rules
 
-Agent rules sit after the global `permission` block in that agent's ruleset, so with
-last-match-wins they override it (`packages/core/src/config/plugin/agent.ts:84-127`):
+The native form is a `permissions` array of `{ action, resource, effect }` rules at the top
+level, and the same array under `agents.<id>` (`packages/schema/src/config.ts:54-59`,
+`packages/schema/src/config/agent.ts:21`). Global rules are appended to every agent first and
+that agent's own rules after (`packages/core/src/config/plugin/agent.ts:90-92`, `121-123`),
+so with last-match-wins the agent's rules override the global ones:
 
 ```json
 {
-  "permission": { "skill": { "nested.*": "allow" } },
-  "agent": {
+  "permissions": [
+    { "action": "skill", "resource": "nested.*", "effect": "allow" }
+  ],
+  "agents": {
     "review": {
-      "permission": { "skill": { "nested.*": "ask" } }
+      "permissions": [
+        { "action": "skill", "resource": "nested.*", "effect": "ask" }
+      ]
     }
   }
 }
 ```
+
+The v1 `agent.<id>.permission` object form still works because the config normaliser migrates
+it into `agents` (`packages/core/src/config/normalize.ts:134`, `155-164`); prefer the native
+form above for new configuration.
 
 Session-level rules, where a host or another plugin sets them, merge after the agent's and
 therefore win over both (`packages/core/src/permission.ts:158-164`,
