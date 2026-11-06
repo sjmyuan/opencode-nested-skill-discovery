@@ -13,7 +13,7 @@ export interface Snapshot {
 }
 
 export interface ManifestRecord {
-  readonly manifestVersion: string
+  readonly manifestVersion: number
   readonly scopeToken: string
   readonly directory: string
   readonly entries: readonly SkillEntry[]

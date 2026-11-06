@@ -14,6 +14,7 @@ import {
   STORAGE_KEYS,
   SUBPROJECT_MARKERS,
 } from "../src/contracts.ts"
+import type { ManifestRecord } from "../src/contracts.ts"
 
 const ADR_PRUNE_DIRECTORIES = [
   ".cache",
@@ -116,5 +117,21 @@ describe("storage keys", () => {
 
   it("namespaces subproject keys", () => {
     expect(STORAGE_KEYS.subproject("abc123")).toBe("nested/subproject/abc123")
+  })
+})
+
+describe("manifest record", () => {
+  it("types the manifest version as an integer counter", () => {
+    const sample: ManifestRecord = {
+      manifestVersion: 42,
+      scopeToken: "abc123",
+      directory: "/Users/ganggang/work",
+      entries: [],
+    }
+    const version: number = sample.manifestVersion
+
+    expect(typeof version).toBe("number")
+    expect(JSON.stringify(sample)).toContain('"manifestVersion":42')
+    expect(JSON.parse(JSON.stringify(sample)).manifestVersion).toBe(42)
   })
 })
