@@ -60,7 +60,7 @@ the swap must be visible before the host rebuilds its skill list.
 Exactly one transform is registered per registry, guarded by a `registering` promise
 (`src/registry.ts:305-324`). Refreshes reuse it and never add a second one. A refresh reloads
 once, twice when it suppresses a duplicate in the same pass, and a deferred check that later
-suppresses one reloads on its own after the refresh has returned (`src/registry.ts:629`).
+suppresses one reloads on its own after the refresh has returned (`src/registry.ts:632`).
 
 ## Discovery bounds
 
@@ -131,8 +131,8 @@ nested entry's `canonicalPath` with the **realpath** of every foreign entry's `p
 suppresses a match (`src/registry.ts:475-483`, `203-219`). Dedupe is two-phase: the immediate
 pass runs inside the refresh and emits one `dedupe: <id>` diagnostic per suppressed entry
 (`src/registry.ts:483`); when the foreign tier still looks incomplete a deferred check runs at
-1.5 s and again at 4 s (`src/registry.ts:28`, `502-511`, `569-635`). That check is silent on
-success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:630-631`).
+1.5 s and again at 4 s (`src/registry.ts:28`, `502-511`, `587-638`). That check is silent on
+success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:633-634`).
 `refresh()` returns without waiting for that check (`src/registry.ts:523-549`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
 timeout that reports failure: the deferred check simply re-lists and re-filters.
@@ -207,7 +207,7 @@ advances as soon as the scan succeeds, even if a later stage fails (`src/registr
 so only a failed scan leaves the previous set watched. `dispose()` clears the deferred timers
 and the debounce timer, closes every handle, awaits any in-flight refresh with errors
 swallowed, then disposes the hook and the transform; it is idempotent
-(`src/registry.ts:637-662`). A deferred dedupe check that is still pending can follow a
+(`src/registry.ts:640-665`). A deferred dedupe check that is still pending can follow a
 completed refresh without delaying it (`src/registry.ts:569-585`, `523-549`).
 
 Watcher, debounce, and backstop behaviour is implemented in `src/watch.ts` and
@@ -234,7 +234,7 @@ advertised list is whatever the last completed step produced.
 | The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:453-456` |
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:467-468`, `487-499` |
 | Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:327-337`, `343-371`, `388-392`, `src/plugin.ts:24-28` |
-| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:630-631` |
+| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:633-634` |
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
 (`src/registry.ts:164-171`). opencode `v2.0.26` renders no plugin log or diagnostic surface,
