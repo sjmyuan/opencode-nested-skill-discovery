@@ -15,6 +15,15 @@ import type {
   SubprojectMarker,
 } from "./contracts.ts"
 
+/**
+ * F2 bounded scan (ADR R6–R9, R17; plan PD1–PD11).
+ *
+ * Walks one location as a sorted pre-order DFS: markers nest and never stop the
+ * walk, depth is capped at the subproject boundary, an opened skill root is
+ * descended without a depth cap, and directory/file/byte budgets plus the
+ * diagnostic cap bound the result. It stats only — no content is ever read — and
+ * it never throws for a filesystem error.
+ */
 export interface ScanOptions {
   readonly location: string
   readonly limits?: ScanLimits
@@ -209,11 +218,11 @@ async function walkRoot(
   }
 }
 
+// Native glob parity (PD4): dot-md directly under the root, SKILL.md at any level below it.
 function eligible(name: string, atRoot: boolean): boolean {
   return atRoot ? name.endsWith(".md") : name === "SKILL.md"
 }
 
-// Native glob parity (PD4): dot-md directly under the root, SKILL.md at any level below it.
 type LinkTarget =
   | { readonly type: "directory" }
   | { readonly type: "file"; readonly realPath: string }
