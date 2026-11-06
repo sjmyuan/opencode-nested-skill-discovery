@@ -103,10 +103,10 @@ step (`src/indexer.ts:170` builds the ID without cutting it).
 path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeText` removes
 `<`, `>`, `"`, `&`, and control characters, collapses whitespace, and trims
 (`src/names.ts:48-55`). The entry name is capped at 80 code points and the description at
-500 in `assembleEntries` (`src/registry.ts:66-75`, `src/contracts.ts:82-83`).
+500 in `assembleEntries` (`src/registry.ts:80-99`, `src/contracts.ts:82-83`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:81`, `194`, `src/indexer.ts:170`).
+canonical path, never on the name (`src/registry.ts:98`, `211`, `src/indexer.ts:170`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `166-168`).
@@ -123,8 +123,8 @@ description-less entries from the model's guidance block
 - an entry whose ID is already present is skipped, never replaced (`src/replay.ts:29-35`)
 - nothing is removed, so native and session skills survive untouched
 - a failing `get`/`add` becomes a `replay:` diagnostic instead of an exception
-  (`src/replay.ts:32-41`), which the next refresh drains into its outcome
-  (`src/registry.ts:362`)
+  (`src/replay.ts:32-41`), which three buffer arrays drain into the next outcome
+  (`src/registry.ts:388-392`)
 
 After the first reload the registry lists what the host actually holds, then compares each
 nested entry's `canonicalPath` with the **realpath** of every foreign entry's `path` and
@@ -229,7 +229,7 @@ advertised list is whatever the last completed step produced.
 | The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:453-456` |
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:467-468`, `487-499` |
 | Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:327-337`, `343-371`, `388-392`, `src/plugin.ts:24-28` |
-| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:630-634` |
+| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:630-631` |
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
 (`src/registry.ts:164-171`). opencode `v2.0.26` renders no plugin log or diagnostic surface,

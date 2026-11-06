@@ -111,4 +111,4 @@ npm test
 ```
 
 `npm ci` installs from `package-lock.json`; the gate is `tsc --noEmit` plus `vitest run`
-(`package.json:7-11`). The entry point stays `index.ts`.
+(`package.json:7-12`). The entry point stays `index.ts`.
