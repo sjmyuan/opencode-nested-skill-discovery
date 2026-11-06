@@ -28,6 +28,7 @@ export interface PersistInput {
   readonly location: string
   readonly snapshots: readonly Snapshot[]
   readonly now?: number
+  readonly version?: number
 }
 
 export interface PersistResult {
@@ -109,17 +110,21 @@ async function prunePrefix(
 
 export async function persistRegistry(
   storage: StoragePort,
-  { location, snapshots, now }: PersistInput,
+  { location, snapshots, now, version: reuse }: PersistInput,
 ): Promise<PersistResult> {
-  let current: Schema.Json | undefined
+  let version = reuse
 
-  try {
-    current = await storage.get(STORAGE_KEYS.version)
-  } catch (error) {
-    return { ok: false, version: 0, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
+  if (version === undefined) {
+    let current: Schema.Json | undefined
+
+    try {
+      current = await storage.get(STORAGE_KEYS.version)
+    } catch (error) {
+      return { ok: false, version: 0, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
+    }
+
+    version = Math.max(toCounter(current) + 1, now ?? Date.now())
   }
-
-  const version = Math.max(toCounter(current) + 1, now ?? Date.now())
 
   try {
     await storage.set(STORAGE_KEYS.version, version)

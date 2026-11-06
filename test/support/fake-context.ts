@@ -47,6 +47,8 @@ export interface FakeContext {
   readonly reloadCalls: number
   onReload: (() => void) | undefined
   setLocation(directory: string): void
+  addNative(skill: Skill.Info): void
+  removeNative(id: string): void
   fail(target: FailureTarget, error?: unknown): void
   clearFailures(): void
 }
@@ -64,7 +66,8 @@ export function nativeSkill(id: string, path?: string): Skill.Info {
 }
 
 export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeContextOptions = {}): FakeContext {
-  const entries: Skill.Info[] = seed.map((skill) => ({ ...skill }))
+  const natives: Skill.Info[] = seed.map((skill) => ({ ...skill }))
+  let entries: Skill.Info[] = natives.map((skill) => ({ ...skill }))
   const transforms: TransformCallback[] = []
   const counters = { dispose: 0, reload: 0 }
   const failures = new Map<FailureTarget, unknown>()
@@ -124,6 +127,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         }),
       reload: async () =>
         guarded("skill.reload", () => {
+          entries = natives.map((skill) => ({ ...skill }))
           for (const transform of transforms) transform(editor)
           hooks.onReload?.()
           counters.reload += 1
@@ -168,6 +172,13 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       location.directory = next
       location.project.directory = next
       location.project.canonical = next
+    },
+    addNative(skill: Skill.Info) {
+      natives.push({ ...skill })
+    },
+    removeNative(id: string) {
+      const index = natives.findIndex((skill) => skill.id === id)
+      if (index >= 0) natives.splice(index, 1)
     },
     fail(target: FailureTarget, error: unknown = new Error(target)) {
       failures.set(target, error)

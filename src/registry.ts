@@ -153,6 +153,41 @@ const EMPTY_OUTCOME: RefreshOutcome = Object.freeze({
   diagnostics: Object.freeze([]),
 })
 
+export function selectSuppressed(
+  skills: readonly RegistryEntry[],
+  foreignPaths: ReadonlySet<string>,
+): readonly string[] {
+  const suppressed: string[] = []
+  const seenPaths = new Set<string>()
+
+  for (const entry of [...skills].sort((left, right) => compareId(left.id, right.id))) {
+    if (foreignPaths.has(entry.canonicalPath) || seenPaths.has(entry.canonicalPath)) {
+      suppressed.push(entry.id)
+      continue
+    }
+    seenPaths.add(entry.canonicalPath)
+  }
+
+  return suppressed
+}
+
+function withoutEntries(
+  snapshot: RegistrySnapshot,
+  suppressed: ReadonlySet<string>,
+): RegistrySnapshot {
+  const snapshots = snapshot.snapshots
+    .map((subproject) =>
+      Object.freeze({
+        scopeToken: subproject.scopeToken,
+        directory: subproject.directory,
+        skills: Object.freeze(subproject.skills.filter((entry) => !suppressed.has(entry.id))),
+      }),
+    )
+    .filter((subproject) => subproject.skills.length > 0)
+
+  return Object.freeze({ location: snapshot.location, snapshots: Object.freeze(snapshots) })
+}
+
 export function createRegistry(ctx: Plugin.Context): Registry {
   let canonical: string | undefined
   let current: RegistrySnapshot = Object.freeze({
@@ -266,12 +301,55 @@ export function createRegistry(ctx: Plugin.Context): Registry {
       return record(fail(diagnostics))
     }
 
+    let reloads = 1
+    let listed
+    try {
+      listed = await ctx.skill.list()
+    } catch (error) {
+      diagnostics.push(`list: ${reasonOf(error)}`)
+      return record(fail(diagnostics, reloads))
+    }
+
+    const ownedIds = new Set(current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)))
+    const foreignPaths = new Set(
+      listed.data
+        .filter((entry) => !ownedIds.has(String(entry.id)))
+        .map((entry) => String(entry.path)),
+    )
+    const suppressed = selectSuppressed(
+      current.snapshots.flatMap((subproject) => subproject.skills),
+      foreignPaths,
+    )
+
+    for (const id of suppressed) diagnostics.push(`dedupe: ${id}`)
+
+    if (suppressed.length > 0) {
+      const corrected = withoutEntries(current, new Set(suppressed))
+      const written = await persistRegistry(ctx.storage, {
+        location: base,
+        snapshots: corrected.snapshots,
+        version: persisted.version,
+      })
+      diagnostics.push(...written.diagnostics)
+      if (!written.ok) return record(fail(diagnostics, reloads))
+
+      current = corrected
+      reloads += 1
+
+      try {
+        await ctx.skill.reload()
+      } catch (error) {
+        diagnostics.push(`reload: ${reasonOf(error)}`)
+        return record(fail(diagnostics, reloads - 1))
+      }
+    }
+
     return record({
       ok: true,
-      skills: built.snapshot.snapshots.reduce((total, subproject) => total + subproject.skills.length, 0),
-      subprojects: built.snapshot.snapshots.length,
+      skills: current.snapshots.reduce((total, subproject) => total + subproject.skills.length, 0),
+      subprojects: current.snapshots.length,
       version: persisted.version,
-      reloads: 1,
+      reloads,
       diagnostics: capDiagnostics(diagnostics),
     })
   }
