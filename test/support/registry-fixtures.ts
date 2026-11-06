@@ -1,6 +1,19 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import type { IndexedSkill } from "../../src/indexer.ts"
+
+export function indexedSkill(overrides: Partial<IndexedSkill> = {}): IndexedSkill {
+  return {
+    id: "nested.scope.deploy-00000000",
+    canonicalPath: "/tmp/root/.opencode/skills/deploy/SKILL.md",
+    subproject: "",
+    nativeName: "deploy",
+    description: "Deploys releases.",
+    content: "# Deploy\n\nDeploys releases.\n",
+    ...overrides,
+  }
+}
 
 export interface RegistryFixture {
   readonly root: string
