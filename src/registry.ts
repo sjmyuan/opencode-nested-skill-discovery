@@ -34,6 +34,14 @@ async function canonicalDirectory(target: string): Promise<string> {
   }
 }
 
+async function canonicalPathOf(target: string): Promise<string> {
+  try {
+    return await realpath(target)
+  } catch {
+    return target
+  }
+}
+
 function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
   if (diagnostics.length <= DIAGNOSTIC_LIMIT) return diagnostics
 
@@ -431,9 +439,11 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     const ownedIds = new Set(current.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id)))
     const foreignPaths = new Set(
-      listed.value.data
-        .filter((entry) => !ownedIds.has(String(entry.id)))
-        .map((entry) => String(entry.path)),
+      await Promise.all(
+        listed.value.data
+          .filter((entry) => !ownedIds.has(String(entry.id)))
+          .map((entry) => canonicalPathOf(String(entry.path))),
+      ),
     )
     const suppressed = selectSuppressed(
       current.snapshots.flatMap((subproject) => subproject.skills),
