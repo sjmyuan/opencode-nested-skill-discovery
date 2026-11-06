@@ -148,3 +148,70 @@ describe("symlink policy", () => {
     expect(result.diagnostics.filter((line) => line.includes("file-symlink-outside"))).toHaveLength(1)
   })
 })
+
+describe("excludeRoots", () => {
+  it("prunes an excluded subtree and keeps its siblings", async () => {
+    const f = await fixture()
+    await f.write(".opencode/skills/at-location.md")
+    await f.write("A/.opencode/skills/a.md")
+    await f.write("B/.opencode/skills/b.md")
+
+    const result = await scanSkills({ location: f.root, excludeRoots: [join(f.realRoot, "A")] })
+
+    expect(result.candidates.map((candidate) => f.rel(candidate.path)).sort()).toEqual([
+      ".opencode/skills/at-location.md",
+      "B/.opencode/skills/b.md",
+    ])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("does not exclude a directory that merely shares a string prefix", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a.md")
+    await f.write("A-extra/.opencode/skills/extra.md")
+
+    const result = await scanSkills({ location: f.root, excludeRoots: [join(f.realRoot, "A")] })
+
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A-extra/.opencode/skills/extra.md",
+    ])
+  })
+
+  it("tolerates an entry that cannot be resolved", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a.md")
+
+    const result = await scanSkills({
+      location: f.root,
+      excludeRoots: [join(f.realRoot, "does-not-exist")],
+    })
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("changes nothing when the exclude list is empty", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a.md")
+
+    const excluded = await scanSkills({ location: f.root, excludeRoots: [] })
+    const plain = await scanSkills({ location: f.root })
+
+    expect(excluded.candidates).toEqual(plain.candidates)
+  })
+
+  it("applies inside an open skill root", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/keep/SKILL.md")
+    await f.write("A/.opencode/skills/drop/SKILL.md")
+
+    const result = await scanSkills({
+      location: f.root,
+      excludeRoots: [join(f.realRoot, "A/.opencode/skills/drop")],
+    })
+
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/keep/SKILL.md",
+    ])
+  })
+})

@@ -55,6 +55,7 @@ interface Context {
   readonly prune: ReadonlySet<string>
   readonly markers: ReadonlySet<SubprojectMarker>
   readonly roots: readonly SkillRootKind[]
+  readonly excluded: readonly string[]
   readonly state: State
   readonly emit: (message: string) => void
 }
@@ -111,6 +112,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     prune: new Set(options.prune ?? PRUNE_DIRECTORIES),
     markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
     roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
+    excluded: await canonicalRoots(options.excludeRoots ?? []),
     state,
     emit,
   }
@@ -141,6 +143,7 @@ async function walk(
     if (!entry.isDirectory()) continue
     if (context.prune.has(entry.name)) continue
     const child = join(dir, entry.name)
+    if (isExcluded(context, child)) continue
     const childRel = joinRel(rel, entry.name)
     // A root of a visited directory is opened without a depth check; only ordinary descent is capped.
     if (await openRoots(context, entry.name, child, childRel, owner)) continue
@@ -189,7 +192,9 @@ async function walkRoot(
     }
     if (entry.isDirectory()) {
       if (context.prune.has(entry.name)) continue
-      await walkRoot(context, join(dir, entry.name), joinRel(rel, entry.name), kind, false, owner)
+      const child = join(dir, entry.name)
+      if (isExcluded(context, child)) continue
+      await walkRoot(context, child, joinRel(rel, entry.name), kind, false, owner)
       continue
     }
     if (!entry.isFile()) continue
@@ -249,6 +254,16 @@ async function acceptLink(
   }
   if (!eligible(basename(path), atRoot)) return
   await accept(context, path, kind, owner, link.realPath)
+}
+
+function isExcluded(context: Context, path: string): boolean {
+  return context.excluded.some((root) => path === root || path.startsWith(`${root}${sep}`))
+}
+
+/** Canonicalised once; entries that cannot be resolved are skipped silently (PD10). */
+async function canonicalRoots(roots: readonly string[]): Promise<readonly string[]> {
+  const resolved = await Promise.all(roots.map((root) => canonical(resolve(root))))
+  return resolved.filter((root): root is string => root !== null)
 }
 
 function isInside(location: string, target: string): boolean {
