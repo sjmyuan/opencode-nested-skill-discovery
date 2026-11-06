@@ -168,3 +168,57 @@ describe("per-file byte budget", () => {
     expect(result.diagnostics).toEqual([])
   })
 })
+
+describe("total byte budget", () => {
+  async function threeByForty(): Promise<ScanFixture> {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/a.md", "a".repeat(40))
+    await f.write("B/.opencode/skills/b.md", "b".repeat(40))
+    await f.write("C/.opencode/skills/c.md", "c".repeat(40))
+    return f
+  }
+
+  it("stops at maxTotalBytes and never reports more accepted bytes than the budget", async () => {
+    const f = await threeByForty()
+    const limits = { ...DEFAULT_SCAN_LIMITS, maxTotalBytes: 80 }
+
+    const limited = await scanSkills({ location: f.root, limits })
+    const again = await scanSkills({ location: f.root, limits })
+
+    expect(limited.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/a.md",
+      "B/.opencode/skills/b.md",
+    ])
+    expect(limited.stats.bytes).toBe(80)
+    expect(limited.truncated).toBe(true)
+    expect(limited.diagnostics).toHaveLength(1)
+    expect(limited.diagnostics[0]).toContain("maxTotalBytes")
+    expect(again.candidates).toEqual(limited.candidates)
+  })
+
+  it("returns nothing when maxTotalBytes is zero", async () => {
+    const f = await threeByForty()
+
+    const result = await scanSkills({
+      location: f.root,
+      limits: { ...DEFAULT_SCAN_LIMITS, maxTotalBytes: 0 },
+    })
+
+    expect(result.candidates).toEqual([])
+    expect(result.stats.bytes).toBe(0)
+    expect(result.truncated).toBe(true)
+  })
+
+  it("keeps every candidate when the budget is large enough", async () => {
+    const f = await threeByForty()
+
+    const result = await scanSkills({
+      location: f.root,
+      limits: { ...DEFAULT_SCAN_LIMITS, maxTotalBytes: 120 },
+    })
+
+    expect(result.candidates).toHaveLength(3)
+    expect(result.stats.bytes).toBe(120)
+    expect(result.truncated).toBe(false)
+  })
+})

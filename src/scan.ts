@@ -308,6 +308,13 @@ async function accept(
     return
   }
 
+  if (context.state.bytes + info.size > context.limits.maxTotalBytes) {
+    context.state.truncated = true
+    context.state.stopped = true
+    context.emit(`budget-total-bytes: maxTotalBytes=${context.limits.maxTotalBytes}`)
+    return
+  }
+
   context.state.bytes += info.size
   context.state.accepted += 1
   context.state.candidates.push({
