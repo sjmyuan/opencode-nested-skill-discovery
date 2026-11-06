@@ -1,5 +1,7 @@
 import { realpath } from "node:fs/promises"
-import { resolve } from "node:path"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
+import type { Plugin } from "@opencode/plugin"
 import {
   MAX_DESCRIPTION_LENGTH,
   MAX_NAME_LENGTH,
@@ -7,13 +9,18 @@ import {
   type RegistrySnapshot,
   type Snapshot,
 } from "./contracts.ts"
-import type { IndexedSkill } from "./indexer.ts"
-import { scopeTokenFor } from "./indexer.ts"
+import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
+import { persistRegistry, type PersistResult } from "./manifest.ts"
+import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
+import { applyRegistry } from "./replay.ts"
+import { scanSkills } from "./scan.ts"
 
 const compareId = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+const DIAGNOSTIC_LIMIT = 200
 
 async function canonicalDirectory(target: string): Promise<string> {
   try {
@@ -21,6 +28,13 @@ async function canonicalDirectory(target: string): Promise<string> {
   } catch {
     return resolve(target)
   }
+}
+
+function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
+  if (diagnostics.length <= DIAGNOSTIC_LIMIT) return diagnostics
+
+  const kept = diagnostics.slice(0, DIAGNOSTIC_LIMIT - 1)
+  return [...kept, `truncated: ${diagnostics.length - kept.length} more diagnostics`]
 }
 
 export interface AssembledEntry extends RegistryEntry {
@@ -108,5 +122,213 @@ export async function buildRegistrySnapshot({
   return {
     snapshot: Object.freeze({ location: canonicalLocation, snapshots }),
     diagnostics,
+  }
+}
+
+export interface RefreshOutcome {
+  readonly ok: boolean
+  readonly skills: number
+  readonly subprojects: number
+  readonly version?: number
+  readonly reloads: number
+  readonly diagnostics: readonly string[]
+}
+
+export interface Registry {
+  readonly location: string
+  readonly snapshot: RegistrySnapshot
+  readonly outcome: RefreshOutcome
+  activate(): Promise<RefreshOutcome>
+  refresh(): Promise<RefreshOutcome>
+  dispose(): Promise<void>
+}
+
+type Registration = Awaited<ReturnType<Plugin.Context["skill"]["transform"]>>
+
+const EMPTY_OUTCOME: RefreshOutcome = Object.freeze({
+  ok: false,
+  skills: 0,
+  subprojects: 0,
+  reloads: 0,
+  diagnostics: Object.freeze([]),
+})
+
+export function createRegistry(ctx: Plugin.Context): Registry {
+  let canonical: string | undefined
+  let current: RegistrySnapshot = Object.freeze({
+    location: resolve(ctx.location.directory),
+    snapshots: Object.freeze([]),
+  })
+  let outcome = EMPTY_OUTCOME
+  let registration: Registration | undefined
+  let registering: Promise<void> | undefined
+  let inFlight: Promise<RefreshOutcome> | undefined
+  let disposed = false
+  const replayDiagnostics: string[] = []
+
+  const location = (): string => canonical ?? resolve(ctx.location.directory)
+
+  const nativeInput = (): NativeRootInput => {
+    const home = process.env.OPENCODE_TEST_HOME ?? homedir()
+    const configDirectory =
+      process.env.OPENCODE_CONFIG_DIR ??
+      join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), "opencode")
+
+    return { location: location(), home, configDirectory }
+  }
+
+  const record = (next: RefreshOutcome): RefreshOutcome => {
+    outcome = next
+    return next
+  }
+
+  const fail = (diagnostics: readonly string[], reloads = 0): RefreshOutcome => ({
+    ok: false,
+    skills: 0,
+    subprojects: 0,
+    reloads,
+    diagnostics: capDiagnostics(diagnostics),
+  })
+
+  const ensureRegistered = async (): Promise<void> => {
+    if (registration !== undefined || disposed) return
+    if (registering === undefined) {
+      registering = ctx.skill
+        .transform((editor) => {
+          try {
+            replayDiagnostics.push(...applyRegistry(editor, current))
+          } catch (error) {
+            replayDiagnostics.push(`replay: ${reasonOf(error)}`)
+          }
+        })
+        .then((created) => {
+          registration = created
+        })
+        .finally(() => {
+          registering = undefined
+        })
+    }
+    await registering
+  }
+
+  const runRefresh = async (): Promise<RefreshOutcome> => {
+    if (disposed) return record(fail(["disposed"]))
+
+    const diagnostics: string[] = [...replayDiagnostics.splice(0)]
+    const base = await canonicalDirectory(ctx.location.directory)
+    canonical = base
+    const nativeRoots = await resolveNativeRoots(nativeInput())
+
+    let scanned
+    try {
+      scanned = await scanSkills({ location: base, excludeRoots: nativeRoots })
+    } catch (error) {
+      diagnostics.push(`scan: ${reasonOf(error)}`)
+      return record(fail(diagnostics))
+    }
+    if (scanned.truncated) diagnostics.push("scan-truncated")
+    diagnostics.push(...scanned.diagnostics)
+
+    let indexed
+    try {
+      indexed = await indexCandidates(scanned.candidates, { location: base, nativeRoots })
+    } catch (error) {
+      diagnostics.push(`index: ${reasonOf(error)}`)
+      return record(fail(diagnostics))
+    }
+    diagnostics.push(...indexed.diagnostics)
+
+    let built
+    try {
+      built = await buildRegistrySnapshot({ location: base, skills: assembleEntries(indexed.skills) })
+    } catch (error) {
+      diagnostics.push(`snapshot: ${reasonOf(error)}`)
+      return record(fail(diagnostics))
+    }
+    diagnostics.push(...built.diagnostics)
+
+    let persisted: PersistResult
+    try {
+      persisted = await persistRegistry(ctx.storage, { location: base, snapshots: built.snapshot.snapshots })
+    } catch (error) {
+      diagnostics.push(`manifest: ${reasonOf(error)}`)
+      return record(fail(diagnostics))
+    }
+    diagnostics.push(...persisted.diagnostics)
+    if (!persisted.ok) return record(fail(diagnostics))
+
+    current = built.snapshot
+
+    try {
+      await ctx.skill.reload()
+    } catch (error) {
+      diagnostics.push(`reload: ${reasonOf(error)}`)
+      return record(fail(diagnostics))
+    }
+
+    return record({
+      ok: true,
+      skills: built.snapshot.snapshots.reduce((total, subproject) => total + subproject.skills.length, 0),
+      subprojects: built.snapshot.snapshots.length,
+      version: persisted.version,
+      reloads: 1,
+      diagnostics: capDiagnostics(diagnostics),
+    })
+  }
+
+  const refresh = async (): Promise<RefreshOutcome> => {
+    if (disposed) return record(fail(["disposed"]))
+    if (inFlight !== undefined) return inFlight
+
+    const run = (async () => {
+      try {
+        await ensureRegistered()
+      } catch (error) {
+        return record(fail([`register: ${reasonOf(error)}`]))
+      }
+      return runRefresh()
+    })()
+
+    inFlight = run
+    try {
+      return await run
+    } finally {
+      if (inFlight === run) inFlight = undefined
+    }
+  }
+
+  const activate = async (): Promise<RefreshOutcome> => {
+    try {
+      await ensureRegistered()
+    } catch (error) {
+      return record(fail([`register: ${reasonOf(error)}`]))
+    }
+    return refresh()
+  }
+
+  const dispose = async (): Promise<void> => {
+    if (disposed) return
+    disposed = true
+
+    if (registering !== undefined) await registering.catch(() => undefined)
+
+    const created = registration
+    registration = undefined
+    if (created !== undefined) await created.dispose()
+  }
+
+  return {
+    get location() {
+      return location()
+    },
+    get snapshot() {
+      return current
+    },
+    get outcome() {
+      return outcome
+    },
+    activate,
+    refresh,
+    dispose,
   }
 }

@@ -39,7 +39,7 @@ describe("registry persistence", () => {
     const cached = fake.storage.get(STORAGE_KEYS.subproject("token-a")) as unknown as Snapshot
     const manifestEntry = manifest.entries[0]
 
-    expect(result).toEqual({ version: 1000, pruned: 0, diagnostics: [] })
+    expect(result).toEqual({ ok: true, version: 1000, pruned: 0, diagnostics: [] })
     expect(fake.storage.get(STORAGE_KEYS.version)).toBe(1000)
     expect(manifest).toMatchObject({
       manifestVersion: 1000,
@@ -158,7 +158,7 @@ describe("registry persistence", () => {
       now: 1000,
     })
 
-    expect(result).toEqual({ version: 1000, pruned: 0, diagnostics: [] })
+    expect(result).toEqual({ ok: true, version: 1000, pruned: 0, diagnostics: [] })
     expect(fake.storage.get(STORAGE_KEYS.version)).toBe(1000)
     expect(fake.storage.get(STORAGE_KEYS.manifest("token-broken"))).toBe("not a record")
   })

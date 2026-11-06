@@ -124,6 +124,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         }),
       reload: async () =>
         guarded("skill.reload", () => {
+          for (const transform of transforms) transform(editor)
           hooks.onReload?.()
           counters.reload += 1
         }),

@@ -31,6 +31,7 @@ export interface PersistInput {
 }
 
 export interface PersistResult {
+  readonly ok: boolean
   readonly version: number
   readonly pruned: number
   readonly diagnostics: readonly string[]
@@ -110,10 +111,21 @@ export async function persistRegistry(
   storage: StoragePort,
   { location, snapshots, now }: PersistInput,
 ): Promise<PersistResult> {
-  const current = toCounter(await storage.get(STORAGE_KEYS.version))
-  const version = Math.max(current + 1, now ?? Date.now())
+  let current: Schema.Json | undefined
 
-  await storage.set(STORAGE_KEYS.version, version)
+  try {
+    current = await storage.get(STORAGE_KEYS.version)
+  } catch (error) {
+    return { ok: false, version: 0, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
+  }
+
+  const version = Math.max(toCounter(current) + 1, now ?? Date.now())
+
+  try {
+    await storage.set(STORAGE_KEYS.version, version)
+  } catch (error) {
+    return { ok: false, version, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
+  }
 
   const ordered = [...snapshots].sort((left, right) => compareText(left.scopeToken, right.scopeToken))
   const active = new Set<string>()
@@ -131,8 +143,28 @@ export async function persistRegistry(
       skills: snapshot.skills.map(toCachedEntry),
     }
 
-    await storage.set(STORAGE_KEYS.manifest(snapshot.scopeToken), asJson(manifest))
-    await storage.set(STORAGE_KEYS.subproject(snapshot.scopeToken), asJson(cached))
+    try {
+      await storage.set(STORAGE_KEYS.manifest(snapshot.scopeToken), asJson(manifest))
+    } catch (error) {
+      return {
+        ok: false,
+        version,
+        pruned: 0,
+        diagnostics: [`manifest: ${snapshot.scopeToken}: ${reasonOf(error)}`],
+      }
+    }
+
+    try {
+      await storage.set(STORAGE_KEYS.subproject(snapshot.scopeToken), asJson(cached))
+    } catch (error) {
+      return {
+        ok: false,
+        version,
+        pruned: 0,
+        diagnostics: [`snapshot: ${snapshot.scopeToken}: ${reasonOf(error)}`],
+      }
+    }
+
     active.add(snapshot.scopeToken)
   }
 
@@ -144,8 +176,8 @@ export async function persistRegistry(
     pruned += await prunePrefix(storage, STORAGE_KEYS.subproject(""), active, location)
   } catch (error) {
     diagnostics.push(`prune: ${reasonOf(error)}`)
-    return { version, pruned: 0, diagnostics }
+    return { ok: true, version, pruned: 0, diagnostics }
   }
 
-  return { version, pruned, diagnostics }
+  return { ok: true, version, pruned, diagnostics }
 }
