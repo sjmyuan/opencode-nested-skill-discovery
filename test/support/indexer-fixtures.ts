@@ -39,7 +39,9 @@ export async function createWorkspace(): Promise<Workspace> {
 
   const kindOf = (relativePath: string): SkillRootKind => {
     const normalized = relativePath.split(path.sep).join("/")
-    const marker = ROOT_MARKERS.find(([suffix]) => normalized.includes(`/${suffix}/`))
+    const marker = ROOT_MARKERS.find(
+      ([suffix]) => normalized.startsWith(`${suffix}/`) || normalized.includes(`/${suffix}/`),
+    )
     if (marker === undefined) throw new Error(`no skill root marker in ${relativePath}`)
     return marker[1]
   }
