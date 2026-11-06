@@ -50,6 +50,7 @@ export interface FakeContext {
   addNative(skill: Skill.Info): void
   removeNative(id: string): void
   fail(target: FailureTarget, error?: unknown): void
+  failKey(key: string, error?: unknown): void
   clearFailures(): void
 }
 
@@ -71,6 +72,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const transforms: TransformCallback[] = []
   const counters = { dispose: 0, reload: 0 }
   const failures = new Map<FailureTarget, unknown>()
+  const keyFailures = new Map<string, unknown>()
   const values = new Map<string, Schema.Json>(options.storage ?? [])
   const hooks: { onReload: (() => void) | undefined } = { onReload: options.onReload }
   const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), "nested-fake-")))
@@ -82,6 +84,10 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const guarded = async <T>(target: FailureTarget, run: () => T | Promise<T>): Promise<T> => {
     if (failures.has(target)) throw failures.get(target)
     return run()
+  }
+
+  const guardKey = (key: string): void => {
+    if (keyFailures.has(key)) throw keyFailures.get(key)
   }
 
   const page = ({ prefix, after, limit = DEFAULT_SCAN_LIMIT }: FakeStorageScanOptions) => {
@@ -137,13 +143,19 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     location,
     storage: {
-      get: async (key: string) => guarded("storage.get", () => values.get(key)),
+      get: async (key: string) =>
+        guarded("storage.get", () => {
+          guardKey(key)
+          return values.get(key)
+        }),
       set: async (key: string, value: Schema.Json) =>
         guarded("storage.set", () => {
+          guardKey(key)
           values.set(key, value)
         }),
       remove: async (key: string) =>
         guarded("storage.remove", () => {
+          guardKey(key)
           values.delete(key)
         }),
       scan: async (options: FakeStorageScanOptions) => guarded("storage.scan", () => page(options)),
@@ -183,8 +195,12 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     fail(target: FailureTarget, error: unknown = new Error(target)) {
       failures.set(target, error)
     },
+    failKey(key: string, error: unknown = new Error(`key ${key}`)) {
+      keyFailures.set(key, error)
+    },
     clearFailures() {
       failures.clear()
+      keyFailures.clear()
     },
   }
 }

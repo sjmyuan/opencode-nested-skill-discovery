@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises"
+import { realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import type { Plugin } from "@opencode/plugin"
@@ -253,6 +253,38 @@ export function createRegistry(ctx: Plugin.Context): Registry {
     const base = await canonicalDirectory(ctx.location.directory)
     canonical = base
     const nativeRoots = await resolveNativeRoots(nativeInput())
+
+    let locationInfo
+    try {
+      locationInfo = await stat(base)
+    } catch {
+      locationInfo = undefined
+    }
+
+    if (locationInfo === undefined || !locationInfo.isDirectory()) {
+      diagnostics.push(`scan: ${base} is not a directory`)
+      const written = await persistRegistry(ctx.storage, { location: base, snapshots: [] })
+      diagnostics.push(...written.diagnostics)
+      if (!written.ok) return record(fail(diagnostics))
+
+      current = Object.freeze({ location: base, snapshots: Object.freeze([]) })
+
+      try {
+        await ctx.skill.reload()
+      } catch (error) {
+        diagnostics.push(`reload: ${reasonOf(error)}`)
+        return record(fail(diagnostics))
+      }
+
+      return record({
+        ok: false,
+        skills: 0,
+        subprojects: 0,
+        version: written.version,
+        reloads: 1,
+        diagnostics: capDiagnostics(diagnostics),
+      })
+    }
 
     let scanned
     try {
