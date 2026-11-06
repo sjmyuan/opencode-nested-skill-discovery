@@ -1,5 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
-import type { Snapshot } from "./contracts.ts"
+import type { RegistrySnapshot, Snapshot } from "./contracts.ts"
+import { createRegistry } from "./registry.ts"
+import { applyRegistry } from "./replay.ts"
 
 export const id = "nested-skill-discovery"
 
@@ -11,25 +13,21 @@ export const EMPTY_SNAPSHOT: Snapshot = Object.freeze({
   skills: Object.freeze([]),
 })
 
-export function applySnapshot(_editor: SkillEditor, snapshot: Snapshot | undefined): void {
-  if (snapshot === undefined || snapshot.skills.length === 0) return
-  // F5 replays a populated snapshot here; F1 must not touch the registry.
-}
-
-interface SnapshotHolder {
-  snapshot: Snapshot | undefined
-}
-
-function createSnapshotHolder(initial: Snapshot | undefined): SnapshotHolder {
-  return { snapshot: initial }
+export function applySnapshot(editor: SkillEditor, snapshot: RegistrySnapshot | undefined): void {
+  applyRegistry(editor, snapshot)
 }
 
 export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
-  const state = createSnapshotHolder(EMPTY_SNAPSHOT)
-  const registration = await ctx.skill.transform((editor) => applySnapshot(editor, state.snapshot))
+  const registry = createRegistry(ctx)
+
+  try {
+    await registry.activate()
+  } catch {
+    // Activation is total by contract; a throw here must not reject setup.
+  }
 
   return async () => {
-    await registration.dispose()
+    await registry.dispose()
   }
 }
 

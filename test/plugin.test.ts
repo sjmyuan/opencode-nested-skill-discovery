@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
+import type { RegistrySnapshot } from "../src/contracts.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
+import { createRegistryFixture } from "./support/registry-fixtures.ts"
 
 vi.mock("@opencode/plugin", () => ({ Plugin: { define: (plugin: unknown) => plugin } }))
 
 const entry = await import("../index.ts")
 const core = await import("../src/plugin.ts")
+
+const DOC = "---\nname: deploy\n---\n# Deploy\n"
 
 describe("plugin definition", () => {
   it("default-exports only the id and setup", () => {
@@ -13,35 +17,59 @@ describe("plugin definition", () => {
   })
 
   it("registers exactly one skill transform and disposes it once", async () => {
-    const fake = fakeContext()
-    const cleanup = await entry.default.setup(fake.ctx)
+    const fixture = await createRegistryFixture()
 
-    expect(fake.transforms).toHaveLength(1)
-    expect(cleanup).toBeTypeOf("function")
-    if (typeof cleanup !== "function") return
+    try {
+      const fake = fakeContext([], { directory: fixture.root })
+      const cleanup = await entry.default.setup(fake.ctx)
 
-    await cleanup()
-    expect(fake.disposeCalls).toBe(1)
+      expect(fake.transforms).toHaveLength(1)
+      expect(cleanup).toBeTypeOf("function")
+      if (typeof cleanup !== "function") return
+
+      await cleanup()
+      expect(fake.disposeCalls).toBe(1)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 })
 
-describe("empty snapshot replay", () => {
-  it("leaves a native entry untouched", async () => {
-    const seed = nativeSkill("native-alpha")
-    const fake = fakeContext([seed])
-    await entry.default.setup(fake.ctx)
+describe("snapshot replay", () => {
+  it("adds the nested entry next to an untouched native entry", async () => {
+    const fixture = await createRegistryFixture()
 
-    const transform = fake.transforms[0]
-    expect(transform).toBeDefined()
-    transform!(fake.editor)
+    try {
+      await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
+      const seed = nativeSkill("native-alpha")
+      const fake = fakeContext([seed], { directory: fixture.root })
+      await entry.default.setup(fake.ctx)
 
-    expect(fake.editor.list()).toEqual([seed])
+      const listed = fake.editor.list()
+
+      expect(listed).toHaveLength(2)
+      expect(listed[0]).toEqual(seed)
+      expect(listed[1]?.name).toBe("A/deploy")
+      expect(String(listed[1]?.id).startsWith("nested.")).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 
   it("tolerates an undefined snapshot", () => {
     const fake = fakeContext()
 
     expect(() => core.applySnapshot(fake.editor, undefined)).not.toThrow()
+  })
+
+  it("is a no-op for an empty registry snapshot", () => {
+    const fake = fakeContext([nativeSkill("native-alpha")])
+    const before = fake.editor.list().map((skill) => ({ ...skill }))
+    const empty: RegistrySnapshot = { location: "/loc/root", snapshots: [] }
+
+    core.applySnapshot(fake.editor, empty)
+
+    expect(fake.editor.list()).toEqual(before)
   })
 
   it("freezes the empty snapshot", () => {

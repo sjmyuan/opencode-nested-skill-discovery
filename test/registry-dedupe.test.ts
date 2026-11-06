@@ -1,0 +1,141 @@
+import { describe, expect, it } from "vitest"
+import { scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { createRegistry, selectSuppressed } from "../src/registry.ts"
+import { fakeContext, nativeSkill } from "./support/fake-context.ts"
+import { createRegistryFixture, registryEntry } from "./support/registry-fixtures.ts"
+
+const DOC = "---\nname: deploy\n---\n# Deploy\n"
+
+async function deployedFixture() {
+  const fixture = await createRegistryFixture()
+  await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
+  return fixture
+}
+
+async function expectedIdOf(fixture: Awaited<ReturnType<typeof createRegistryFixture>>): Promise<string> {
+  const subproject = await fixture.realpathOf("A")
+  const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+  return `nested.${scopeTokenFor(subproject)}.${skillTokenFor("deploy", skillPath)}`
+}
+
+describe("native dedupe after reload", () => {
+  it("suppresses a nested twin of a native entry with one extra reload", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+      const native = nativeSkill("native-deploy", skillPath)
+      const fake = fakeContext([native], { directory: fixture.root })
+      const registry = createRegistry(fake.ctx)
+      const sizes: number[] = []
+      fake.onReload = () => sizes.push(fake.editor.list().length)
+
+      const outcome = await registry.activate()
+      const subproject = await fixture.realpathOf("A")
+
+      expect(sizes).toEqual([2, 1])
+      expect(outcome.reloads).toBe(2)
+      expect(outcome.skills).toBe(0)
+      expect(outcome.diagnostics).toContain(`dedupe: ${await expectedIdOf(fixture)}`)
+      expect(fake.editor.list()).toEqual([native])
+      expect(fake.storage.has(`nested/manifest/${scopeTokenFor(subproject)}`)).toBe(false)
+      expect(fake.storage.has(`nested/subproject/${scopeTokenFor(subproject)}`)).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("never indexes a skill that sits inside a native root", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write(".claude/skills/x/SKILL.md", DOC)
+      const fake = fakeContext([], { directory: fixture.root })
+      const registry = createRegistry(fake.ctx)
+
+      const outcome = await registry.activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.skills).toBe(0)
+      expect(outcome.reloads).toBe(1)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves a foreign entry that already owns a nested id untouched", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const foreign = nativeSkill(await expectedIdOf(fixture))
+      const fake = fakeContext([foreign], { directory: fixture.root })
+      const registry = createRegistry(fake.ctx)
+
+      const outcome = await registry.activate()
+
+      expect(outcome.reloads).toBe(1)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
+      expect(fake.editor.list()).toEqual([foreign])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("restores the nested entry once the native twin is gone", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+      const native = nativeSkill("native-deploy", skillPath)
+      const fake = fakeContext([native], { directory: fixture.root })
+      const registry = createRegistry(fake.ctx)
+
+      const first = await registry.activate()
+      fake.removeNative(native.id)
+      const second = await registry.refresh()
+
+      expect(first.reloads).toBe(2)
+      expect(second.reloads).toBe(1)
+      expect(fake.editor.get(await expectedIdOf(fixture))).toBeDefined()
+      expect(second.skills).toBe(1)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("keeps the lowest id and diagnoses its path twin", () => {
+    const shared = "/loc/x/.opencode/skills/deploy/SKILL.md"
+
+    const suppressed = selectSuppressed(
+      [
+        registryEntry({ id: "nested.a.2", canonicalPath: shared }),
+        registryEntry({ id: "nested.a.1", canonicalPath: shared }),
+      ],
+      new Set(),
+    )
+
+    expect(suppressed).toEqual(["nested.a.2"])
+  })
+
+  it("keeps the replayed snapshot and reports when list throws", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const skillPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+      const fake = fakeContext([nativeSkill("native-deploy", skillPath)], { directory: fixture.root })
+      const registry = createRegistry(fake.ctx)
+      fake.fail("skill.list", new Error("list down"))
+
+      const outcome = await registry.activate()
+
+      expect(outcome.ok).toBe(false)
+      expect(outcome.reloads).toBe(1)
+      expect(outcome.diagnostics).toContain("list: list down")
+      expect(registry.snapshot.snapshots).toHaveLength(1)
+      expect(fake.editor.list()).toHaveLength(2)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+})

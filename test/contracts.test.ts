@@ -14,7 +14,13 @@ import {
   STORAGE_KEYS,
   SUBPROJECT_MARKERS,
 } from "../src/contracts.ts"
-import type { ManifestRecord } from "../src/contracts.ts"
+import type {
+  ManifestRecord,
+  RegistryEntry,
+  RegistrySnapshot,
+  SkillEntry,
+  Snapshot,
+} from "../src/contracts.ts"
 
 const ADR_PRUNE_DIRECTORIES = [
   ".cache",
@@ -133,5 +139,56 @@ describe("manifest record", () => {
     expect(typeof version).toBe("number")
     expect(JSON.stringify(sample)).toContain('"manifestVersion":42')
     expect(JSON.parse(JSON.stringify(sample)).manifestVersion).toBe(42)
+  })
+})
+
+const registryEntry: RegistryEntry = {
+  id: "nested.scope.skill",
+  canonicalPath: "/tmp/root/.opencode/skills/deploy/SKILL.md",
+  name: "deploy",
+  content: "# Deploy\n\nDeploys releases.\n",
+}
+
+describe("registry entries", () => {
+  it("requires the body on a registry entry", () => {
+    // @ts-expect-error RegistryEntry carries the skill body
+    const withoutContent: RegistryEntry = { id: "nested.a.b", canonicalPath: "/tmp/a", name: "a" }
+
+    expect(withoutContent.canonicalPath).toBe("/tmp/a")
+  })
+
+  it("assigns a registry entry where a skill entry is expected", () => {
+    const widened: SkillEntry = registryEntry
+
+    expect(widened.name).toBe("deploy")
+    expect(widened.id).toBe(registryEntry.id)
+  })
+
+  it("keeps content out of the manifest entry shape", () => {
+    const skill: SkillEntry = { id: registryEntry.id, canonicalPath: registryEntry.canonicalPath, name: "deploy" }
+    const record: ManifestRecord = {
+      manifestVersion: 7,
+      scopeToken: "scope",
+      directory: "/tmp/root",
+      entries: [skill],
+    }
+    const contentOf = (entry: SkillEntry): string | undefined =>
+      // @ts-expect-error SkillEntry declares no content
+      entry.content
+
+    expect(Object.keys(record.entries[0] ?? {}).sort()).toEqual(["canonicalPath", "id", "name"])
+    expect(contentOf(skill)).toBeUndefined()
+  })
+
+  it("narrows snapshot skills to registry entries", () => {
+    const snapshot: Snapshot = {
+      scopeToken: "scope",
+      directory: "/tmp/root",
+      skills: [registryEntry],
+    }
+    const registry: RegistrySnapshot = { location: "/tmp/root", snapshots: [snapshot] }
+
+    expect(registry.snapshots[0]?.skills[0]?.content).toBe(registryEntry.content)
+    expect(Object.isFrozen(registry.snapshots)).toBe(false)
   })
 })
