@@ -16,13 +16,15 @@ list current while you work.
 ## Status
 
 Delivered and covered by the test suite: bounded discovery, stable IDs and qualified
-display names, add-only advertisement, manifest/cache persistence, and refresh. Refresh
+display names, add-only advertisement (the transform appends; a nested entry that duplicates
+a native skill's path is suppressed), manifest/cache persistence, and refresh. Refresh
 means a watcher set derived from the last good scan, one coalescing timer at
 `DEBOUNCE_MS = 250` (`src/contracts.ts:84`), and a prompt backstop throttled to one refresh
 per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:87`); the implementation is `src/watch.ts`
-and `src/backstop.ts`. Outstanding: an end-to-end smoke run against a live opencode
-workspace — every behaviour is proven by the unit and integration suite rather than by a
-manual session.
+and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
+projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
+ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes
+and scores its claims C1–C5, reporting an unmet timing claim as `unproven` rather than green.
 
 ## Requirements
 
@@ -90,6 +92,7 @@ Detail and the full limit list: [docs/limits.md](docs/limits.md).
 | Display caps | name 80 code points · description 500 |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
+| Duplicate | a nested entry duplicating a native skill's path is suppressed, at the latest about 4 s after a refresh |
 | Scale | around 50 nested entries is the point to revisit on-demand listing |
 
 A truncated scan still advertises what it found. No limit is configurable in this release.
@@ -143,7 +146,7 @@ npm test
 ```
 
 `tsc --noEmit` plus the `vitest` suite is the whole gate; no linter is configured
-(`package.json:7-11`).
+(`package.json:7-12`).
 
 ## Documentation
 

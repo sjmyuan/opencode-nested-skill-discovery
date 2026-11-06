@@ -88,8 +88,9 @@ Pin and block individual entries by exact ID:
 The scope part is the subproject slug plus 8 hex characters, the skill part is the skill
 slug plus 8 hex characters, so an ID contains only `nested.`, two lower-case `[a-z0-9-]`
 slugs, a hyphen, and hex — never `*` or `?`
-([architecture.md](architecture.md#identity)). A copied ID always matches literally, and
-`nested.*` is the only wildcard you need.
+([architecture.md](architecture.md#identity)). Two patterns cover practice: `nested.*` for
+every nested entry, and `nested.<scopeToken>.*` for the entries of one subproject. A copied
+exact ID needs no wildcard at all.
 
 Two forms that look right and match nothing:
 
@@ -142,12 +143,14 @@ upgrade a configured `ask`.
 | the composer's `@` menu | `@<id>` (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | storage | `nested/manifest/<scopeToken>` holds `entries[].id` for that subproject (`src/manifest.ts:138-143`) |
 
-The records live in opencode's SQLite database `opencode.db`, in the global data directory —
-`~/.local/share/opencode/opencode.db`, or `$XDG_DATA_HOME/opencode/opencode.db`, with
-`OPENCODE_DB` overriding the file and a channel suffix on non-release builds
-(`packages/cli/src/database-path.ts:4-13`, `packages/util/src/global-roots.ts:5-13`). They are
-namespaced by the host (`packages/core/src/plugin/host.ts:609-616`), so filter on the plugin
-prefix:
+The records live in opencode's SQLite database, in the global data directory:
+`~/.local/share/opencode/opencode.db`, or `$XDG_DATA_HOME/opencode/opencode.db`. The file is
+named `opencode.db` when the channel is one of `latest`, `dev`, `beta`, `next`, `prod`, or
+when `OPENCODE_DISABLE_CHANNEL_DB` is `1`/`true`; every other channel gets
+`opencode-<channel>.db`. `OPENCODE_DB` overrides the whole name, and `:memory:` is used as
+written (`packages/cli/src/database-path.ts:4-12`, `packages/util/src/global-roots.ts:5-13`).
+The rows are namespaced by the host (`packages/core/src/plugin/host.ts:609-616`), so filter
+on the plugin prefix:
 
 ```sh
 sqlite3 ~/.local/share/opencode/opencode.db \

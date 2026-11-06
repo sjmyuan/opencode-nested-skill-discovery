@@ -32,7 +32,7 @@ An entry can be:
 - a symlink to either of the above (`packages/core/src/plugin/source-directory.ts:21-31`)
 
 A directory target is resolved by trying `<dir>/server` and then `<dir>/index`
-(`packages/plugin/src/host.ts:16-36`). This repository's entry is `index.ts`, which
+(`packages/plugin/src/host.ts:17-44`). This repository's entry is `index.ts`, which
 default-exports the plugin definition (`index.ts:1-4`), and no `package.json` field is
 consulted for that resolution.
 
@@ -111,4 +111,4 @@ npm test
 ```
 
 `npm ci` installs from `package-lock.json`; the gate is `tsc --noEmit` plus `vitest run`
-(`package.json:7-11`). The entry point stays `index.ts`.
+(`package.json:7-12`). The entry point stays `index.ts`.
