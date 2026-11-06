@@ -1,5 +1,8 @@
+import { realpathSync } from "node:fs"
+import { symlink, unlink } from "node:fs/promises"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { nativeIdFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
 import { createRegistry, selectSuppressed } from "../src/registry.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
 import { createRegistryFixture, registryEntry } from "./support/registry-fixtures.ts"
@@ -133,6 +136,105 @@ describe("native dedupe after reload", () => {
       expect(outcome.reloads).toBe(1)
       expect(outcome.diagnostics).toContain("list: list down")
       expect(registry.snapshot.snapshots).toHaveLength(1)
+      expect(fake.editor.list()).toHaveLength(2)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+})
+
+describe("symlinked location dedupe", () => {
+  const CONFIG_ROOT = "pkg-a/.opencode/skills"
+  const CONFIGURED = ["deploy/SKILL.md", "foo.md"]
+  const OTHER = [
+    "pkg-b/.opencode/skills/a/SKILL.md",
+    "pkg-b/.opencode/skills/b/SKILL.md",
+    "pkg-b/.opencode/skills/c/SKILL.md",
+    "pkg-b/.opencode/skills/d/SKILL.md",
+    "pkg-b/.opencode/skills/e/SKILL.md",
+  ]
+
+  it("settles to one entry per canonical path for an aliased location", async () => {
+    const fixture = await createRegistryFixture()
+    const alias = `${fixture.root}-alias`
+    await symlink(fixture.root, alias, "dir")
+
+    try {
+      await fixture.write("opencode.json", JSON.stringify({ skills: [`./${CONFIG_ROOT}`] }))
+      for (const rel of [...CONFIGURED.map((entry) => `${CONFIG_ROOT}/${entry}`), ...OTHER]) {
+        await fixture.write(rel, DOC)
+      }
+      const natives = CONFIGURED.map((rel) =>
+        nativeSkill(nativeIdFor(rel), join(alias, CONFIG_ROOT, rel)),
+      )
+      const fake = fakeContext(natives, { directory: alias })
+      const sizes: number[] = []
+      fake.onReload = () => sizes.push(fake.editor.list().length)
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      const owners = new Map<string, string[]>()
+      for (const entry of fake.editor.list()) {
+        const canonical = realpathSync(String(entry.path))
+        owners.set(canonical, [...(owners.get(canonical) ?? []), String(entry.id)])
+      }
+
+      expect(fake.editor.list()).toHaveLength(7)
+      expect(owners.size).toBe(7)
+      expect([...owners.values()].every((ids) => ids.length === 1)).toBe(true)
+      expect(sizes).toEqual([9, 7])
+      expect(outcome.reloads).toBe(2)
+      expect(outcome.skills).toBe(5)
+      expect(outcome.subprojects).toBe(1)
+      expect(fake.editor.get("deploy")).toEqual(natives[0])
+      expect(fake.editor.get("foo")).toEqual(natives[1])
+      const survivors = fake.editor.list().filter((entry) => String(entry.id).startsWith("nested."))
+      expect(survivors).toHaveLength(5)
+      expect(survivors.every((entry) => !String(entry.path).includes("-alias"))).toBe(true)
+      expect(outcome.diagnostics.filter((entry) => entry.startsWith("dedupe:"))).toHaveLength(2)
+    } finally {
+      await unlink(alias)
+      await fixture.cleanup()
+    }
+  })
+})
+
+describe("dedupe path canonicalisation edges", () => {
+  it("leaves a native entry outside the location untouched", async () => {
+    const fixture = await deployedFixture()
+    const outside = await createRegistryFixture()
+
+    try {
+      await outside.write("skills/outside/SKILL.md", DOC)
+      const native = nativeSkill("outside", await outside.realpathOf("skills/outside/SKILL.md"))
+      const fake = fakeContext([native], { directory: fixture.root })
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(1)
+      expect(fake.editor.get("outside")).toEqual(native)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
+      expect(fake.editor.list()).toHaveLength(2)
+    } finally {
+      await outside.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  it("falls back to the raw path when realpath fails", async () => {
+    const fixture = await deployedFixture()
+
+    try {
+      const ghost = nativeSkill("ghost", join(fixture.root, "ghost", "SKILL.md"))
+      const fake = fakeContext([ghost], { directory: fixture.root })
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.reloads).toBe(1)
+      expect(fake.editor.get("ghost")).toEqual(ghost)
+      expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
       expect(fake.editor.list()).toHaveLength(2)
     } finally {
       await fixture.cleanup()
