@@ -30,8 +30,8 @@ async function seedWorkspace(fixture: RegistryFixture): Promise<void> {
   await fixture.write("pkgs/d1/d2/d3/d4/d5/d6/.opencode/skills/hidden/SKILL.md", LINT_D)
 }
 
-const nested = (fake: FakeContext) => fake.editor.list().filter((entry) => entry.id.startsWith("nested."))
-const byName = (fake: FakeContext, name: string) => nested(fake).find((entry) => entry.name === name)
+const nested = (fake: FakeContext) => fake.editor.list().filter((entry) => String(entry.id).startsWith("nested."))
+const byName = (fake: FakeContext, name: string) => nested(fake).find((entry) => String(entry.name) === name)
 
 async function expectedId(
   fixture: RegistryFixture,
@@ -88,7 +88,7 @@ describe("conformance: advertised union", () => {
       ),
     }
 
-    expect(Object.fromEntries(nested(fake).map((entry) => [entry.name, entry.id]))).toEqual(expected)
+    expect(Object.fromEntries(nested(fake).map((entry) => [String(entry.name), String(entry.id)]))).toEqual(expected)
   })
 
   it("uses the documented id shape for every nested entry", async () => {
