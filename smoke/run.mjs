@@ -16,7 +16,7 @@ const BUILTIN = (entry) => String(entry.path).startsWith("/builtin/")
 const options = parseArgs(process.argv.slice(2))
 const claims = []
 const state = {
-  fixture: undefined,
+  fixtures: [],
   servers: [],
   scratch: mkdtempSync(join(tmpdir(), "f8-smoke-scratch-")),
   logs: [],
@@ -68,7 +68,7 @@ async function cleanup() {
       console.error(`stop ${server.pid}: ${error.message}`)
     }
   }
-  if (state.fixture !== undefined && !state.keep) removeTree(state.fixture.root)
+  for (const fixture of state.fixtures.splice(0)) if (!state.keep) removeTree(fixture.root)
   removeTree(state.scratch)
 }
 
@@ -156,7 +156,7 @@ const withoutBuiltin = (capture) => capture.data.filter((entry) => !BUILTIN(entr
 
 async function suiteFixture(evidence, keep) {
   const fixture = buildFixture()
-  state.fixture = fixture
+  state.fixtures.push(fixture)
   const tree = listTree(fixture.root)
   writeEvidence("fixture-tree.txt", `${tree.join("\n")}\n`)
 
@@ -496,7 +496,7 @@ async function claimC5(fixture, server, id) {
 
 async function suiteSmoke(evidence, keep) {
   const fixture = buildFixture()
-  state.fixture = fixture
+  state.fixtures.push(fixture)
   const isolation = buildIsolation(fixture)
 
   const baseline = await phaseBaseline(fixture, isolation)
