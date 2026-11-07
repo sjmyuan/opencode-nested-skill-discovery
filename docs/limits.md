@@ -2,7 +2,7 @@
 
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The values
 are constants in `src/contracts.ts`: the refresh passes no `limits` override, so
-`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:425-427`), and this release reads no
+`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:447-449`), and this release reads no
 plugin configuration, so none of them can be changed from `opencode.json`.
 
 ## Summary
@@ -67,27 +67,36 @@ marker kinds are `src/contracts.ts:113-129`:
 | `hg` | a real `.hg` directory |
 
 Markers nest and never stop the walk: the deepest marker owner wins, and its relative path
-becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:91`). A symlinked
+becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:112`). A symlinked
 skill-root directory is not a marker and is not followed.
 
 ## Worktree families
 
 A linked worktree and its main checkout are one repository. From an ancestor location only
-the main working tree's skills are advertised; every skill in the linked worktree is hidden,
-including a skill that exists only there (`src/family.ts:168-196`,
-`test/conformance-family.test.ts`). The main working tree is the checkout whose `.git` is a
+the main working tree's skills are advertised, at the checkout root and in every nested
+subproject beneath it; every skill in the linked worktree is hidden, including a skill that
+exists only there (`src/family.ts:240-284`, `test/conformance-family.test.ts`,
+`test/indexer-family-nested.test.ts`). The main working tree is the checkout whose `.git` is a
 directory, not the one whose `.git` is a `gitdir:` file.
 
-- Derivation is filesystem-only: one `lstat` of `<checkout>/.git` and at most one 4 KB read
-  of a `.git` file, never a `git` subprocess (`src/family.ts:54-127`).
+- A nested subproject with no `.git` of its own resolves to the nearest ancestor `.git` inside
+  the location, so `vscode/extensions/copilot` is compared as part of the `vscode` checkout
+  (`src/family.ts:189-231`).
+- Derivation is filesystem-only: one memoised `lstat` per ancestor up to the location, one
+  `lstat` of `<checkout>/.git` per checkout, and at most one ≤ 4 KB read of a `.git` file,
+  never a `git` subprocess (`src/family.ts:58-131`, `155-231`).
 - The rule applies only when both checkouts are strict descendants of the location; a
   worktree of a repository outside the workspace, or a session located inside the worktree,
   sees both checkouts unchanged (`test/indexer-family.test.ts` B7–B8,
   `test/conformance-family.test.ts` C7).
+- A nested subproject with no `.git` ancestor inside the location is a foreign checkout: it is
+  kept and reports no diagnostic (`test/indexer-family-nested.test.ts` B18–B20).
 - A `.git` that cannot be read, carries no `gitdir:` line in its first 4 KB, points at a
   missing target, or names a common dir that is not its parent's own `.git` disables the rule
   for that checkout: the entries are advertised as before and one `family:` diagnostic is
-  recorded (`test/family.test.ts` A9–A12).
+  recorded (`test/family.test.ts` A6–A7, A9–A12, A22).
+- Creating a `.git` on an ancestor is outside the watch set, so a nested subproject starts
+  deduping at the next prompt or the next file move, not immediately (Q10).
 - Residual: a worktree of a **submodule** (`.git/modules/<n>/worktrees/<wt>`) cannot name a
   survivor, so that pair still double-registers (Q8).
 - Residual: deleting the main checkout's `.git` republishes the hidden worktree at the next
@@ -122,10 +131,10 @@ the walk (`src/scan.ts:323-353`, `398-419`). A single file over 128 KiB is skipp
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:429`).
+(`src/registry.ts:453`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:44`, `89-98`, ending
-in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:54-59`),
+in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:75-80`),
 where the overflow is summarised as `truncated: N more diagnostics`. A scan that truncates
 still feeds the outcome budget. No opencode `v2.0.26` surface renders them — see
 [architecture.md](architecture.md#failure-model).
@@ -135,7 +144,7 @@ still feeds the outcome budget. No opencode `v2.0.26` surface renders them — s
 | Field | Cap | Behaviour |
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
-| description | 500 code points | cut (`src/registry.ts:83-86`) |
+| description | 500 code points | cut (`src/registry.ts:104-107`) |
 | scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:45-47`) |
 | skill slug | 40 | cut, same (`src/indexer.ts:49-51`) |
 
@@ -151,7 +160,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:475-483`, `203-219`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:28`, `587-638`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:507-512`, `203-219`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:28`, `587-638`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -174,5 +183,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:502-511`, `569-585`, `523-549`). Details in
+(`src/registry.ts:534-543`, `569-585`, `523-549`). Details in
 [architecture.md](architecture.md#refresh-model).

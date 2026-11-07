@@ -93,7 +93,7 @@ Detail and the full limit list: [docs/limits.md](docs/limits.md).
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
 | Duplicate | a nested entry duplicating a native skill's path is suppressed on the refresh that sees it; when the foreign tier still looks incomplete, at the latest about 4 s after that refresh — otherwise on the next refresh |
-| Worktree family | a linked worktree of the main checkout is hidden from an ancestor workspace; only the main checkout's skills are advertised |
+| Worktree family | a linked worktree of the main checkout is hidden from an ancestor workspace, at the checkout root and in every nested subproject beneath it; only the main checkout's skills are advertised |
 | Scale | around 50 nested entries is the point to revisit on-demand listing |
 
 A truncated scan still advertises what it found. No limit is configurable in this release.
@@ -129,9 +129,11 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
 - **A skill never appears even though it exists on disk.** A `skill` rule that denies its
   ID removes it from the guidance block, so the model never sees it.
 - **A worktree's skill is missing from an ancestor session.** A linked worktree and its main
-  checkout form one repo family: an ancestor workspace advertises the main checkout's skills
-  only, and the worktree's copy is hidden with a `family:` diagnostic. Open the session
-  inside the worktree to see its own view — see
+  checkout form one repo family, at the checkout root and in every nested subproject beneath
+  it: an ancestor workspace advertises the main checkout's skills only, so a worktree copy
+  such as `packages/app/.claude/skills` is hidden with a `family:` diagnostic. A nested
+  subproject with no `.git` ancestor inside the workspace is a foreign checkout and stays
+  visible, silently. Open the session inside the worktree to see its own view — see
   [docs/limits.md](docs/limits.md#worktree-families).
 - **You need to see what was discovered.** Read storage: `nested/manifest/version`,
   `nested/manifest/<scopeToken>` (ids and names), `nested/subproject/<scopeToken>` (with
