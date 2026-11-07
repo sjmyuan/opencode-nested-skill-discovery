@@ -53,9 +53,6 @@ const gitTrace = async <T>(run: () => Promise<T>): Promise<{ stats: number; open
   return { stats: trace.gitStats, opens: trace.gitOpens }
 }
 
-const familyLines = (diagnostics: readonly string[]): readonly string[] =>
-  diagnostics.filter((line) => line.startsWith("family:"))
-
 /** Main + linked worktree, each with a root and a nested skill and command of the same name. */
 const buildWorkspace = async (): Promise<FamilyWorkspace> => {
   const ws = await workspace()

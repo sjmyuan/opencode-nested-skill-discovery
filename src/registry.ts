@@ -15,6 +15,8 @@ import {
 } from "./contracts.ts"
 import { createBackstop, type Backstop } from "./backstop.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
+import { filterCommandFamilies } from "./command-family.ts"
+import { createFamilyPass } from "./family.ts"
 import { persistRegistry } from "./manifest.ts"
 import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
@@ -455,9 +457,24 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     // A good scan is a valid watcher set even if a later stage fails (PD7).
     await syncWatchers(base, scanned.value.candidates)
 
-    const indexed = await runStage(diagnostics, "index", () =>
-      indexCandidates(scanned.value.candidates, { location: base, nativeRoots }),
-    )
+    // One family pass per refresh, shared with the skill indexer inside the existing
+    // index stage (ADR command R8). F2 runs its native pre-drop before the
+    // `filterCommandFamilies` call; F5 replaces this seam with publication.
+    const indexed = await runStage(diagnostics, "index", async () => {
+      const commands = scanned.value.commands
+      const family =
+        scanned.value.candidates.length + commands.length > 0 ? await createFamilyPass(base) : undefined
+      const skills = await indexCandidates(scanned.value.candidates, { location: base, nativeRoots, family })
+      if (family === undefined || commands.length === 0) {
+        return { skills: skills.skills, commands, diagnostics: skills.diagnostics }
+      }
+      const filtered = await filterCommandFamilies(commands, { family })
+      return {
+        skills: skills.skills,
+        commands: filtered.commands,
+        diagnostics: [...skills.diagnostics, ...filtered.diagnostics],
+      }
+    })
     if (!indexed.ok) return record(fail(diagnostics))
     diagnostics.push(...indexed.value.diagnostics)
 
