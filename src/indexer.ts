@@ -9,7 +9,7 @@ import {
   MAX_SKILL_SLUG_LENGTH,
 } from "./contracts.ts"
 import { type Frontmatter, parseSkillFrontmatter } from "./frontmatter.ts"
-import { deriveFamilies, selectSurvivorEntries } from "./family.ts"
+import { type FamilyPass, createFamilyPass, selectSurvivorEntries } from "./family.ts"
 
 export interface IndexedSkill {
   readonly id: string
@@ -24,6 +24,8 @@ export interface IndexedSkill {
 export interface IndexOptions {
   readonly location: string
   readonly nativeRoots?: readonly string[]
+  /** One family pass per refresh (ADR command R8); omit to derive privately. */
+  readonly family?: FamilyPass
 }
 
 const hash8 = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 8)
@@ -167,12 +169,14 @@ const applyFamilies = async (
   entries: readonly Prepared[],
   location: string,
   diagnostics: string[],
+  family?: FamilyPass,
 ): Promise<readonly Prepared[]> => {
   if (entries.length === 0) return entries
   const checkouts = [...new Set(entries.map((entry) => entry.subprojectRealPath))]
-  const derived = await deriveFamilies(checkouts, location)
+  const pass = family ?? (await createFamilyPass(location))
+  const derived = await pass.derive(checkouts)
   diagnostics.push(...derived.diagnostics)
-  const selected = selectSurvivorEntries(entries, derived.families, derived.location)
+  const selected = selectSurvivorEntries(entries, derived.families, pass.location)
   diagnostics.push(...selected.diagnostics)
   return selected.kept
 }
@@ -239,7 +243,7 @@ export async function indexCandidates(
 
   // Dedupe after parsing: a malformed winner must not shadow a valid sibling.
   const deduped = dedupeByNativeId(dedupeByRealPath(prepared, diagnostics), diagnostics)
-  const kept = await applyFamilies(deduped, options.location, diagnostics)
+  const kept = await applyFamilies(deduped, options.location, diagnostics, options.family)
   const skills = kept
     .map(toIndexedSkill)
     .sort((left, right) => comparePath(left.id, right.id))

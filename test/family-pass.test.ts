@@ -2,7 +2,10 @@ import { realpath } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import { createFamilyPass, deriveFamilies, type FamilyPass } from "../src/family.ts"
-import { createFamilyWorkspace, type FamilyWorkspace } from "./support/family-fixtures.ts"
+import { indexCandidates } from "../src/indexer.ts"
+import { checkoutSkill, createFamilyWorkspace, nestedCheckoutSkill, type FamilyWorkspace } from "./support/family-fixtures.ts"
+
+const NESTED = "packages/app/.opencode/skills"
 
 const trace = vi.hoisted(() => ({ recording: false, gitStats: 0, gitOpens: 0 }))
 
@@ -96,5 +99,33 @@ describe("one family pass per refresh", () => {
 
     expect(first.diagnostics).toEqual([`family: ${await realpath(absolute(ws, "broken"))}: no gitdir line`])
     expect(second.diagnostics).toEqual(first.diagnostics)
+  })
+
+  it("P4: indexCandidates accepts an injected pass and returns the same skills and diagnostics", async () => {
+    const ws = await workspace()
+    await ws.repo("main")
+    await ws.worktree("wt", "main", "linked")
+    await checkoutSkill(ws, "main", "deploy")
+    await nestedCheckoutSkill(ws, "main", NESTED, "tidy")
+    await checkoutSkill(ws, "wt", "deploy")
+    await nestedCheckoutSkill(ws, "wt", NESTED, "tidy")
+    const candidates = [
+      await ws.candidate("main/.opencode/skills/deploy/SKILL.md", "main"),
+      await ws.candidate(`main/${NESTED}/tidy/SKILL.md`, "main/packages/app"),
+      await ws.candidate("wt/.opencode/skills/deploy/SKILL.md", "wt"),
+      await ws.candidate(`wt/${NESTED}/tidy/SKILL.md`, "wt/packages/app"),
+    ]
+    const pass = await createFamilyPass(ws.root)
+
+    const injected = await indexCandidates(candidates, { location: ws.root, family: pass })
+    const standalone = await indexCandidates(candidates, { location: ws.root })
+    const warm = await gitTrace(async () => {
+      await indexCandidates(candidates, { location: ws.root, family: pass })
+    })
+
+    expect(injected.skills).toEqual(standalone.skills)
+    expect(injected.diagnostics).toEqual(standalone.diagnostics)
+    expect(injected.skills).toHaveLength(2)
+    expect(warm).toEqual({ stats: 0, opens: 0 })
   })
 })
