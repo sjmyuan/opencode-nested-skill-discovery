@@ -7,6 +7,8 @@ import { nodeWatchFactory } from "./watch.ts"
 export const id = "nested-skill-discovery"
 
 export type SkillEditor = Parameters<Parameters<Plugin.Context["skill"]["transform"]>[0]>[0]
+export type CommandEditor = Parameters<Parameters<Plugin.Context["command"]["transform"]>[0]>[0]
+export type CommandInvocation = Parameters<Parameters<CommandEditor["add"]>[0]["execute"]>[0]
 
 export const EMPTY_SNAPSHOT: Snapshot = Object.freeze({
   scopeToken: "",
