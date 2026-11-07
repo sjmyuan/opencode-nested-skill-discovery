@@ -294,6 +294,7 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | `src/native.ts` | the native skill roots to exclude |
 | `src/command-native.ts` | the native command names visible from a location: ancestor and global walks, shared budgets, no content read |
 | `src/command-shadow.ts` | native precedence for command names: pre-drop, post-refresh audit, cross-pass denial ledger |
+| `src/command-names.ts` | command-name composition: `composeCommandName` joins `subproject:command`, `composeCommandNames` resolves first-wins collisions, `createNameLedger` silences repeats, and `QualifiedCommand.publishedName` is the key |
 | `src/registry.ts` | the refresh pipeline, transform registration, snapshot swap, shutdown |
 | `src/manifest.ts` | version, manifest and cache writes, location-scoped prune |
 | `src/replay.ts` | add-only snapshot replay into the transform editor |
