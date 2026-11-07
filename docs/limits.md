@@ -21,6 +21,13 @@ plugin configuration, so none of them can be changed from `opencode.json`.
 | Description | 500 code points | truncated |
 | Scope slug / skill slug | 24 / 40 characters | slug truncated, hash keeps the ID unique |
 | Entry ID | 96 characters declared | structural maximum is 90, so no ID is ever cut |
+| Command template | the file body, so the same 128 KiB per-file limit | the whole command file is skipped with `command-oversize:`; the command snapshot adds no new budget |
+
+The command template is the file body after the closing fence, so it is bounded by the shared
+128 KiB per-file limit (`src/contracts.ts:142-148`) rather than by a budget of its own. The
+snapshot reader re-checks the limit on the bytes it read, because a file can grow between the
+scan and the read (`src/command-snapshot.ts:87-90`), and the template is then stored in
+`nested/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
 
 ## Depth
 

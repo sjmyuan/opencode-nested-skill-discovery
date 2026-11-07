@@ -138,9 +138,11 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
   [docs/limits.md](docs/limits.md#worktree-families).
 - **You need to see what was discovered.** Read storage: `nested/manifest/version`,
   `nested/manifest/<scopeToken>` (ids and names), `nested/subproject/<scopeToken>` (with
-  content). Raw KV keys carry the host's `plugin:<id>:` prefix, so filter
-  `LIKE 'plugin:%:nested/%'`. A record only disappears when the same location refreshes
-  again after the skill is gone.
+  content). Commands have their own store: `nested/commands/version`,
+  `nested/commands/manifest/<scopeToken>` (names, routing keys) and
+  `nested/commands/<scopeToken>` (with the template). Raw KV keys carry the host's
+  `plugin:<id>:` prefix, so filter `LIKE 'plugin:%:nested/%'`. A record only disappears when
+  the same location refreshes again after the skill or command is gone.
 - **A refresh looks delayed.** Events are coalesced for 250 ms, and a prompt-triggered
   refresh runs at most once per 2 s. Diagnostics are attached to the `RefreshOutcome` that
   `activate()`/`refresh()` return, but no opencode `v2.0.26` surface renders them — see

@@ -9,9 +9,10 @@ permission rules are in [permissions.md](permissions.md), and the decision of re
 ## What the plugin changes
 
 The plugin adds entries and removes nothing native. Each refresh scans the location,
-replays the result through the single `skill.transform` it registers, and leaves native,
-global, and session skills exactly as they were (`src/registry.ts:327-346`,
-`src/replay.ts:18-45`). The only entry it ever drops is its own duplicate of a nested skill
+replays the result through the single `skill.transform` it registers, publishes commands
+through the single `command.transform` it registers, and leaves native, global, and session
+skills exactly as they were (`src/registry.ts:349-397`, `src/replay.ts:18-45`,
+`src/command-replay.ts:43-90`). The only entry it ever drops is its own duplicate of a nested skill
 already registered under another path ([Advertisement](#advertisement)), and it never
 registers a second checkout of one repository ([Repo families](#repo-families)). Every entry
 it adds carries an ID starting with `nested.` (`src/contracts.ts:78`).
@@ -55,13 +56,23 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:476-485` |
 | 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:487-543`, `224-240` |
 
+That table is the skill pipeline. After the skill manifest stage, four **non-fatal** command
+stages run before the skill reload: compose the surviving commands' names, drop native
+collisions, build the frozen command snapshot, persist and swap it, then call
+`command.reload()` exactly once (`src/registry.ts:566-611`). A failure in any of them is a
+`command-<stage>:` diagnostic; it never replaces the previous command snapshot and never
+blocks the skill reload.
+
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
 the swap must be visible before the host rebuilds its skill list.
 
-Exactly one transform is registered per registry, guarded by a `registering` promise
-(`src/registry.ts:327-346`). Refreshes reuse it and never add a second one. A refresh reloads
-once, twice when it suppresses a duplicate in the same pass, and a deferred check that later
-suppresses one reloads on its own after the refresh has returned (`src/registry.ts:670`).
+Exactly one skill transform (`src/registry.ts:349-366`) and one command transform
+(`src/registry.ts:371-397`) are registered per registry, guarded by a `registering` promise.
+Refreshes reuse them and never add a second one. A refresh reloads skills once, twice when it
+suppresses a duplicate in the same pass, and a deferred check that later suppresses one
+reloads on its own after the refresh has returned (`src/registry.ts:670`). Commands reload
+exactly once per refresh that reaches the command stages, alongside — never instead of — the
+skill reload.
 
 ## Discovery bounds
 
@@ -177,33 +188,42 @@ timeout that reports failure: the deferred check simply re-lists and re-filters.
 
 ## Storage model
 
-Three logical keys (`src/contracts.ts:141-145`):
+Three skill keys (`src/contracts.ts:201-204`) and three command keys
+(`src/contracts.ts:205-207`):
 
 | Key | Contents |
 |---|---|
 | `nested/manifest/version` | monotonic counter: `max(current + 1, Date.now())` (`src/manifest.ts:114-126`) |
 | `nested/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }` (`src/contracts.ts:24-29`, `src/manifest.ts:138-151`) |
 | `nested/subproject/<scopeToken>` | the same grouping with each entry's `content` (`src/manifest.ts:59-66`, `144-162`) |
+| `nested/commands/version` | the command store's own counter; it moves only when the command set changes (`src/manifest.ts:333-393`) |
+| `nested/commands/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }`, no `template` (`src/manifest.ts:407-413`) |
+| `nested/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:71-93`, `src/manifest.ts:414-419`) |
 
 A manifest entry is `{ id, canonicalPath, name, description?, autoinvoke? }` and carries no
 `content` (`src/manifest.ts:51-57`). The cache entry adds `content`, the
 markdown body with the frontmatter block removed (`src/manifest.ts:59-66`,
 `src/indexer.ts:191`).
 
-Every successful refresh writes the three keys and then prunes. Pruning scans both prefixes
-page by page, keeps the tokens written in this run plus the version key, and removes a stale
-record only when its recorded `directory` is inside the location being scanned
-(`src/manifest.ts:79-108`, `178-184`). A non-nested location therefore never deletes another
+Every successful refresh writes the three skill keys and then prunes them. Pruning scans both
+prefixes page by page, keeps the tokens written in this run plus the version key, and removes
+a stale record only when its recorded `directory` is inside the location being scanned
+(`src/manifest.ts:82-111`, `178-184`). The command store instead compares a canonical
+signature and writes nothing at all when the records already match, counter included
+(`src/manifest.ts:350-393`). It prunes both command prefixes in-location, and its cache-prefix
+prune skips `nested/commands/manifest/` because that prefix is nested inside the cache prefix
+(`src/manifest.ts:323-324`, `452-458`). A non-nested location therefore never deletes another
 workspace's records, and a record whose token is still active is never touched. Nested
 locations share one plugin-id storage, so an outer location's refresh sees an inner location's
 records inside its own root and prunes them; a directory bound by two locations has one scope
 token, so its record is last-writer-wins on the same key — the record carries no location
 field (`src/contracts.ts:24-29`).
 
-The cache is written but not read back: no code path calls `storage.get` on
+The skill cache is written but not read back: no code path calls `storage.get` on
 `nested/subproject/<token>`, so nothing is served from storage. ADR R15 and solution §4.7
 describe that cache as reloaded on bind; those documents are stale on that point — the only
-storage read in the plugin is the version counter (`src/manifest.ts:114-126`). The manifest is likewise an
+storage reads in the plugin are the two version counters and the command cache the
+change comparison inspects (`src/manifest.ts:337-366`). The manifest is likewise an
 audit and diagnostics artifact — it is never a filter for what gets advertised
 (`src/registry.ts:404-553` reads only live scan output).
 
@@ -273,9 +293,13 @@ advertised list is whatever the last completed step produced.
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:497`, `514-532` |
 | Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:349-359`, `365-393`, `410-414`, `src/plugin.ts:24-28` |
 | A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:672` |
+| A command stage throws (index, snapshot, persist, reload) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:566-611` |
+| A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
+| A published command never appears | a native name shadows it or a repo family suppresses it before publication; nothing audits `command.list()` after the reload yet, so a late shadow recovers only at the next rescan | `src/registry.ts:566-581`, `src/command-shadow.ts:86-117` |
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
-(`src/registry.ts:185-192`). opencode `v2.0.26` renders no plugin log or diagnostic surface,
+(`src/registry.ts:193-202`), which also reports `commands` and `commandReloads` next to the
+skill `skills`/`reloads` counts. opencode `v2.0.26` renders no plugin log or diagnostic surface,
 so a user sees them only through a caller that inspects the outcome; the observable
 fallbacks are the guidance block, the `@` menu, and storage keys.
 
@@ -285,9 +309,9 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 |---|---|
 | `index.ts` | default export for the host loader |
 | `src/plugin.ts` | plugin ID, `setup`, cleanup, empty snapshot |
-| `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers, command root kinds and candidate shape |
+| `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers, command root kinds, candidate and command-snapshot shapes |
 | `src/scan.ts` | bounded DFS, markers, skill roots, command roots and candidates, budgets, refusals |
-| `src/frontmatter.ts` | minimal frontmatter reader: `name`, `description`, `metadata.opencode/autoinvoke`, `disable-model-invocation` |
+| `src/frontmatter.ts` | minimal frontmatter reader: `name`, `description`, `metadata.opencode/autoinvoke`, `disable-model-invocation`; the additive command reader (`description`, `agent`, `model`, `subagent`/`subtask`, verbatim template) |
 | `src/family.ts` | repo-family derivation from `.git` and the survivor filter |
 | `src/indexer.ts` | ranks, dedupes, parses candidates; drops non-survivor checkouts; derives IDs and names |
 | `src/names.ts` | qualified display names, truncation, sanitisation |
@@ -295,8 +319,10 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | `src/command-native.ts` | the native command names visible from a location: ancestor and global walks, shared budgets, no content read |
 | `src/command-shadow.ts` | native precedence for command names: pre-drop, post-refresh audit, cross-pass denial ledger |
 | `src/command-names.ts` | command-name composition: `composeCommandName` joins `subproject:command`, `composeCommandNames` resolves first-wins collisions, `createNameLedger` silences repeats, and `QualifiedCommand.publishedName` is the key |
-| `src/registry.ts` | the refresh pipeline, transform registration, snapshot swap, shutdown |
-| `src/manifest.ts` | version, manifest and cache writes, location-scoped prune |
+| `src/command-snapshot.ts` | reads each qualified command's content, drops a malformed, unreadable or oversized file, and freezes the per-subproject command snapshot |
+| `src/command-replay.ts` | add-only, synchronous, I/O-free command replay; `execute` resolves its entry from the live snapshot |
+| `src/registry.ts` | the refresh pipeline, skill and command transform registration, snapshot swaps, shutdown |
+| `src/manifest.ts` | skill and command version, manifest and cache writes, location-scoped prune |
 | `src/replay.ts` | add-only snapshot replay into the transform editor |
 | `src/watch.ts` | watcher set derivation, handle reconciliation, debounce timer, node factory |
 | `src/backstop.ts` | throttled prompt-triggered refresh |
