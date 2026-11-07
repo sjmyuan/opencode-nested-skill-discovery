@@ -37,6 +37,7 @@ export function composeCommandName(subproject: string, nativeName: string): stri
  *
  * The input is re-sorted so the snapshot order never depends on the caller, and the
  * dropped entry is reported with its location-relative path so no absolute path leaks.
+ * `location` must be the canonical scan location, the same path the candidates came from.
  */
 export function composeCommandNames(
   commands: readonly CommandCandidate[],
