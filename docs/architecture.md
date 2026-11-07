@@ -56,12 +56,12 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:561-621` |
 | 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:629-680`, `237-253` |
 
-That table is the skill pipeline. After the skill manifest stage, four **non-fatal** command
-stages run before the skill reload: compose the surviving commands' names, drop native
-collisions, build the frozen command snapshot, persist and swap it, then call
-`command.reload()` exactly once (`src/registry.ts:569-619`). A failure in any of them is a
-`command-<stage>:` diagnostic; it never replaces the previous command snapshot and never
-blocks the skill reload.
+That table is the skill pipeline. After the skill manifest stage, five **non-fatal** command
+stages run around the skill reload: compose the surviving commands' names, drop native
+collisions, build the frozen command snapshot, persist and swap it, call `command.reload()`
+exactly once, then audit the reloaded listing against that snapshot before reporting a shadow
+(`src/registry.ts:579-643`). A failure in any of them is a `command-<stage>:` diagnostic; it
+never replaces the previous command snapshot and never blocks the skill reload.
 
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
 the swap must be visible before the host rebuilds its skill list.
@@ -296,9 +296,16 @@ advertised list is whatever the last completed step produced.
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:634`, `651-669` |
 | Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:406-416`, `422-450`, `467-472`, `src/plugin.ts:28-32` |
 | A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:816` |
-| A command stage throws (index, snapshot, persist, reload) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:569-619` |
+| A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:579-643` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
-| A published command never appears | a native name shadows it or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the audit reports `native-shadow-audit:` and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:628-642`, `src/command-shadow.ts:86-117` |
+| A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |
+| A published command never appears | a native name shadows it or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the audit reports `native-shadow-audit:` and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:627-643`, `src/command-shadow.ts:86-117` |
+
+When the pre-drop stage never ran, the audit is handed `EMPTY_NATIVE_COMMANDS`
+(`src/command-audit.ts:5-10`): its `complete: true` asserts only that **no walk happened**, so
+nothing is known to be native-owned. It is a marker of that state, not a claim about the
+filesystem; a walk that was truncated instead reports `budget-*` and is never treated as
+complete.
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
 (`src/registry.ts:193-202`), which also reports `commands` and `commandReloads` next to the
@@ -325,6 +332,11 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | `src/command-names.ts` | command-name composition: `composeCommandName` joins `subproject:command`, `composeCommandNames` resolves first-wins collisions, `createNameLedger` silences repeats, and `QualifiedCommand.publishedName` is the key |
 | `src/command-snapshot.ts` | reads each qualified command's content, drops a malformed, unreadable or oversized file, and freezes the per-subproject command snapshot |
 | `src/command-replay.ts` | add-only, synchronous, I/O-free command replay; `execute` resolves its entry from the live snapshot |
+| `src/command-expand.ts` | native-parity template expansion: tokenise → `$N` with the highest index absorbing the tail → `$ARGUMENTS` → append → trim → shell; the text half is pure and the shell pass is injected |
+| `src/command-shell.ts` | `{env, platform}` to a shell target, the family's argv shape, the production runner, and the injectable `ProcessRunner` |
+| `src/command-model.ts` | the one place the stored `model` string and the routing `Model.Ref` meet |
+| `src/command-family.ts` | command candidates through the delivered repo-family survivor filter |
+| `src/command-execute.ts` | invocation routing: expansion, agent and model selection, child creation for a subagent, prompt forwarding |
 | `src/registry.ts` | the refresh pipeline, skill and command transform registration, snapshot swaps, shutdown |
 | `src/manifest.ts` | skill and command version, manifest and cache writes, location-scoped prune |
 | `src/replay.ts` | add-only snapshot replay into the transform editor |

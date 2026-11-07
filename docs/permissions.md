@@ -190,3 +190,11 @@ form above for new configuration.
 Session-level rules, where a host or another plugin sets them, merge after the agent's and
 therefore win over both (`packages/core/src/permission.ts:158-164`,
 `packages/core/src/session/context.ts:130-131`).
+
+## Commands
+
+A published nested command has no permission action of its own: the invocation host is two
+domains only — `session` and `agent` (`src/command-execute.ts:15-18`) — so no gate can be
+added for a command name without changing that type. An invocation prompts as the session's
+agent, and a `subagent: true` command creates a child session exactly like a task, so the
+usual `agent` and tool rules apply to whatever the command then does.
