@@ -43,3 +43,17 @@ export async function checkoutSkill(
 ): Promise<string> {
   return ws.write(path.posix.join(checkout, ".opencode", "skills", slug, "SKILL.md"), skillDoc(name))
 }
+
+export async function nestedCheckoutSkill(
+  ws: Workspace,
+  checkout: string,
+  relPath: string,
+  slug: string,
+  name = slug,
+): Promise<string> {
+  return ws.write(path.posix.join(checkout, relPath, slug, "SKILL.md"), skillDoc(name))
+}
+
+export async function plainProject(ws: FamilyWorkspace, relPath: string): Promise<string> {
+  return ws.mkdirp(relPath)
+}
