@@ -88,7 +88,7 @@ Detail and the full limit list: [docs/limits.md](docs/limits.md).
 | Limit | Value |
 |---|---|
 | Subproject depth | 5 directories below the workspace; unbounded inside an opened skill root |
-| Scan budgets | 20,000 directories · 5,000 skill files · 128 KiB per file · 16 MiB total |
+| Scan budgets | 20,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total |
 | Display caps | name 80 code points · description 500 |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
@@ -121,9 +121,10 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
 
 ## Troubleshooting
 
-- **An expected skill is missing.** Check the subproject has one of the eight markers
-  (`.opencode/skills`, `.opencode/skill`, `.claude/skills`, `.agents/skills`, `AGENTS.md`,
-  `CLAUDE.md`, `.git`, `.hg`), that it sits at most 5 directories below the workspace, and
+- **An expected skill is missing.** Check the subproject has one of the ten markers
+  (`.opencode/skills`, `.opencode/skill`, `.claude/skills`, `.agents/skills`,
+  `.opencode/command`, `.opencode/commands`, `AGENTS.md`, `CLAUDE.md`, `.git`, `.hg`),
+  that it sits at most 5 directories below the workspace, and
   that no directory in the path is pruned (`node_modules`, `dist`, `vendor`, …). Only
   `*.md` directly under a skill root and `SKILL.md` below it count.
 - **A skill never appears even though it exists on disk.** A `skill` rule that denies its

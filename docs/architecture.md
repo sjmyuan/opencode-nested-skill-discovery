@@ -285,8 +285,8 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 |---|---|
 | `index.ts` | default export for the host loader |
 | `src/plugin.ts` | plugin ID, `setup`, cleanup, empty snapshot |
-| `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers |
-| `src/scan.ts` | bounded DFS, markers, skill roots, budgets, refusals |
+| `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers, command root kinds and candidate shape |
+| `src/scan.ts` | bounded DFS, markers, skill roots, command roots and candidates, budgets, refusals |
 | `src/frontmatter.ts` | minimal frontmatter reader: `name`, `description`, `metadata.opencode/autoinvoke`, `disable-model-invocation` |
 | `src/family.ts` | repo-family derivation from `.git` and the survivor filter |
 | `src/indexer.ts` | ranks, dedupes, parses candidates; drops non-survivor checkouts; derives IDs and names |

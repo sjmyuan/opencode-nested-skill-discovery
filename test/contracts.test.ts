@@ -9,6 +9,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_SCOPE_SLUG_LENGTH,
   MAX_SKILL_SLUG_LENGTH,
+  COMMAND_ROOT_DIRECTORIES,
   PRUNE_DIRECTORIES,
   PROMPT_THROTTLE_MS,
   SKILL_ROOT_DIRECTORIES,
@@ -46,6 +47,8 @@ const ADR_SUBPROJECT_MARKERS = [
   "claude-skills",
   "git",
   "hg",
+  "opencode-command",
+  "opencode-commands",
   "opencode-skill",
   "opencode-skills",
 ]
@@ -56,6 +59,8 @@ const ADR_SKILL_ROOT_DIRECTORIES = [
   "opencode-skill",
   "opencode-skills",
 ]
+
+const ADR_COMMAND_ROOT_DIRECTORIES = ["opencode-command", "opencode-commands"]
 
 describe("scan budgets", () => {
   it("matches the ADR defaults", () => {
@@ -113,12 +118,16 @@ describe("discovery rules", () => {
     expect([...PRUNE_DIRECTORIES].sort()).toEqual(ADR_PRUNE_DIRECTORIES)
   })
 
-  it("enumerates the eight R6 subproject marker kinds", () => {
+  it("enumerates the ten R6 subproject marker kinds", () => {
     expect([...SUBPROJECT_MARKERS].sort()).toEqual(ADR_SUBPROJECT_MARKERS)
   })
 
   it("scans exactly the four skill root directories", () => {
     expect([...SKILL_ROOT_DIRECTORIES].sort()).toEqual(ADR_SKILL_ROOT_DIRECTORIES)
+  })
+
+  it("scans exactly the two command root directories", () => {
+    expect([...COMMAND_ROOT_DIRECTORIES].sort()).toEqual(ADR_COMMAND_ROOT_DIRECTORIES)
   })
 })
 
