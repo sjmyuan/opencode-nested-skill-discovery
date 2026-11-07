@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { expandCommand, tokenizeArguments } from "../src/command-expand.ts"
-import { fakeRunner, posixTarget } from "./support/command-fixtures.ts"
+import { failed, fakeRunner, posixTarget, ran, scriptedRunner, type FakeOutcome } from "./support/command-fixtures.ts"
 
 /**
  * Golden vectors G1–G21 (plan PD3/PD4): the native five-step text pipeline, transcribed
@@ -22,6 +22,16 @@ const expandText = async (template: string, args: string) => {
   expect(result.diagnostics).toEqual([])
   expect(result.shellFailed).toBe(false)
   return result
+}
+
+const expandShell = async (template: string, outcomes: readonly FakeOutcome[], cwd = "/loc/sub") => {
+  const runner = scriptedRunner(outcomes)
+  const result = await expandCommand({
+    template,
+    args: "",
+    shell: { target: posixTarget(), cwd, run: runner.run },
+  })
+  return { result, runner }
 }
 
 describe("golden: native text pipeline (G1–G21)", () => {
@@ -130,6 +140,55 @@ describe("golden: native text pipeline (G1–G21)", () => {
   it("G21 a placeholder suppresses the append", async () => {
     const result = await expandText("x $1", "")
     expect(result.text).toBe("x")
+  })
+})
+
+describe("golden: shell pass (G22–G28)", () => {
+  it("G22 shell success", async () => {
+    const { result, runner } = await expandShell("run !`echo hi`", [ran("hi\n")])
+    expect(result.text).toBe("run hi\n")
+    expect(result.diagnostics).toEqual([])
+    expect(result.shellFailed).toBe(false)
+    expect(runner.calls).toHaveLength(1)
+  })
+
+  it("G23 shell match order", async () => {
+    const { result, runner } = await expandShell("a !`one` b !`two`", [ran("1"), ran("2")])
+    expect(result.text).toBe("a 1 b 2")
+    expect(runner.calls.map((call) => call.args)).toEqual([
+      ["-c", "one"],
+      ["-c", "two"],
+    ])
+  })
+
+  it("G24 output $& and $$ stay literal", async () => {
+    const { result } = await expandShell("!`emit`", [ran("A$&B$$C")])
+    expect(result.text).toBe("A$&B$$C")
+  })
+
+  it("G25 non-zero exit is not a failure", async () => {
+    const { result } = await expandShell("!`false`", [ran("", 1)])
+    expect(result.text).toBe("")
+    expect(result.diagnostics).toEqual([])
+    expect(result.shellFailed).toBe(false)
+  })
+
+  it("G26 spawn failure is diagnosed and flags the result", async () => {
+    const { result } = await expandShell("!`nope`", [failed("ENOENT")])
+    expect(result.text).toBe("")
+    expect(result.diagnostics).toEqual([`Shell interpolation failed for "nope": ENOENT`])
+    expect(result.shellFailed).toBe(true)
+  })
+
+  it("G27 trim happens before the shell, with no final trim", async () => {
+    const { result, runner } = await expandShell("  !`echo`  ", [ran("hi\n")])
+    expect(result.text).toBe("hi\n")
+    expect(runner.calls[0]?.args).toEqual(["-c", "echo"])
+  })
+
+  it("G28 run shape carries the resolved shell, argv and caller cwd", async () => {
+    const { runner } = await expandShell("!`echo hi`", [ran("hi\n")])
+    expect(runner.calls).toEqual([{ file: "/bin/zsh", args: ["-c", "echo hi"], cwd: "/loc/sub" }])
   })
 })
 

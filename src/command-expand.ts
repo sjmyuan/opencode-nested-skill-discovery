@@ -1,14 +1,19 @@
 /**
- * Native-parity command template expansion (ADR R9/R10/R11, plan PD3/PD4).
+ * Native-parity command template expansion (ADR R9/R10/R11, plan PD3–PD6).
  *
  * The five native steps are immovable: tokenise → `$N` (the highest index absorbs the
- * tail) → `$ARGUMENTS` (raw) → append when no placeholder → trim → shell. This module
- * owns the text half in Step 3; the shell pass lands in Step 5.
+ * tail) → `$ARGUMENTS` (raw) → append when no placeholder → trim → shell. The text
+ * half is pure; the shell pass reaches the process world only through the injected
+ * `ProcessRunner`, never throws, and never adds a final trim.
  */
+
+import { shellArgs } from "./command-shell.ts"
+import type { ProcessOutcome, ProcessRunner, ShellTarget } from "./command-shell.ts"
 
 const ARGUMENT_PATTERN = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
 const PLACEHOLDER_PATTERN = /\$(\d+)/g
 const QUOTE_TRIM_PATTERN = /^["']|["']$/g
+const SHELL_PATTERN = /!`([^`]+)`/g
 
 /** The native tokenizer (`packages/core/src/config/plugin/command.ts:242-244`). */
 export function tokenizeArguments(text: string): readonly string[] {
@@ -17,31 +22,10 @@ export function tokenizeArguments(text: string): readonly string[] {
   )
 }
 
-/**
- * Structural mirror of the shell seam (`src/command-shell.ts`), kept local until the
- * shell pass lands so the text pipeline typechecks on its own.
- */
-export interface ExpandShellTarget {
-  readonly file: string
-  readonly family: "posix" | "cmd" | "powershell"
-}
-
-export interface ExpandShellRun {
-  readonly file: string
-  readonly args: readonly string[]
-  readonly cwd: string
-}
-
-export type ExpandProcessOutcome =
-  | { readonly kind: "ran"; readonly exitCode: number; readonly output: string }
-  | { readonly kind: "failed"; readonly message: string }
-
-export type ExpandProcessRunner = (run: ExpandShellRun) => Promise<ExpandProcessOutcome>
-
 export interface ExpandShell {
-  readonly target: ExpandShellTarget
+  readonly target: ShellTarget
   readonly cwd: string
-  readonly run: ExpandProcessRunner
+  readonly run: ProcessRunner
 }
 
 export interface ExpandInput {
@@ -92,5 +76,75 @@ export async function expandCommand(input: ExpandInput): Promise<ExpandResult> {
     ? `${withArguments}\n\n${input.args}`.trim()
     : withArguments.trim()
 
-  return { text, diagnostics: [], shellFailed: false }
+  return interpolate(text, input.shell)
+}
+
+interface ShellOutcome {
+  readonly output: string
+  readonly diagnostic?: string
+}
+
+const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+/**
+ * One `` !`cmd` ``: a `ran` outcome substitutes its combined output with no diagnostic
+ * (a non-zero exit is not a failure — `AppProcess.run` does not fail on it either);
+ * a `failed` outcome, a synchronous throw and a rejection all become the same
+ * diagnostic and an empty substitution.
+ */
+async function runShell(shell: ExpandShell, source: string): Promise<ShellOutcome> {
+  const diagnostic = (message: string): ShellOutcome => ({
+    output: "",
+    diagnostic: `Shell interpolation failed for ${JSON.stringify(source)}: ${message}`,
+  })
+
+  let outcome: ProcessOutcome
+  try {
+    outcome = await shell.run({
+      file: shell.target.file,
+      args: shellArgs(shell.target, source),
+      cwd: shell.cwd,
+    })
+  } catch (error) {
+    return diagnostic(reasonOf(error))
+  }
+
+  if (outcome.kind === "failed") return diagnostic(outcome.message)
+  return { output: outcome.output }
+}
+
+/**
+ * PD5/PD6: every match in match order, concurrency 2, substitution by index through a
+ * function replacer so `$&`/`$$` inside shell output stay literal. Diagnostics are
+ * collected by index, so their order never depends on settle order.
+ */
+async function interpolate(text: string, shell: ExpandShell): Promise<ExpandResult> {
+  const matches = Array.from(text.matchAll(SHELL_PATTERN))
+  if (matches.length === 0) {
+    return { text, diagnostics: [], shellFailed: false }
+  }
+
+  const outcomes: (ShellOutcome | undefined)[] = new Array(matches.length)
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = cursor
+      cursor += 1
+      if (index >= matches.length) return
+      const source = matches[index]?.[1] ?? ""
+      outcomes[index] = await runShell(shell, source)
+    }
+  }
+  await Promise.all([worker(), worker()])
+
+  const resolved: ShellOutcome[] = outcomes.map((outcome) => outcome ?? { output: "" })
+  const diagnostics: string[] = []
+  for (const outcome of resolved) {
+    if (outcome.diagnostic !== undefined) diagnostics.push(outcome.diagnostic)
+  }
+
+  let position = 0
+  const expanded = text.replace(SHELL_PATTERN, () => resolved[position++]?.output ?? "")
+
+  return { text: expanded, diagnostics, shellFailed: diagnostics.length > 0 }
 }
