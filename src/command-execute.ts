@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode/plugin"
 import { expandCommand } from "./command-expand.ts"
 import { nodeProcessRunner, resolveShell } from "./command-shell.ts"
 import type { ProcessRunner } from "./command-shell.ts"
+import { modelRefOf } from "./command-model.ts"
 import type { CommandExecutor } from "./command-replay.ts"
 
 /**
@@ -33,6 +34,13 @@ export function createCommandExecutor(host: CommandHost, options: CommandExecute
   const run = options.shell?.run ?? nodeProcessRunner
 
   return async (target, invocation) => {
+    // PD5 (native `command.ts:81-92`): the command's agent, then its model, else the agent's.
+    const commandAgent =
+      target.entry.agent === undefined
+        ? undefined
+        : (await host.agent.get({ agentID: target.entry.agent })).data
+    const model = target.entry.model === undefined ? commandAgent?.model : modelRefOf(target.entry.model)
+
     const expanded = await expandCommand({
       template: target.entry.template,
       args: invocation.prompt.text,
@@ -43,6 +51,16 @@ export function createCommandExecutor(host: CommandHost, options: CommandExecute
         run,
       },
     })
+
+    // PD9 (native `command.ts:124-128`): switch the agent only on a difference, the model
+    // whenever one resolved.
+    const parent = await host.session.get({ sessionID: invocation.sessionID })
+    if (target.entry.agent !== undefined && parent.agent !== target.entry.agent) {
+      await host.session.switchAgent({ sessionID: invocation.sessionID, agent: target.entry.agent })
+    }
+    if (model !== undefined) {
+      await host.session.switchModel({ sessionID: invocation.sessionID, model })
+    }
 
     await host.session.prompt({
       ...invocation.prompt,

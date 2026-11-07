@@ -84,3 +84,61 @@ describe("command executor: expansion and prompt forwarding", () => {
     expect(entry).toEqual(before)
   })
 })
+
+describe("command executor: agent and model routing", () => {
+  it("E5: agent X on a session running Y switches the agent once", async () => {
+    const fake = fixture({ agents: [{ id: "X" }], sessions: [{ id: "parent", agent: "Y" }] })
+    const entry = commandEntry({ name: "A:deploy", agent: "X" })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod" }))
+
+    expect(fake.switches).toEqual([{ kind: "agent", sessionID: "parent", value: "X" }])
+    expect(fake.prompts).toHaveLength(1)
+  })
+
+  it("E6: an already-selected agent is not switched again, but its model is", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", model: { id: "m", providerID: "p" } }],
+      sessions: [{ id: "parent", agent: "X" }],
+    })
+    const entry = commandEntry({ name: "A:deploy", agent: "X" })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod" }))
+
+    expect(fake.switches).toEqual([
+      { kind: "model", sessionID: "parent", value: { id: "m", providerID: "p" } },
+    ])
+  })
+
+  it("E7: an agent-only command switches the model to the agent's model", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", model: { id: "m", providerID: "p", variant: "v" } }],
+      sessions: [{ id: "parent", agent: "X" }],
+    })
+    const entry = commandEntry({ name: "A:deploy", agent: "X" })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod" }))
+
+    expect(fake.switches).toEqual([
+      { kind: "model", sessionID: "parent", value: { id: "m", providerID: "p", variant: "v" } },
+    ])
+  })
+
+  it("E8: a command model wins over the agent's model and carries its variant", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", model: { id: "agent-model", providerID: "p" } }],
+      sessions: [{ id: "parent", agent: "X" }],
+    })
+    const entry = commandEntry({ name: "A:deploy", agent: "X", model: "anthropic/claude-sonnet#fast" })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod" }))
+
+    expect(fake.switches).toEqual([
+      {
+        kind: "model",
+        sessionID: "parent",
+        value: { providerID: "anthropic", id: "claude-sonnet", variant: "fast" },
+      },
+    ])
+  })
+})
