@@ -51,6 +51,27 @@ const foreignIdsOf = (list: SkillList, ownedIds: ReadonlySet<string>): ReadonlyS
 const containsAll = (superset: ReadonlySet<string>, subset: ReadonlySet<string>): boolean =>
   [...subset].every((id) => superset.has(id))
 
+type WriteGate = <T>(run: () => Promise<T>) => Promise<T>
+
+const createWriteGate = (): WriteGate => {
+  let tail: Promise<void> = Promise.resolve()
+
+  return async <T>(run: () => Promise<T>): Promise<T> => {
+    const previous = tail
+    let release: () => void = () => {}
+    tail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    await previous
+    try {
+      return await run()
+    } finally {
+      release()
+    }
+  }
+}
+
 function capDiagnostics(diagnostics: readonly string[]): readonly string[] {
   if (diagnostics.length <= DIAGNOSTIC_LIMIT) return diagnostics
 
@@ -257,6 +278,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const watchDiagnostics: string[] = []
 
   const now = options.now ?? (() => Date.now())
+  const withWriteGate = createWriteGate()
 
   const debouncer =
     options.watchDirectory === undefined
@@ -403,11 +425,13 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     if (locationInfo === undefined || !locationInfo.isDirectory()) {
       diagnostics.push(`scan: ${base} is not a directory`)
-      const written = await persistRegistry(ctx.storage, { location: base, snapshots: [] })
+      const written = await withWriteGate(async () => {
+        const result = await persistRegistry(ctx.storage, { location: base, snapshots: [] })
+        if (result.ok) current = Object.freeze({ location: base, snapshots: Object.freeze([]) })
+        return result
+      })
       diagnostics.push(...written.diagnostics)
       if (!written.ok) return record(fail(diagnostics))
-
-      current = Object.freeze({ location: base, snapshots: Object.freeze([]) })
 
       const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
       if (!reloaded.ok) return record(fail(diagnostics))
@@ -444,13 +468,18 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     diagnostics.push(...built.value.diagnostics)
 
     const persisted = await runStage(diagnostics, "manifest", () =>
-      persistRegistry(ctx.storage, { location: base, snapshots: built.value.snapshot.snapshots }),
+      withWriteGate(async () => {
+        const written = await persistRegistry(ctx.storage, {
+          location: base,
+          snapshots: built.value.snapshot.snapshots,
+        })
+        if (written.ok) current = built.value.snapshot
+        return written
+      }),
     )
     if (!persisted.ok) return record(fail(diagnostics))
     diagnostics.push(...persisted.value.diagnostics)
     if (!persisted.value.ok) return record(fail(diagnostics))
-
-    current = built.value.snapshot
 
     const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
     if (!reloaded.ok) return record(fail(diagnostics))
@@ -484,16 +513,19 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     if (suppressed.length > 0) {
       const corrected = withoutEntries(current, new Set(suppressed))
-      const written = await persistRegistry(ctx.storage, {
-        location: base,
-        snapshots: corrected.snapshots,
-        version: persisted.value.version,
+      const written = await withWriteGate(async () => {
+        const result = await persistRegistry(ctx.storage, {
+          location: base,
+          snapshots: corrected.snapshots,
+          version: persisted.value.version,
+        })
+        if (!result.ok) return result
+        current = corrected
+        reloads += 1
+        return result
       })
       diagnostics.push(...written.diagnostics)
       if (!written.ok) return record(fail(diagnostics, reloads))
-
-      current = corrected
-      reloads += 1
 
       const correctedReload = await runStage(diagnostics, "reload", () => ctx.skill.reload())
       if (!correctedReload.ok) return record(fail(diagnostics, reloads - 1))
@@ -616,20 +648,26 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       if (suppressed.length === 0) return
 
       const corrected = withoutEntries(before, new Set(suppressed))
-      const written = await persistRegistry(ctx.storage, {
-        location: base,
-        snapshots: corrected.snapshots,
-        version,
-      })
-      if (!written.ok) {
-        deferredDiagnostics.push(...written.diagnostics)
-        return
-      }
-      if (disposed || generation !== dedupeGeneration || inFlight !== undefined || current !== before) return
+      let applied = false
+      await withWriteGate(async () => {
+        if (disposed || generation !== dedupeGeneration || inFlight !== undefined || current !== before) return
 
-      current = corrected
-      deferredCorrected = true
-      await ctx.skill.reload()
+        const written = await persistRegistry(ctx.storage, {
+          location: base,
+          snapshots: corrected.snapshots,
+          version,
+        })
+        if (!written.ok) {
+          deferredDiagnostics.push(...written.diagnostics)
+          return
+        }
+
+        current = corrected
+        deferredCorrected = true
+        applied = true
+      })
+
+      if (applied) await ctx.skill.reload()
     } catch (error) {
       deferredDiagnostics.push(`dedupe-deferred: ${reasonOf(error)}`)
     } finally {
