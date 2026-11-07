@@ -2,7 +2,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, relative, sep } from "node:path"
 import { describe, expect, it } from "vitest"
-import type { ScanCandidate, SkillRootKind } from "../src/contracts.ts"
+import type { CommandCandidate, ScanCandidate, SkillRootKind } from "../src/contracts.ts"
 import { scanSkills } from "../src/scan.ts"
 import { deriveWatchTargets } from "../src/watch.ts"
 import { createRegistryFixture } from "./support/registry-fixtures.ts"
@@ -121,6 +121,114 @@ describe("watch target derivation", () => {
       expect(diagnostics.some((entry) => entry.startsWith("watch-symlink:"))).toBe(true)
     } finally {
       await rm(outside, { recursive: true, force: true })
+      await fixture.cleanup()
+    }
+  })
+
+  it("derives every command root, command directory, and subproject from one scan", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("A/.opencode/command/deploy.md", "# Deploy\n")
+      await fixture.write("A/.opencode/commands/release.md", "# Release\n")
+      await fixture.write("B/.opencode/command/git/push.md", "# Push\n")
+
+      const scanned = await scanSkills({ location: fixture.root })
+      const { targets, diagnostics } = await deriveWatchTargets({
+        location: fixture.realRoot,
+        candidates: scanned.candidates,
+        commands: scanned.commands,
+      })
+
+      expect(scanned.commands).toHaveLength(3)
+      expect(relativeTargets(fixture.realRoot, targets)).toEqual([
+        "",
+        "A",
+        "A/.opencode/command",
+        "A/.opencode/commands",
+        "B",
+        "B/.opencode/command",
+        "B/.opencode/command/git",
+      ])
+      expect(diagnostics).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("falls back to the command file's own directory when its root pair is absent", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("A/commands-x/deploy.md", "# Deploy\n")
+      const path = join(fixture.realRoot, "A/commands-x/deploy.md")
+      const command: CommandCandidate = {
+        name: "deploy",
+        path,
+        canonicalPath: path,
+        subproject: "A",
+        subprojectRealPath: join(fixture.realRoot, "A"),
+        root: "opencode-command",
+        markers: [],
+      }
+
+      const { targets, diagnostics } = await deriveWatchTargets({
+        location: fixture.realRoot,
+        candidates: [],
+        commands: [command],
+      })
+
+      expect(relativeTargets(fixture.realRoot, targets)).toEqual(["", "A", "A/commands-x"])
+      expect(diagnostics).toEqual(["watch-root-unresolved: A/commands-x/deploy.md"])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("derives the same command targets with and without a .git in either checkout", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("main/.git/worktrees/wt/keep", "")
+      await fixture.write("wt/.git", "gitdir: ../main/.git/worktrees/wt\n")
+      await fixture.write("main/.opencode/command/deploy.md", "# Deploy\n")
+      await fixture.write("wt/.opencode/command/release.md", "# Release\n")
+
+      const both = await scanSkills({ location: fixture.root })
+      const withGit = await deriveWatchTargets({
+        location: fixture.realRoot,
+        candidates: both.candidates,
+        commands: both.commands,
+      })
+
+      await rm(join(fixture.root, "main/.git"), { recursive: true, force: true })
+      await rm(join(fixture.root, "wt/.git"), { force: true })
+      const none = await scanSkills({ location: fixture.root })
+      const withoutGit = await deriveWatchTargets({
+        location: fixture.realRoot,
+        candidates: none.candidates,
+        commands: none.commands,
+      })
+
+      await fixture.mkdirp("main/.git")
+      const one = await scanSkills({ location: fixture.root })
+      const partially = await deriveWatchTargets({
+        location: fixture.realRoot,
+        candidates: one.candidates,
+        commands: one.commands,
+      })
+
+      expect(relativeTargets(fixture.realRoot, withGit.targets)).toEqual([
+        "",
+        "main",
+        "main/.opencode/command",
+        "wt",
+        "wt/.opencode/command",
+      ])
+      expect(withoutGit.targets).toEqual(withGit.targets)
+      expect(partially.targets).toEqual(withGit.targets)
+      expect(withGit.diagnostics).toEqual([])
+    } finally {
       await fixture.cleanup()
     }
   })
