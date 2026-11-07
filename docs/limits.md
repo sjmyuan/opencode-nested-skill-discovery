@@ -15,6 +15,7 @@ plugin configuration, so none of them can be changed from `opencode.json`.
 | One skill or command file | 128 KiB | that file is skipped, scan continues |
 | Total skill and command bytes | 16 MiB | scan stops, partial index advertised |
 | Diagnostics | 200 in the scan, 200 in the refresh outcome | truncated with a summary line, scan continues |
+| Native command-name walk | shares the directory and file budgets above; reads no content | a truncated walk yields a partial native name set and is advertised as incomplete |
 | Display name | 80 code points | leading path segments dropped behind `…/` |
 | Description | 500 code points | truncated |
 | Scope slug / skill slug | 24 / 40 characters | slug truncated, hash keeps the ID unique |
