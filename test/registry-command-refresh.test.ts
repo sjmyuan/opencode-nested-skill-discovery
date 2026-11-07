@@ -237,4 +237,50 @@ describe("command refresh lifecycle", () => {
       await h.dispose()
     }
   })
+
+  it("keeps a suppressed checkout's command root watched and publishes no name", async () => {
+    const h = await harness(async (ws) => {
+      await ws.repo("main")
+      await ws.worktree("wt", "main", "linked")
+      await writeCommand(ws, "main", "command", "deploy.md")
+      await writeCommand(ws, "wt", "command", "deploy.md")
+    })
+
+    try {
+      expect(defined(h.fake)).toEqual(["main:deploy"])
+      expect(h.watch.active()).toContain(at(h.ws, "main/.opencode/command"))
+      expect(h.watch.active()).toContain(at(h.ws, "wt/.opencode/command"))
+      expect(h.watch.closed).toEqual([])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("applies a .git suppression flip in both directions at the next rescan without opening or closing a handle", async () => {
+    const h = await harness(async (ws) => {
+      await ws.repo("main")
+      await ws.worktree("wt", "main", "linked")
+      await writeCommand(ws, "main", "command", "deploy.md")
+      await writeCommand(ws, "wt", "command", "deploy.md")
+    })
+
+    try {
+      const opened = [...h.watch.opened]
+      expect(defined(h.fake)).toEqual(["main:deploy"])
+
+      await rm(at(h.ws, "main/.git"), { recursive: true, force: true })
+      h.watch.emit(at(h.ws, "main"))
+      await vi.waitFor(() => expect(defined(h.fake)).toContain("wt:deploy"), { timeout: 2000 })
+      expect([...defined(h.fake)].sort()).toEqual(["main:deploy", "wt:deploy"])
+
+      await h.ws.mkdirp("main/.git/worktrees/linked")
+      h.watch.emit(at(h.ws, "main"))
+      await vi.waitFor(() => expect(defined(h.fake)).toEqual(["main:deploy"]), { timeout: 2000 })
+
+      expect(h.watch.opened).toEqual(opened)
+      expect(h.watch.closed).toEqual([])
+    } finally {
+      await h.dispose()
+    }
+  })
 })
