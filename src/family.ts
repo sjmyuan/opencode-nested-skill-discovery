@@ -205,29 +205,49 @@ export async function resolveCheckout(
   return { checkout: enclosing, family: family.family }
 }
 
+/**
+ * One family derivation pass (ADR command R8, discovery R20): a single
+ * checkout memo and a single diagnostic-seen set, so the skill stage and any
+ * later stage in the same refresh share one ancestor walk and one report.
+ */
+export interface FamilyPass {
+  readonly location: string
+  derive(checkouts: readonly string[]): Promise<DeriveFamiliesResult>
+}
+
+export async function createFamilyPass(location: string): Promise<FamilyPass> {
+  const canonicalLocation = await canonical(location)
+  const memo = createCheckoutMemo()
+  const seen = new Set<string>()
+
+  return {
+    location: canonicalLocation,
+    async derive(checkouts: readonly string[]): Promise<DeriveFamiliesResult> {
+      const distinct = [...new Set(checkouts)].sort(compareText)
+      const families = new Map<string, FamilyContext>()
+      const diagnostics: string[] = []
+
+      for (const subproject of distinct) {
+        const resolution = await resolveCheckout(subproject, canonicalLocation, memo)
+        if (resolution.diagnostic !== undefined && !seen.has(resolution.diagnostic)) {
+          seen.add(resolution.diagnostic)
+          diagnostics.push(resolution.diagnostic)
+        }
+        if (resolution.checkout !== undefined && resolution.family !== undefined) {
+          families.set(subproject, { ...resolution.family, checkout: resolution.checkout })
+        }
+      }
+
+      return { location: canonicalLocation, families, diagnostics }
+    },
+  }
+}
+
 export async function deriveFamilies(
   checkouts: readonly string[],
   location: string,
 ): Promise<DeriveFamiliesResult> {
-  const canonicalLocation = await canonical(location)
-  const distinct = [...new Set(checkouts)].sort(compareText)
-  const families = new Map<string, FamilyContext>()
-  const diagnostics: string[] = []
-  const seen = new Set<string>()
-  const memo = createCheckoutMemo()
-
-  for (const subproject of distinct) {
-    const resolution = await resolveCheckout(subproject, canonicalLocation, memo)
-    if (resolution.diagnostic !== undefined && !seen.has(resolution.diagnostic)) {
-      seen.add(resolution.diagnostic)
-      diagnostics.push(resolution.diagnostic)
-    }
-    if (resolution.checkout !== undefined && resolution.family !== undefined) {
-      families.set(subproject, { ...resolution.family, checkout: resolution.checkout })
-    }
-  }
-
-  return { location: canonicalLocation, families, diagnostics }
+  return (await createFamilyPass(location)).derive(checkouts)
 }
 
 const isStrictDescendant = (target: string, root: string): boolean => {
