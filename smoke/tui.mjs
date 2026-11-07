@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -29,13 +29,15 @@ const TCL_HEAD = [
   'set da2Reply "${esc}\\u005b>0;1;0c"',
 ]
 
-export function expectScript({ configDir, home, directory, transcript }) {
+export function expectScript({ configDir, home, directory, transcript, server }) {
+  const target =
+    server === undefined ? `--standalone {${directory}}` : `--server {${server}} {${directory}}`
   return [
     "set timeout 30",
     "log_user 0",
     `log_file -a {${transcript}}`,
     ...TCL_HEAD,
-    `spawn -noecho env OPENCODE_CONFIG_DIR={${configDir}} OPENCODE_TEST_HOME={${home}} TERM=xterm-256color PWD={${directory}} opencode --standalone {${directory}}`,
+    `spawn -noecho env OPENCODE_CONFIG_DIR={${configDir}} OPENCODE_TEST_HOME={${home}} TERM=xterm-256color PWD={${directory}} opencode ${target}`,
     "set sent 0",
     "expect {",
     '  -re "$cpr" { send -- $cprReply; exp_continue }',
@@ -57,15 +59,26 @@ export function expectScript({ configDir, home, directory, transcript }) {
  * `:`-qualified name appeared after typing `/pkg-b`. A blank screen is unreadable,
  * never a pass.
  */
-export function runTui({ directory, env, evidence, attempt }) {
+export function runTui({ directory, env, evidence, attempt, server }) {
   if (!existsSync(EXPECT)) {
-    return { readable: false, sawCommand: false, reason: "expect-absent", transcript: null, screen: null, exit: null }
+    return {
+      attempt,
+      readable: false,
+      sawCommand: false,
+      reason: "expect-absent",
+      transcript: null,
+      screen: null,
+      exit: null,
+    }
   }
 
   const transcriptPath = join(evidence, "tui-transcript.txt")
   const screenPath = join(evidence, "tui-screen.txt")
   const scriptPath = join(tmpdir(), `nested-tui-attempt-${attempt}.exp`)
 
+  // `log_file -a` appends, so a frame from an earlier attempt would otherwise pass this one.
+  writeFileSync(transcriptPath, "")
+  writeFileSync(screenPath, "")
   writeFileSync(
     scriptPath,
     expectScript({
@@ -73,6 +86,7 @@ export function runTui({ directory, env, evidence, attempt }) {
       home: env.OPENCODE_TEST_HOME,
       directory,
       transcript: transcriptPath,
+      server,
     }),
   )
 
@@ -81,11 +95,13 @@ export function runTui({ directory, env, evidence, attempt }) {
     timeout: 90_000,
     encoding: "utf8",
   })
+  if (result.error !== undefined) rmSync(transcriptPath, { force: true })
   const raw = existsSync(transcriptPath) ? readFileSync(transcriptPath, "utf8") : ""
   const screen = stripAnsi(raw)
   writeFileSync(screenPath, screen)
 
   return {
+    attempt,
     readable: hasGlyphs(screen),
     sawCommand: screen.includes("pkg-b:deploy"),
     transcript: basename(transcriptPath),

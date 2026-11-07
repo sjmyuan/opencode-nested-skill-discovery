@@ -702,7 +702,7 @@ async function claimC6(fixture, server) {
     "C6",
     problems.length === 0 ? "pass" : "fail",
     problems.length === 0
-      ? `${COMMAND_NAMES.length} qualified names listed; shadowed pkg-a:native refused`
+      ? `${COMMAND_NAMES.length} qualified names listed; the plugin's shadowed definition is absent (its native file is host-rejected, so the name 404s regardless)`
       : problems.slice(0, 4).join("; "),
     "command-settled.json",
   )
@@ -794,9 +794,15 @@ async function claimC7(fixture, server) {
   )
 }
 
-async function tuiRun(server) {
+async function sessionBaseline(server) {
+  const listed = await api(server.base, server.password, "/api/session?limit=20&order=desc")
+  return new Set(listed.data.map((session) => String(session.id)))
+}
+
+async function tuiRun(server, baseline) {
   const listed = await api(server.base, server.password, "/api/session?limit=20&order=desc")
   for (const session of listed.data) {
+    if (baseline.has(String(session.id))) continue
     const texts = await commandUserText(server, session.id)
     const match = texts.find((text) => /^Deploy\s+to$/.test(text))
     if (match !== undefined) return { session: String(session.id), text: match }
@@ -805,26 +811,40 @@ async function tuiRun(server) {
 }
 
 async function claimC8(fixture, server) {
-  const attempts = []
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const result = runTui({
-      directory: realpathSync(fixture.real),
-      env: buildIsolation(fixture).env,
+  const baseline = await sessionBaseline(server)
+  const env = { ...buildIsolation(fixture).env, OPENCODE_PASSWORD: server.password }
+  const directory = realpathSync(fixture.real)
+
+  const drive = (mode, attempt) => ({
+    ...runTui({
+      directory,
+      env,
       evidence: options.evidence,
       attempt,
-    })
+      server: mode === "attach" ? server.base : undefined,
+    }),
+    mode,
+  })
+
+  const attempts = []
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = drive("attach", attempt)
     attempts.push(result)
     if (result.readable) break
   }
+  if (!attempts.some((result) => result.readable)) attempts.push(drive("standalone", attempts.length + 1))
 
   const readable = attempts.find((attempt) => attempt.readable)
   const ran =
     readable?.sawCommand === true
-      ? await poll(() => tuiRun(server), { until: (value) => value !== undefined, timeoutMs: 20_000, intervalMs: 500 })
-      : { ok: false, value: undefined }
+      ? await poll(() => tuiRun(server, baseline), { until: (value) => value !== undefined, timeoutMs: 20_000, intervalMs: 500 })
+      : undefined
+  const observed = ran?.ok === true && ran.value !== undefined
 
   writeEvidence("tui-attempts.json", {
-    attempts: attempts.map(({ readable, sawCommand, transcript, screen, exit, timedOut }) => ({
+    attempts: attempts.map(({ attempt, mode, readable, sawCommand, transcript, screen, exit, timedOut }) => ({
+      attempt,
+      mode,
       readable,
       sawCommand,
       transcript,
@@ -832,11 +852,14 @@ async function claimC8(fixture, server) {
       exit,
       timedOut,
     })),
-    run: ran.value ?? null,
-    runNote:
-      ran.value === null
-        ? "keystrokes after the autocomplete render are not echoed by the PTY; execution is C7 over the same session.command endpoint"
-        : "TUI submit reached a session",
+    kept: readable?.attempt ?? null,
+    keptMode: readable?.mode ?? null,
+    sessionsBefore: baseline.size,
+    run: observed ? ran.value : null,
+    submit: observed ? "observed" : "unobserved (C7)",
+    runNote: observed
+      ? "TUI submit reached a session"
+      : "TUI submit was not observed; C7 proves execution on the same session.command endpoint",
     verdict: readable === undefined ? "unproven" : readable.sawCommand ? "pass" : "fail",
   })
 
@@ -846,8 +869,8 @@ async function claimC8(fixture, server) {
       [
         "# C8: live TUI observation is unproven",
         "",
-        "The PTY could not make the real TUI readable after three attempts; see `tui-attempts.json`",
-        "and `tui-transcript.txt` / `tui-screen.txt`.",
+        "The PTY could not make the real TUI readable after three attach attempts and one standalone",
+        "attempt; see `tui-attempts.json` and `tui-transcript.txt` / `tui-screen.txt`.",
         "",
         "Source equivalence, both verified at the pin:",
         "",
@@ -858,14 +881,16 @@ async function claimC8(fixture, server) {
         "",
       ].join("\n"),
     )
-    return record("C8", "unproven", "PTY never rendered after 3 attempts", "tui-attempts.json, tui-equivalence.md")
+    return record("C8", "unproven", "PTY never rendered after 3 attach + 1 standalone attempts", "tui-attempts.json, tui-equivalence.md")
   }
 
   return record(
     "C8",
     readable.sawCommand ? "pass" : "fail",
     readable.sawCommand
-      ? "/pkg-b:deploy shown by the composer's autocomplete; execution proven by C7 on the same endpoint"
+      ? `/pkg-b:deploy shown by the composer's autocomplete; ${
+          observed ? "submit observed on a new session" : "submit unobserved, C7 covers the same endpoint"
+        }`
       : "screen readable, command never appeared",
     "tui-attempts.json, tui-transcript.txt, tui-screen.txt",
   )

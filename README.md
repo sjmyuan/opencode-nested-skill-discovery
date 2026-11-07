@@ -89,9 +89,11 @@ Detail and the full limit list: [docs/limits.md](docs/limits.md).
 A command file in a nested subproject — `.opencode/command/` or `.opencode/commands/` — is
 published under its qualified name, `/subproject:command`; the `:` keeps the prefix in the
 name a human types. `$1`–`$N` (the highest index absorbing the remaining arguments),
-`$ARGUMENTS`, and `` !`cmd` `` shell interpolation expand exactly as native does, and an
-invocation routes the agent, the model, and a subagent child by the same rules native uses
-(`src/command-execute.ts:30-104`, `src/command-expand.ts:56-80`). A composed name that
+`$ARGUMENTS`, and `` !`cmd` `` shell interpolation expand in native's five steps (tokenise →
+`$N` → `$ARGUMENTS` → append → trim → shell), and an invocation routes the agent, the model,
+and a subagent child by the same rules native uses (`src/command-execute.ts:30-104`,
+`src/command-expand.ts:56-150`). One divergence is recorded in
+[docs/limits.md](docs/limits.md): the stored template is never trimmed. A composed name that
 collides with a native command is dropped, never shadowed
 (`src/command-shadow.ts:28-53`). There is no `command` permission action, so a published
 command needs no rule of its own.

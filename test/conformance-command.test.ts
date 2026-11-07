@@ -2,9 +2,11 @@ import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createCommandExecutor } from "../src/command-execute.ts"
 import { scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry, type Registry } from "../src/registry.ts"
 import { commandDoc, writeCommand, writeCommandDoc } from "./support/command-family-fixtures.ts"
+import { scriptedRunner } from "./support/command-fixtures.ts"
 import { commandStorage } from "./support/command-publish-fixtures.ts"
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
 import { createFamilyWorkspace, type FamilyWorkspace } from "./support/family-fixtures.ts"
@@ -55,7 +57,9 @@ const buildLocation = async (): Promise<FamilyWorkspace> => {
 
 const open = (ws: FamilyWorkspace): { readonly fake: FakeContext; readonly registry: Registry } => {
   const fake = fakeContext([], { directory: ws.root })
-  return { fake, registry: createRegistry(fake.ctx) }
+  const host = { session: fake.ctx.session, agent: fake.ctx.agent }
+  const shell = { env: {}, platform: "darwin", run: scriptedRunner([]).run }
+  return { fake, registry: createRegistry(fake.ctx, { executeCommand: createCommandExecutor(host, { shell }) }) }
 }
 
 const namesOf = (entries: ReadonlyArray<{ readonly name: unknown }>): string[] =>
@@ -170,6 +174,14 @@ describe("conformance: native precedence, removal and a quiet rescan", () => {
 
     try {
       await registry.activate()
+      await fake.invokeCommand("main:packages:app:tidy", {
+        sessionID: "parent",
+        prompt: { text: "app" },
+        delivery: "steer",
+      })
+      expect(fake.prompts).toHaveLength(1)
+      expect(fake.prompts[0]?.text).toContain("tidy body.")
+
       await rm(path.join(ws.root, "main/packages/app/.opencode/command/tidy.md"))
 
       const removed = await registry.refresh()
@@ -183,7 +195,8 @@ describe("conformance: native precedence, removal and a quiet rescan", () => {
         prompt: { text: "app" },
         delivery: "steer",
       })
-      expect(fake.prompts).toEqual([])
+      expect(fake.prompts).toHaveLength(1)
+      expect(fake.prompts[0]?.text).toContain("tidy body.")
 
       const before = JSON.stringify(commandStorage(fake))
       const quiet = await registry.refresh()

@@ -34,6 +34,10 @@ A `model:` selection is canonicalised before storage: both frontmatter forms —
 short string (`src/command-model.ts:58-64`), so the cache, the listing, and the routing
 reference can never disagree about which model a command selects.
 
+One divergence is recorded, not fixed: the template is stored verbatim, while native trims it at
+decode (`packages/core/src/config/plugin/command.ts:177`), so a body ending in a newline plus
+trailing arguments expands with one extra blank line (`src/command-expand.ts:71-77`).
+
 ## Depth
 
 Depth counts directories between the location and the **subproject** — a directory that

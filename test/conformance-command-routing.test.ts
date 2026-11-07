@@ -1,4 +1,4 @@
-import { mkdtemp, realpath } from "node:fs/promises"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -25,6 +25,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs()
+  await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
 })
 
 afterAll(async () => {

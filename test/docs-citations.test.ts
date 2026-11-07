@@ -4,7 +4,18 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const REPO = fileURLToPath(new URL("..", import.meta.url))
-const PIN = "/Users/ganggang/work/opencode-v2.0.26"
+
+/** This machine's checkout of `opencode-v2.0.26`; `OPENCODE_PIN` is the only override. */
+const PIN = process.env.OPENCODE_PIN ?? "/Users/ganggang/work/opencode-v2.0.26"
+const pinAvailable = existsSync(PIN)
+
+/** The repo has no top-level `packages/`, so this prefix resolves only at the pin. */
+const EXTERNAL_PREFIX = "packages/"
+
+/** Measured at the F10 rework head; re-measure both whenever a doc gains or loses a citation. */
+const EXPECTED_IN_REPO = 195
+const EXPECTED_EXTERNAL = 55
+
 const DOCS = [
   "README.md",
   "docs/architecture.md",
@@ -23,11 +34,25 @@ interface Citation {
   readonly ranges: string
 }
 
-const fileOf = (target: string): string | undefined => {
-  const local = path.join(REPO, target)
-  if (existsSync(local)) return local
+type Kind = "in-repo" | "external" | "missing"
+
+type Resolution =
+  | { readonly kind: "in-repo" | "external"; readonly file: string }
+  | { readonly kind: "external-unavailable" }
+  | { readonly kind: "missing" }
+
+const kindOf = (target: string): Kind => {
+  if (existsSync(path.join(REPO, target))) return "in-repo"
+  return target.startsWith(EXTERNAL_PREFIX) ? "external" : "missing"
+}
+
+const resolve = (target: string): Resolution => {
+  const kind = kindOf(target)
+  if (kind === "missing") return { kind }
+  if (kind === "in-repo") return { kind, file: path.join(REPO, target) }
+  if (!pinAvailable) return { kind: "external-unavailable" }
   const pinned = path.join(PIN, target)
-  return existsSync(pinned) ? pinned : undefined
+  return existsSync(pinned) ? { kind, file: pinned } : { kind: "missing" }
 }
 
 const linesOf = (file: string): readonly string[] => readFileSync(file, "utf8").split("\n")
@@ -52,28 +77,53 @@ const parts = (ranges: string): ReadonlyArray<readonly [number, number]> =>
     return [start, end] as const
   })
 
+const checkBounds = (citation: Citation, file: string, problems: string[]): void => {
+  const total = linesOf(file).length
+  for (const [start, end] of parts(citation.ranges)) {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end > total) {
+      problems.push(`${citation.doc}:${citation.line} ${citation.target}:${start}-${end} of ${total}`)
+    }
+  }
+}
+
 const slice = (target: string, start: number, end: number): string => {
-  const file = fileOf(target)
-  return file === undefined ? "" : linesOf(file).slice(start - 1, end).join("\n")
+  const resolved = resolve(target)
+  return "file" in resolved ? linesOf(resolved.file).slice(start - 1, end).join("\n") : ""
 }
 
 describe("docs citations: bounds", () => {
   it("every in-repo citation resolves to a range inside its file", () => {
     const problems: string[] = []
     for (const citation of citations()) {
-      const file = fileOf(citation.target)
-      if (file === undefined) {
+      const resolved = resolve(citation.target)
+      if (resolved.kind === "external-unavailable") continue
+      if (resolved.kind === "missing") {
         problems.push(`${citation.doc}:${citation.line} missing ${citation.target}`)
         continue
       }
-      const total = linesOf(file).length
-      for (const [start, end] of parts(citation.ranges)) {
-        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end > total) {
-          problems.push(`${citation.doc}:${citation.line} ${citation.target}:${start}-${end} of ${total}`)
-        }
-      }
+      checkBounds(citation, resolved.file, problems)
     }
     expect(problems).toEqual([])
+  })
+
+  it.skipIf(!pinAvailable)("every pinned citation resolves to a range inside its file", () => {
+    const problems: string[] = []
+    for (const citation of citations().filter((citation) => kindOf(citation.target) === "external")) {
+      const file = path.join(PIN, citation.target)
+      if (!existsSync(file)) {
+        problems.push(`${citation.doc}:${citation.line} missing ${citation.target}`)
+        continue
+      }
+      checkBounds(citation, file, problems)
+    }
+    expect(problems).toEqual([])
+  })
+
+  it("keeps the citation totals pinned", () => {
+    const kinds = citations().map((citation) => kindOf(citation.target))
+    expect(kinds.filter((kind) => kind === "in-repo")).toHaveLength(EXPECTED_IN_REPO)
+    expect(kinds.filter((kind) => kind === "external")).toHaveLength(EXPECTED_EXTERNAL)
+    expect(kinds.filter((kind) => kind === "missing")).toHaveLength(0)
   })
 })
 
@@ -99,6 +149,8 @@ const ANCHORS: ReadonlyArray<{
   { doc: "README.md", target: "src/command-execute.ts", ranges: "30-104", marker: "export function createCommandExecutor" },
   { doc: "docs/limits.md", target: "src/command-model.ts", ranges: "58-64", marker: "export function canonicalModelSelection" },
   { doc: "docs/architecture.md", target: "src/contracts.ts", ranges: "205-207", marker: 'commandVersion: "nested/commands/version"' },
+  { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "export async function expandCommand" },
+  { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "return { text: expanded, diagnostics, shellFailed: diagnostics.length > 0 }" },
 ]
 
 describe("docs citations: curated anchors", () => {
