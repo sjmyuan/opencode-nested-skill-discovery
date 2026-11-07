@@ -26,6 +26,7 @@ export async function createFamilyWorkspace(): Promise<FamilyWorkspace> {
     },
     worktree: async (relativePath, common, name) => {
       const gitdir = absolute(path.join(common, ".git", "worktrees", name))
+      await mkdir(gitdir, { recursive: true })
       return base.write(path.join(relativePath, ".git"), `gitdir: ${gitdir}\n`)
     },
   }
