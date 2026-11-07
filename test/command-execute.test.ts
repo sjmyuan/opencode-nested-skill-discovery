@@ -312,3 +312,34 @@ describe("command executor: shell and failure isolation", () => {
     expect(fake.switches).toEqual([])
   })
 })
+
+describe("command executor: no permission gate", () => {
+  it("E17: only the session and agent domains are read (R18)", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", mode: "subagent", model: { id: "m", providerID: "p" } }],
+      sessions: [{ id: "parent", model: { id: "parent-model", providerID: "pp" } }],
+    })
+    const reads: string[] = []
+    const base = { session: fake.ctx.session, agent: fake.ctx.agent }
+    const host = new Proxy(base, {
+      get(target, property, receiver) {
+        if (typeof property === "string") reads.push(property)
+        if (property === "session" || property === "agent") {
+          return Reflect.get(target, property, receiver)
+        }
+        throw new Error(`forbidden host read: ${String(property)}`)
+      },
+    }) as CommandHost
+    const executor = createCommandExecutor(host, { shell: shellDefaults().shell })
+
+    await executor(commandTarget(commandEntry({ name: "A:deploy" })), invocation({ text: "prod" }))
+    await executor(
+      commandTarget(commandEntry({ name: "A:spawn", agent: "X", subagent: true })),
+      invocation({ text: "prod" }),
+    )
+
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.every((read) => read === "session" || read === "agent")).toBe(true)
+    expect(fake.prompts).toHaveLength(2)
+  })
+})
