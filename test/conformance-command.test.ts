@@ -128,3 +128,71 @@ describe("conformance: family suppression across a worktree and a nested subproj
     }
   })
 })
+
+describe("conformance: native precedence, removal and a quiet rescan", () => {
+  it("CC3: the pre-drop shadow is reported once, a late native entry is audited, and the next pass drops it", async () => {
+    const ws = await buildLocation()
+    const { fake, registry } = open(ws)
+
+    try {
+      const first = await registry.activate()
+
+      expect(namesOf(fake.commandDefinitions).sort()).toEqual(["main:packages:app:tidy", "main:release"])
+      expect(first.diagnostics.filter((line) => line === "native-shadow: main:deploy")).toHaveLength(1)
+      expect(first.commands).toBe(2)
+
+      fake.setNativeCommands([{ name: "main:release", description: "native release" }])
+
+      const audited = await registry.refresh()
+
+      expect(audited.commands).toBe(2)
+      expect(audited.diagnostics.filter((line) => line === "native-shadow: main:release")).toHaveLength(0)
+      expect(audited.diagnostics.filter((line) => line === "native-shadow: main:deploy")).toHaveLength(0)
+      expect(audited.diagnostics.filter((line) => line === "native-shadow-audit: main:release")).toHaveLength(1)
+      expect(JSON.stringify(commandStorage(fake))).toContain("main:release")
+
+      const denied = await registry.refresh()
+
+      expect(denied.commands).toBe(1)
+      expect(JSON.stringify(commandStorage(fake))).not.toContain("main:release")
+      expect(fake.commandDefinitions.filter((entry) => entry.name === "main:release")).toEqual([
+        expect.objectContaining({ description: "native release" }),
+      ])
+      expect(denied.diagnostics.filter((line) => line === "native-shadow-audit: main:release")).toHaveLength(0)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("CC4: a deleted command leaves the listing and the cache, invokes nothing, and a quiet rescan writes nothing", async () => {
+    const ws = await buildLocation()
+    const { fake, registry } = open(ws)
+
+    try {
+      await registry.activate()
+      await rm(path.join(ws.root, "main/packages/app/.opencode/command/tidy.md"))
+
+      const removed = await registry.refresh()
+
+      expect(removed.commands).toBe(1)
+      expect(namesOf(fake.commandDefinitions)).toEqual(["main:release"])
+      expect(JSON.stringify(commandStorage(fake))).not.toContain("main:packages:app:tidy")
+
+      await fake.invokeCommand("main:packages:app:tidy", {
+        sessionID: "parent",
+        prompt: { text: "app" },
+        delivery: "steer",
+      })
+      expect(fake.prompts).toEqual([])
+
+      const before = JSON.stringify(commandStorage(fake))
+      const quiet = await registry.refresh()
+
+      expect(JSON.stringify(commandStorage(fake))).toBe(before)
+      expect(quiet.diagnostics.filter((line) => line.startsWith("command-"))).toEqual([])
+      expect(quiet.reloads).toBe(1)
+    } finally {
+      await registry.dispose()
+    }
+  })
+})
