@@ -2,6 +2,9 @@ import { relative, sep } from "node:path"
 import { compareText } from "./contracts.ts"
 import type { CommandCandidate } from "./contracts.ts"
 
+/** R1's ceiling for a published command name: over it the name is kept and logged, never cut. */
+export const MAX_COMMAND_NAME_LENGTH = 160
+
 /** A published name plus F1's candidate; every other field keeps its scanned meaning. */
 export interface QualifiedCommand extends CommandCandidate {
   readonly publishedName: string
@@ -59,6 +62,12 @@ export function composeCommandNames(
     kept.push(command)
   }
 
+  for (const command of kept) {
+    if (length(command.publishedName) > MAX_COMMAND_NAME_LENGTH) {
+      diagnostics.push(`name-too-long: ${command.publishedName}`)
+    }
+  }
+
   return { commands: kept, diagnostics }
 }
 
@@ -82,3 +91,5 @@ function compareCommand(left: CommandCandidate, right: CommandCandidate): number
 function relativeTo(location: string, path: string): string {
   return relative(location, path).split(sep).join("/")
 }
+
+const length = (value: string): number => Array.from(value).length
