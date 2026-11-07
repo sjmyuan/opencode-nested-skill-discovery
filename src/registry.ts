@@ -8,6 +8,7 @@ import {
   compareText,
   MAX_NAME_LENGTH,
   PROMPT_THROTTLE_MS,
+  type CommandCandidate,
   type CommandSnapshotSet,
   type RegistryEntry,
   type RegistrySnapshot,
@@ -403,11 +404,15 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   }
 
   /** Reconciles the watcher set from a successful scan. Never throws (PD7). */
-  const syncWatchers = async (base: string, candidates: readonly ScanCandidate[]): Promise<void> => {
+  const syncWatchers = async (
+    base: string,
+    candidates: readonly ScanCandidate[],
+    commands: readonly CommandCandidate[],
+  ): Promise<void> => {
     if (disposed || watchers === undefined) return
 
     try {
-      const derived = await deriveWatchTargets({ location: base, candidates })
+      const derived = await deriveWatchTargets({ location: base, candidates, commands })
       watchDiagnostics.push(...derived.diagnostics)
       watchers.sync(derived.targets)
     } catch (error) {
@@ -523,8 +528,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (!scanned.ok) return record(fail(diagnostics))
     if (scanned.value.truncated) diagnostics.push("scan-truncated")
     diagnostics.push(...scanned.value.diagnostics)
-    // A good scan is a valid watcher set even if a later stage fails (PD7).
-    await syncWatchers(base, scanned.value.candidates)
+    // A good scan is a valid watcher set even if a later stage fails (PD7). Command candidates
+    // are the pre-suppression list, so a family flip opens and closes no handle (PD3).
+    await syncWatchers(base, scanned.value.candidates, scanned.value.commands)
 
     // One family pass per refresh, shared with the skill indexer inside the existing
     // index stage (ADR command R8). Publication composes the survivors' names later.
