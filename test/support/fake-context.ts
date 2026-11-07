@@ -3,15 +3,30 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Plugin, Skill } from "@opencode/plugin"
 import type { Schema } from "effect"
-import type { SkillEditor } from "../../src/plugin.ts"
+import type { CommandEditor, SkillEditor } from "../../src/plugin.ts"
 
 type TransformCallback = (editor: SkillEditor) => void
+type CommandTransformCallback = (editor: CommandEditor) => void
 type HookCallback = (input: unknown) => Promise<void> | void
+
+export interface CommandSeed {
+  readonly name: string
+  readonly description?: string
+}
+
+export interface FakeCommandDefinition {
+  readonly name: string
+  readonly description?: string
+  readonly execute: (input: unknown) => Promise<void>
+}
 
 export type FailureTarget =
   | "skill.transform"
   | "skill.reload"
   | "skill.list"
+  | "command.transform"
+  | "command.reload"
+  | "command.list"
   | "session.hook"
   | "storage.get"
   | "storage.set"
@@ -37,6 +52,8 @@ export interface FakeContextOptions {
   readonly directory?: string
   readonly storage?: Iterable<readonly [string, Schema.Json]>
   readonly onReload?: () => void
+  readonly commands?: readonly CommandSeed[]
+  readonly onCommandReload?: () => void
 }
 
 export interface FakeContext {
@@ -46,18 +63,25 @@ export interface FakeContext {
   readonly hookRegistrations: number
   readonly hookDisposeCalls: number
   readonly editor: SkillEditor
+  readonly commandTransforms: readonly CommandTransformCallback[]
+  readonly commandDefinitions: readonly FakeCommandDefinition[]
   readonly location: FakeLocation
   readonly storage: Map<string, Schema.Json>
   readonly reloadCalls: number
+  readonly commandReloadCalls: number
+  readonly commandDisposeCalls: number
   onReload: (() => void) | undefined
+  onCommandReload: (() => void) | undefined
   setLocation(directory: string): void
   hideNatives(reads: number, keep?: readonly string[]): void
   addNative(skill: Skill.Info): void
   removeNative(id: string): void
   fail(target: FailureTarget, error?: unknown): void
   failKey(key: string, error?: unknown): void
+  failCommandAdd(name: string, error?: unknown): void
   clearFailures(): void
   firePrompt(): Promise<void>
+  invokeCommand(name: string, input?: unknown): Promise<void>
 }
 
 const NATIVE_PATH = "/tmp/native-skills/alpha/SKILL.md" as Skill.Info["path"]
@@ -78,12 +102,17 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   let hiddenListReads = 0
   let hiddenKeep: ReadonlySet<string> = new Set()
   const transforms: TransformCallback[] = []
-  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0 }
+  const commandTransforms: CommandTransformCallback[] = []
+  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
   const keyFailures = new Map<string, unknown>()
+  const commandAddFailures = new Map<string, unknown>()
   const values = new Map<string, Schema.Json>(options.storage ?? [])
-  const hooks: { onReload: (() => void) | undefined } = { onReload: options.onReload }
+  const hooks: { onReload: (() => void) | undefined; onCommandReload: (() => void) | undefined } = {
+    onReload: options.onReload,
+    onCommandReload: options.onCommandReload,
+  }
   const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), "nested-fake-")))
   const location: FakeLocation = {
     directory,
@@ -128,7 +157,26 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
   } as unknown as SkillEditor
 
-  // Only the four faked domains exist: any other host capability in setup is a loud failure.
+  const commandSeeds: readonly FakeCommandDefinition[] = (options.commands ?? []).map((seed) => ({
+    name: seed.name,
+    ...(seed.description === undefined ? {} : { description: seed.description }),
+    execute: async () => undefined,
+  }))
+  let commandEntries = new Map<string, FakeCommandDefinition>()
+  const resetCommands = (): void => {
+    commandEntries = new Map(commandSeeds.map((entry) => [entry.name, { ...entry }]))
+  }
+  resetCommands()
+
+  const commandEditor = {
+    add: (definition: FakeCommandDefinition) => {
+      const failure = commandAddFailures.get(definition.name)
+      if (failure !== undefined) throw failure
+      commandEntries.set(definition.name, { ...definition })
+    },
+  } as unknown as CommandEditor
+
+  // Only the five faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
     skill: {
       transform: async (callback: TransformCallback) =>
@@ -158,6 +206,32 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
           if (hiddenListReads > 0) hiddenListReads -= 1
           return { location: { directory: location.directory }, data }
         }),
+    },
+    command: {
+      transform: async (callback: CommandTransformCallback) =>
+        guarded("command.transform", () => {
+          commandTransforms.push(callback)
+          return {
+            dispose: async () => {
+              counters.commandDispose += 1
+            },
+          }
+        }),
+      reload: async () =>
+        guarded("command.reload", () => {
+          resetCommands()
+          for (const transform of commandTransforms) transform(commandEditor)
+          hooks.onCommandReload?.()
+          counters.commandReload += 1
+        }),
+      list: async () =>
+        guarded("command.list", () => ({
+          location: { directory: location.directory },
+          data: [...commandEntries.values()].map(({ name, description }) => ({
+            name,
+            ...(description === undefined ? {} : { description }),
+          })),
+        })),
     },
     location,
     session: {
@@ -198,10 +272,20 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     ctx,
     transforms,
     editor,
+    commandTransforms,
     location,
     storage: values,
     get disposeCalls() {
       return counters.dispose
+    },
+    get commandReloadCalls() {
+      return counters.commandReload
+    },
+    get commandDisposeCalls() {
+      return counters.commandDispose
+    },
+    get commandDefinitions() {
+      return [...commandEntries.values()]
     },
     get hookRegistrations() {
       return counters.hookRegistrations
@@ -217,6 +301,12 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     set onReload(value) {
       hooks.onReload = value
+    },
+    get onCommandReload() {
+      return hooks.onCommandReload
+    },
+    set onCommandReload(value) {
+      hooks.onCommandReload = value
     },
     setLocation(next: string) {
       location.directory = next
@@ -240,15 +330,24 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     failKey(key: string, error: unknown = new Error(`key ${key}`)) {
       keyFailures.set(key, error)
     },
+    failCommandAdd(name: string, error: unknown = new Error(`command ${name}`)) {
+      commandAddFailures.set(name, error)
+    },
     clearFailures() {
       failures.clear()
       keyFailures.clear()
+      commandAddFailures.clear()
     },
     // Surfaces rejections on purpose: a "never rejects" test must be able to fail loudly.
     async firePrompt() {
       for (const callback of hookRegistry.get("prompt") ?? []) {
         await callback({})
       }
+    },
+    async invokeCommand(name: string, input: unknown = {}) {
+      const entry = commandEntries.get(name)
+      if (entry === undefined) return
+      await entry.execute(input)
     },
   }
 }
