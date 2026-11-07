@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises"
 import { describe, expect, it, vi } from "vitest"
 import { skillTokenFor, scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry } from "../src/registry.ts"
@@ -10,7 +11,7 @@ const pause = vi.hoisted(() => {
   let release = (): void => {}
   let settle = (): void => {}
 
-  return {
+  const state = {
     armed: false,
     blocked: false,
     gate: new Promise<void>((resolve) => {
@@ -21,7 +22,19 @@ const pause = vi.hoisted(() => {
     }),
     release: (): void => release(),
     settle: (): void => settle(),
+    reset: (): void => {
+      state.armed = false
+      state.blocked = false
+      state.gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      state.released = new Promise<void>((resolve) => {
+        settle = resolve
+      })
+    },
   }
+
+  return state
 })
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -51,13 +64,27 @@ const flushMicrotasks = async (): Promise<void> => {
   for (let turn = 0; turn < 100; turn += 1) await Promise.resolve()
 }
 
+const waitUntil = async (predicate: () => boolean, timeoutMs = 4000): Promise<void> => {
+  const started = Date.now()
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) throw new Error("waitUntil timed out")
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 const idsOf = (registry: ReturnType<typeof createRegistry>): string[] =>
   registry.snapshot.snapshots.flatMap((subproject) => subproject.skills.map((entry) => entry.id))
 
+const nestedIdFor = async (directory: string, skillPath: string): Promise<string> =>
+  `nested.${scopeTokenFor(await realpath(directory))}.${skillTokenFor("deploy", await realpath(skillPath))}`
+
 describe("deferred dedupe against a concurrent refresh", () => {
   it("never applies a correction computed from a replaced snapshot", async () => {
+    pause.reset()
     const fixture = await createRegistryFixture()
     const globals = await createRegistryFixture()
+    let fake: ReturnType<typeof fakeContext> | undefined
+    let registry: ReturnType<typeof createRegistry> | undefined
     vi.useFakeTimers()
 
     try {
@@ -75,9 +102,9 @@ describe("deferred dedupe against a concurrent refresh", () => {
         "deploy",
         twin.path as string,
       )}`
-      const fake = fakeContext([globalNative, twin], { directory: fixture.root })
+      fake = fakeContext([globalNative, twin], { directory: fixture.root })
       fake.hideNatives(1, ["global-demo"])
-      const registry = createRegistry(fake.ctx)
+      registry = createRegistry(fake.ctx)
 
       const first = await registry.activate()
 
@@ -105,6 +132,149 @@ describe("deferred dedupe against a concurrent refresh", () => {
       expect(fake.reloadCalls).toBe(reloadsBeforeRelease)
     } finally {
       vi.useRealTimers()
+      if (registry !== undefined) await registry.dispose()
+      await globals.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  it("D1: a suppression-turning refresh is never overtaken by a deferred persist", async () => {
+    const fixture = await createRegistryFixture()
+    const globals = await createRegistryFixture()
+    let registry: ReturnType<typeof createRegistry> | undefined
+    let release: () => void = () => {}
+    let blocked = false
+
+    try {
+      await globals.write("skills/global-demo/SKILL.md", DOC)
+      await fixture.write("main/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("wt/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("wt/.opencode/skills/tidy/SKILL.md", DOC)
+      const globalNative = nativeSkill(
+        "global-demo",
+        await globals.realpathOf("skills/global-demo/SKILL.md"),
+      )
+      const twin = nativeSkill(
+        "native-deploy",
+        await fixture.realpathOf("wt/.opencode/skills/deploy/SKILL.md"),
+      )
+      const wtToken = scopeTokenFor(await fixture.realpathOf("wt"))
+      const suppressedId = `nested.${wtToken}.${skillTokenFor("deploy", twin.path as string)}`
+      const survivorId = await nestedIdFor(
+        `${fixture.root}/main`,
+        `${fixture.root}/main/.opencode/skills/deploy/SKILL.md`,
+      )
+      const fake = fakeContext([globalNative, twin], { directory: fixture.root })
+      fake.hideNatives(1, ["global-demo"])
+      registry = createRegistry(fake.ctx)
+
+      const first = await registry.activate()
+
+      expect(first.reloads).toBe(1)
+      expect(idsOf(registry)).toHaveLength(3)
+
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const storagePort = (
+        fake.ctx as unknown as { storage: { set(key: string, value: unknown): Promise<void> } }
+      ).storage
+      const writeStorage = storagePort.set.bind(storagePort)
+      const blockedKey = `nested/manifest/${wtToken}`
+      storagePort.set = async (key, value) => {
+        if (!blocked && key === blockedKey) {
+          blocked = true
+          await gate
+        }
+        return writeStorage(key, value)
+      }
+
+      await waitUntil(() => blocked)
+
+      const commonDir = await fixture.mkdirp("main/.git/worktrees/linked")
+      await fixture.write("wt/.git", `gitdir: ${commonDir}\n`)
+      fake.removeNative(twin.id)
+
+      const refreshing = registry.refresh()
+      await Promise.race([refreshing, new Promise<void>((resolve) => setTimeout(resolve, 250))])
+
+      release()
+      const newer = await refreshing
+      await flushMicrotasks()
+
+      expect(newer.reloads).toBe(1)
+      expect([...idsOf(registry)].sort()).toEqual([survivorId])
+      expect(idsOf(registry)).not.toContain(suppressedId)
+      expect(
+        fake.editor
+          .list()
+          .map((entry) => String(entry.id))
+          .filter((id) => id.startsWith("nested.")),
+      ).toEqual([survivorId])
+      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/subproject/${wtToken}`)).toBe(false)
+      expect(await fake.storage.get("nested/manifest/version")).toBe(newer.version)
+    } finally {
+      if (registry !== undefined) await registry.dispose()
+      await globals.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  it("D2: a deferred correction committed first is superseded by the refresh that follows", async () => {
+    pause.reset()
+    const fixture = await createRegistryFixture()
+    const globals = await createRegistryFixture()
+    let fake: ReturnType<typeof fakeContext> | undefined
+    let registry: ReturnType<typeof createRegistry> | undefined
+    vi.useFakeTimers()
+
+    try {
+      await globals.write("skills/global-demo/SKILL.md", DOC)
+      await fixture.write("main/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("wt/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("wt/.opencode/skills/tidy/SKILL.md", DOC)
+      const globalNative = nativeSkill(
+        "global-demo",
+        await globals.realpathOf("skills/global-demo/SKILL.md"),
+      )
+      const twin = nativeSkill(
+        "native-deploy",
+        await fixture.realpathOf("wt/.opencode/skills/deploy/SKILL.md"),
+      )
+      const wtToken = scopeTokenFor(await fixture.realpathOf("wt"))
+      const survivorId = await nestedIdFor(
+        `${fixture.root}/main`,
+        `${fixture.root}/main/.opencode/skills/deploy/SKILL.md`,
+      )
+      fake = fakeContext([globalNative, twin], { directory: fixture.root })
+      fake.hideNatives(1, ["global-demo"])
+      const active = createRegistry(fake.ctx)
+      registry = active
+
+      const first = await active.activate()
+
+      expect(first.reloads).toBe(1)
+
+      await vi.advanceTimersByTimeAsync(1500)
+      await vi.waitFor(() => expect(idsOf(active)).toHaveLength(2))
+
+      expect(idsOf(registry)).toHaveLength(2)
+      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(true)
+
+      fake.removeNative(twin.id)
+      const commonDir = await fixture.mkdirp("main/.git/worktrees/linked")
+      await fixture.write("wt/.git", `gitdir: ${commonDir}\n`)
+      const newer = await active.refresh()
+
+      expect(newer.reloads).toBe(1)
+      expect([...idsOf(active)].sort()).toEqual([survivorId])
+      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/subproject/${wtToken}`)).toBe(false)
+      expect(await fake.storage.get("nested/manifest/version")).toBe(newer.version)
+    } finally {
+      vi.useRealTimers()
+      if (registry !== undefined) await registry.dispose()
       await globals.cleanup()
       await fixture.cleanup()
     }
