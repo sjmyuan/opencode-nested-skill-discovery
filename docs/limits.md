@@ -11,9 +11,9 @@ plugin configuration, so none of them can be changed from `opencode.json`.
 |---|---|---|
 | Subproject depth | 5 directories below the location | a depth-6 subproject is invisible |
 | Directories scanned | 20,000 | scan stops, partial index advertised |
-| Skill files | 5,000 | scan stops, partial index advertised |
-| One skill file | 128 KiB | that file is skipped, scan continues |
-| Total skill bytes | 16 MiB | scan stops, partial index advertised |
+| Skill and command files | 5,000 | scan stops, partial index advertised |
+| One skill or command file | 128 KiB | that file is skipped, scan continues |
+| Total skill and command bytes | 16 MiB | scan stops, partial index advertised |
 | Diagnostics | 200 in the scan, 200 in the refresh outcome | truncated with a summary line, scan continues |
 | Display name | 80 code points | leading path segments dropped behind `…/` |
 | Description | 500 code points | truncated |
@@ -53,7 +53,7 @@ copied plugin checkout or an installed dependency from flooding the registry.
 ## Markers
 
 A marker makes a directory a subproject and gives it a scope token and a name prefix. The
-marker kinds are `src/contracts.ts:113-129`:
+marker kinds are `src/contracts.ts:138-161`:
 
 | Kind | Detected as |
 |---|---|
@@ -61,6 +61,8 @@ marker kinds are `src/contracts.ts:113-129`:
 | `opencode-skill` | `.opencode/skill` directory |
 | `claude-skills` | `.claude/skills` directory |
 | `agents-skills` | `.agents/skills` directory |
+| `opencode-command` | `.opencode/command` directory |
+| `opencode-commands` | `.opencode/commands` directory |
 | `agents-md` | `AGENTS.md` file |
 | `claude-md` | `CLAUDE.md` file |
 | `git` | any `.git` entry (a worktree file counts) |
@@ -127,10 +129,10 @@ Symlinks are inspected, never followed blindly (`src/scan.ts:196-214`, `269-300`
 ## Budgets and truncation
 
 The scan counts directories, accepted files, and bytes against the budgets in
-`src/contracts.ts:89-95`. Hitting a directory, file-count, or total-byte budget sets
+`src/contracts.ts:114-120`. Hitting a directory, file-count, or total-byte budget sets
 `truncated`, emits `budget-directories` / `budget-files` / `budget-total-bytes`, and stops
-the walk (`src/scan.ts:323-353`, `398-419`). A single file over 128 KiB is skipped with
-`budget-file-bytes` while the walk continues (`src/scan.ts:340-346`).
+the walk (`src/scan.ts:425-465`, `540-561`). A single file over 128 KiB is skipped with
+`budget-file-bytes` while the walk continues (`src/scan.ts:447-453`).
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
