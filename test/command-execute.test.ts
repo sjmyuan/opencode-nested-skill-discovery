@@ -142,3 +142,126 @@ describe("command executor: agent and model routing", () => {
     ])
   })
 })
+
+describe("command executor: the subagent child branch", () => {
+  it("E9: creates a child with the native fields and prompts it with the prefix", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", model: { id: "agent-model", providerID: "p" } }],
+      sessions: [{ id: "parent", agent: "Y", model: { id: "parent-model", providerID: "pp" } }],
+    })
+    const entry = commandEntry({
+      name: "A:deploy",
+      description: "Deploy release",
+      agent: "X",
+      model: "anthropic/claude#fast",
+      subagent: true,
+      template: "Deploy $1",
+    })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod", delivery: "queue" }))
+
+    expect(fake.childSessions).toEqual([
+      {
+        parentID: "parent",
+        title: "Deploy release",
+        agent: "X",
+        model: { providerID: "anthropic", id: "claude", variant: "fast" },
+      },
+    ])
+    expect(fake.prompts).toHaveLength(1)
+    expect(fake.prompts[0]?.sessionID).toBe("child-1")
+    expect(fake.prompts[0]?.text).toBe("You are a subagent spawned by another session.\nDeploy prod")
+    expect(fake.prompts[0]?.input.resume).toBe(false)
+    expect(fake.prompts[0]?.input).not.toHaveProperty("delivery")
+    expect(fake.switches).toEqual([])
+  })
+
+  it("E10: child model falls back command model → selected agent model → parent model", async () => {
+    const commandModel = fixture({
+      agents: [{ id: "X", model: { id: "agent-model", providerID: "p" } }],
+      sessions: [{ id: "parent", model: { id: "parent-model", providerID: "pp" } }],
+    })
+    await executorFor(commandModel)(
+      commandTarget(
+        commandEntry({ name: "A:deploy", agent: "X", model: "anthropic/claude#fast", subagent: true }),
+      ),
+      invocation({ text: "prod" }),
+    )
+    expect(commandModel.childSessions[0]?.model).toEqual({
+      providerID: "anthropic",
+      id: "claude",
+      variant: "fast",
+    })
+
+    const agentModel = fixture({
+      agents: [{ id: "X", model: { id: "agent-model", providerID: "p" } }],
+      sessions: [{ id: "parent", model: { id: "parent-model", providerID: "pp" } }],
+    })
+    await executorFor(agentModel)(
+      commandTarget(commandEntry({ name: "A:deploy", agent: "X", subagent: true })),
+      invocation({ text: "prod" }),
+    )
+    expect(agentModel.childSessions[0]?.model).toEqual({ id: "agent-model", providerID: "p" })
+
+    const parentModel = fixture({
+      sessions: [{ id: "parent", model: { id: "parent-model", providerID: "pp" } }],
+    })
+    await executorFor(parentModel)(
+      commandTarget(commandEntry({ name: "A:deploy", subagent: true })),
+      invocation({ text: "prod" }),
+    )
+    expect(parentModel.childSessions[0]?.model).toEqual({ id: "parent-model", providerID: "pp" })
+  })
+
+  it("E11: the child agent is the parent's, and is omitted when neither names one", async () => {
+    const inherited = fixture({
+      agents: [{ id: "P" }],
+      sessions: [{ id: "parent", agent: "P" }],
+    })
+    await executorFor(inherited)(
+      commandTarget(commandEntry({ name: "A:deploy", subagent: true })),
+      invocation({ text: "prod" }),
+    )
+    expect(inherited.childSessions[0]?.agent).toBe("P")
+
+    const omitted = fixture({ sessions: [{ id: "parent" }] })
+    await executorFor(omitted)(
+      commandTarget(commandEntry({ name: "A:deploy", subagent: true })),
+      invocation({ text: "prod" }),
+    )
+    expect(omitted.childSessions[0]).not.toHaveProperty("agent")
+  })
+
+  it("E12: a resolved agent in subagent mode takes the child path", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", mode: "subagent" }],
+      sessions: [{ id: "parent", agent: "P" }],
+    })
+
+    await executorFor(fake)(
+      commandTarget(commandEntry({ name: "A:deploy", agent: "X" })),
+      invocation({ text: "prod" }),
+    )
+
+    expect(fake.childSessions).toHaveLength(1)
+    expect(fake.prompts[0]?.sessionID).toBe("child-1")
+    expect(fake.switches).toEqual([])
+  })
+
+  it("E13: an explicit subagent: false beats the agent mode and stays on the parent", async () => {
+    const fake = fixture({
+      agents: [{ id: "X", mode: "subagent", model: { id: "m", providerID: "p" } }],
+      sessions: [{ id: "parent", agent: "Y" }],
+    })
+    const entry = commandEntry({ name: "A:deploy", agent: "X", subagent: false })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod" }))
+
+    expect(fake.childSessions).toEqual([])
+    expect(fake.switches).toEqual([
+      { kind: "agent", sessionID: "parent", value: "X" },
+      { kind: "model", sessionID: "parent", value: { id: "m", providerID: "p" } },
+    ])
+    expect(fake.prompts[0]?.sessionID).toBe("parent")
+  })
+})

@@ -2,7 +2,7 @@ import type { Plugin } from "@opencode/plugin"
 import { expandCommand } from "./command-expand.ts"
 import { nodeProcessRunner, resolveShell } from "./command-shell.ts"
 import type { ProcessRunner } from "./command-shell.ts"
-import { modelRefOf } from "./command-model.ts"
+import { modelRefOf, SUBAGENT_PREFIX } from "./command-model.ts"
 import type { CommandExecutor } from "./command-replay.ts"
 
 /**
@@ -52,10 +52,41 @@ export function createCommandExecutor(host: CommandHost, options: CommandExecute
       },
     })
 
+    // PD4/PD6/PD7 (native `command.ts:98-123`): `??` binds looser than `===`, so an
+    // explicit `subagent: false` wins over a subagent-mode agent.
+    const session = await host.session.get({ sessionID: invocation.sessionID })
+    const subagent = target.entry.subagent ?? commandAgent?.mode === "subagent"
+
+    if (subagent) {
+      const selectedID = target.entry.agent ?? session.agent
+      const selectedInfo =
+        target.entry.agent !== undefined
+          ? commandAgent
+          : selectedID === undefined
+            ? undefined
+            : (await host.agent.get({ agentID: selectedID })).data
+      const childModel = model ?? selectedInfo?.model ?? session.model
+      const child = await host.session.create({
+        parentID: session.id,
+        title: target.entry.description ?? target.entry.name,
+        ...(selectedID === undefined ? {} : { agent: selectedID }),
+        ...(childModel === undefined ? {} : { model: childModel }),
+      })
+
+      // PD8 (native `command.ts:107-112`): no `delivery` — a brand-new child has nothing
+      // to steer yet; `resume: false` asks for a fresh turn.
+      await host.session.prompt({
+        ...invocation.prompt,
+        sessionID: child.id,
+        text: [SUBAGENT_PREFIX, expanded.text].join("\n"),
+        resume: false,
+      })
+      return
+    }
+
     // PD9 (native `command.ts:124-128`): switch the agent only on a difference, the model
     // whenever one resolved.
-    const parent = await host.session.get({ sessionID: invocation.sessionID })
-    if (target.entry.agent !== undefined && parent.agent !== target.entry.agent) {
+    if (target.entry.agent !== undefined && session.agent !== target.entry.agent) {
       await host.session.switchAgent({ sessionID: invocation.sessionID, agent: target.entry.agent })
     }
     if (model !== undefined) {
