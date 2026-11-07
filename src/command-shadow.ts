@@ -114,3 +114,49 @@ export function auditCommandList({ listed, published }: AuditInput): AuditOutcom
 
   return { shadowed, absent, foreign, diagnostics }
 }
+
+/**
+ * The cross-pass ledger (ADR command R4; plan PD7, PD8).
+ *
+ * A denial is kept while a native file derives the name or the listing still holds it,
+ * and forgotten only when both are gone. Diagnostics are reported once per `reason|name`
+ * for the lifetime of the tracker, so an unchanged rescan stays silent.
+ */
+export interface ShadowTracker {
+  readonly drop: <T extends Nameable>(planned: readonly T[], native: NativeCommandNameIndex) => DropOutcome<T>
+  readonly audit: (input: AuditInput) => AuditOutcome
+}
+
+export function createShadowTracker(): ShadowTracker {
+  const denied = new Set<string>()
+  const reported = new Set<string>()
+
+  const fresh = (diagnostics: readonly string[]): readonly string[] =>
+    diagnostics.filter((line) => {
+      const key = diagnosticKey(line)
+      if (reported.has(key)) return false
+      reported.add(key)
+      return true
+    })
+
+  return {
+    drop<T extends Nameable>(planned: readonly T[], native: NativeCommandNameIndex): DropOutcome<T> {
+      const outcome = dropNativeCollisions(planned, { native, denied: [...denied] })
+      return { ...outcome, diagnostics: fresh(outcome.diagnostics) }
+    },
+    audit(input: AuditInput): AuditOutcome {
+      const outcome = auditCommandList(input)
+      for (const name of outcome.shadowed) denied.add(name)
+      const held = new Set([...input.listed.map((entry) => entry.name), ...input.native.names])
+      for (const name of [...denied]) {
+        if (!held.has(name)) denied.delete(name)
+      }
+      return { ...outcome, diagnostics: fresh(outcome.diagnostics) }
+    },
+  }
+}
+
+function diagnosticKey(line: string): string {
+  const separator = line.indexOf(": ")
+  return separator === -1 ? line : `${line.slice(0, separator)}|${line.slice(separator + 2)}`
+}
