@@ -9,6 +9,10 @@ export interface RepoFamily {
   readonly survivor: string
 }
 
+export interface FamilyContext extends RepoFamily {
+  readonly checkout: string
+}
+
 export interface FamilyResolution {
   readonly family?: RepoFamily
   readonly diagnostic?: string
@@ -16,7 +20,7 @@ export interface FamilyResolution {
 
 export interface DeriveFamiliesResult {
   readonly location: string
-  readonly families: ReadonlyMap<string, RepoFamily>
+  readonly families: ReadonlyMap<string, FamilyContext>
   readonly diagnostics: readonly string[]
 }
 
@@ -126,19 +130,101 @@ export async function resolveRepoFamily(checkout: string): Promise<FamilyResolut
   }
 }
 
+export interface CheckoutMemo {
+  readonly checkouts: Map<string, string | null>
+  readonly families: Map<string, FamilyResolution>
+}
+
+export interface CheckoutResolution {
+  readonly checkout?: string
+  readonly family?: RepoFamily
+  readonly diagnostic?: string
+}
+
+export const createCheckoutMemo = (): CheckoutMemo => ({ checkouts: new Map(), families: new Map() })
+
+async function familyAt(checkout: string, memo: CheckoutMemo): Promise<FamilyResolution> {
+  const known = memo.families.get(checkout)
+  if (known !== undefined) return known
+
+  const resolution = await resolveRepoFamily(checkout)
+  memo.families.set(checkout, resolution)
+  return resolution
+}
+
+async function enclosingCheckout(
+  directory: string,
+  location: string,
+  memo: CheckoutMemo,
+): Promise<string | null> {
+  const visited: string[] = []
+  let current = dirname(directory)
+
+  for (;;) {
+    const known = memo.checkouts.get(current)
+    if (known !== undefined) {
+      for (const ancestor of visited) memo.checkouts.set(ancestor, known)
+      return known
+    }
+    if (!isStrictDescendant(current, location)) {
+      for (const ancestor of visited) memo.checkouts.set(ancestor, null)
+      return null
+    }
+    visited.push(current)
+
+    try {
+      await lstat(join(current, ".git"))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        current = dirname(current)
+        continue
+      }
+    }
+
+    for (const ancestor of visited) memo.checkouts.set(ancestor, current)
+    return current
+  }
+}
+
+export async function resolveCheckout(
+  directory: string,
+  location: string,
+  memo: CheckoutMemo = createCheckoutMemo(),
+): Promise<CheckoutResolution> {
+  const own = await familyAt(directory, memo)
+  if (own.family !== undefined) return { checkout: directory, family: own.family }
+  if (own.diagnostic !== undefined) return { diagnostic: own.diagnostic }
+
+  const enclosing = await enclosingCheckout(directory, location, memo)
+  if (enclosing === null) return {}
+
+  const family = await familyAt(enclosing, memo)
+  if (family.diagnostic !== undefined) return { diagnostic: family.diagnostic }
+  if (family.family === undefined) return {}
+
+  return { checkout: enclosing, family: family.family }
+}
+
 export async function deriveFamilies(
   checkouts: readonly string[],
   location: string,
 ): Promise<DeriveFamiliesResult> {
   const canonicalLocation = await canonical(location)
   const distinct = [...new Set(checkouts)].sort(compareText)
-  const families = new Map<string, RepoFamily>()
+  const families = new Map<string, FamilyContext>()
   const diagnostics: string[] = []
+  const seen = new Set<string>()
+  const memo = createCheckoutMemo()
 
-  for (const checkout of distinct) {
-    const resolution = await resolveRepoFamily(checkout)
-    if (resolution.diagnostic !== undefined) diagnostics.push(resolution.diagnostic)
-    if (resolution.family !== undefined) families.set(checkout, resolution.family)
+  for (const subproject of distinct) {
+    const resolution = await resolveCheckout(subproject, canonicalLocation, memo)
+    if (resolution.diagnostic !== undefined && !seen.has(resolution.diagnostic)) {
+      seen.add(resolution.diagnostic)
+      diagnostics.push(resolution.diagnostic)
+    }
+    if (resolution.checkout !== undefined && resolution.family !== undefined) {
+      families.set(subproject, { ...resolution.family, checkout: resolution.checkout })
+    }
   }
 
   return { location: canonicalLocation, families, diagnostics }
@@ -151,23 +237,25 @@ const isStrictDescendant = (target: string, root: string): boolean => {
 
 const toPosix = (value: string): string => value.split(sep).join("/")
 
+const pairingKey = (family: FamilyContext, realPath: string): string =>
+  `${family.familyKey}\u0000${toPosix(relative(family.checkout, realPath))}`
+
 const survivorPathKeys = (
   entries: readonly FamilyEntry[],
-  families: ReadonlyMap<string, RepoFamily>,
+  families: ReadonlyMap<string, FamilyContext>,
 ): ReadonlySet<string> => {
   const keys = new Set<string>()
   for (const entry of entries) {
     const family = families.get(entry.subprojectRealPath)
-    if (family === undefined || entry.subprojectRealPath !== family.survivor) continue
-    const repoRelative = toPosix(relative(entry.subprojectRealPath, entry.candidate.realPath))
-    keys.add(`${family.familyKey}\u0000${repoRelative}`)
+    if (family === undefined || family.checkout !== family.survivor) continue
+    keys.add(pairingKey(family, entry.candidate.realPath))
   }
   return keys
 }
 
 export function selectSurvivorEntries<T extends FamilyEntry>(
   entries: readonly T[],
-  families: ReadonlyMap<string, RepoFamily>,
+  families: ReadonlyMap<string, FamilyContext>,
   location: string,
 ): { readonly kept: readonly T[]; readonly diagnostics: readonly string[] } {
   const survivorPaths = survivorPathKeys(entries, families)
@@ -176,20 +264,20 @@ export function selectSurvivorEntries<T extends FamilyEntry>(
 
   for (const entry of entries) {
     const family = families.get(entry.subprojectRealPath)
-    if (family === undefined || entry.subprojectRealPath === family.survivor) {
+    if (family === undefined || family.checkout === family.survivor) {
       kept.push(entry)
       continue
     }
-    if (!isStrictDescendant(entry.subprojectRealPath, location) || !isStrictDescendant(family.survivor, location)) {
+    if (!isStrictDescendant(family.checkout, location) || !isStrictDescendant(family.survivor, location)) {
       kept.push(entry)
       continue
     }
 
-    const repoRelative = toPosix(relative(entry.subprojectRealPath, entry.candidate.realPath))
-    const note = survivorPaths.has(`${family.familyKey}\u0000${repoRelative}`)
+    const path = toPosix(relative(family.checkout, entry.candidate.realPath))
+    const note = survivorPaths.has(`${family.familyKey}\u0000${path}`)
       ? `(survivor ${family.survivor} has it)`
       : `(missing at survivor ${family.survivor})`
-    diagnostics.push(`family: suppressed ${repoRelative} from ${entry.subprojectRealPath} ${note}`)
+    diagnostics.push(`family: suppressed ${path} from ${family.checkout} ${note}`)
   }
 
   return { kept, diagnostics }
