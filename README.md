@@ -19,8 +19,8 @@ Delivered and covered by the test suite: bounded discovery, stable IDs and quali
 display names, add-only advertisement (the transform appends; a nested entry that duplicates
 a native skill's path is suppressed), manifest/cache persistence, and refresh. Refresh
 means a watcher set derived from the last good scan, one coalescing timer at
-`DEBOUNCE_MS = 250` (`src/contracts.ts:84`), and a prompt backstop throttled to one refresh
-per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:87`); the implementation is `src/watch.ts`
+`DEBOUNCE_MS = 250` (`src/contracts.ts:137`), and a prompt backstop throttled to one refresh
+per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:140`); the implementation is `src/watch.ts`
 and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
 projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
 ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes

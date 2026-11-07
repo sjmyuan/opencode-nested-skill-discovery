@@ -21,6 +21,8 @@ export function applySnapshot(editor: SkillEditor, snapshot: RegistrySnapshot | 
 }
 
 export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
+  // F7 seam (G4): no executeCommand is passed, so a published command is intentionally inert
+  // until the routing cell fills RegistryOptions.executeCommand.
   const registry = createRegistry(ctx, { watchDirectory: nodeWatchFactory })
 
   try {
