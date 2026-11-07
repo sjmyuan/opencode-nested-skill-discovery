@@ -7,6 +7,19 @@ import { commandStorage, publishWorkspace, type PublishWorkspace } from "./suppo
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
 import type { FamilyWorkspace } from "./support/family-fixtures.ts"
 
+const scanControl = vi.hoisted(() => ({ scans: 0 }))
+
+vi.mock("../src/scan.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/scan.ts")>()
+  return {
+    ...actual,
+    scanSkills: async (options: Parameters<typeof actual.scanSkills>[0]) => {
+      scanControl.scans += 1
+      return actual.scanSkills(options)
+    },
+  }
+})
+
 const { createRegistry } = await import("../src/registry.ts")
 
 const workspaces: FamilyWorkspace[] = []
@@ -37,6 +50,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs()
+  scanControl.scans = 0
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
 })
 
@@ -57,6 +71,67 @@ describe("the post-reload command audit", () => {
       expect(outcome.diagnostics).not.toContain("native-shadow: A:deploy")
       expect(outcome.commands).toBe(1)
       expect(JSON.stringify(commandStorage(fake))).toContain("A:deploy")
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A2: the next snapshot drops a shadow the audit reported", async () => {
+    const ws = await publish("app")
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [{ name: "A:deploy", description: "native deploy" }])
+
+    try {
+      const first = await registry.activate()
+      const second = await registry.refresh()
+
+      expect(first.diagnostics).toContain("native-shadow-audit: A:deploy")
+      expect(second.commands).toBe(0)
+      expect(JSON.stringify(commandStorage(fake))).not.toContain("A:deploy")
+      expect((await fake.ctx.command.list()).data.map((entry) => entry.name)).toEqual(["A:deploy"])
+      expect(second.diagnostics.filter((line) => line.startsWith("native-shadow-audit:"))).toEqual([])
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A3: a removed native entry lets the command return two refreshes later", async () => {
+    const ws = await publish("app")
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [{ name: "A:deploy", description: "native deploy" }])
+
+    try {
+      await registry.activate()
+      const dropped = await registry.refresh()
+      fake.setNativeCommands([])
+      const pruning = await registry.refresh()
+      const returned = await registry.refresh()
+
+      expect(dropped.commands).toBe(0)
+      expect(pruning.commands).toBe(0)
+      expect(returned.commands).toBe(1)
+      expect(names(fake)).toEqual(["A:deploy"])
+      expect(fake.commandDefinitions[0]?.description).toBe("deploy command")
+      expect(JSON.stringify(commandStorage(fake))).toContain("A:deploy")
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A5: the audit causes no second scan and no extra reload", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [{ name: "A:deploy", description: "native deploy" }])
+
+    try {
+      const first = await registry.activate()
+      const second = await registry.refresh()
+
+      expect(first.diagnostics).toContain("native-shadow-audit: A:deploy")
+      expect(scanControl.scans).toBe(2)
+      expect(fake.commandReloadCalls).toBe(2)
+      expect(fake.reloadCalls).toBe(2)
+      expect(second.reloads).toBe(1)
     } finally {
       await registry.dispose()
     }
