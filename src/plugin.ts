@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode/plugin"
+import { createCommandExecutor } from "./command-execute.ts"
 import type { RegistrySnapshot, Snapshot } from "./contracts.ts"
 import { createRegistry } from "./registry.ts"
 import { applyRegistry } from "./replay.ts"
@@ -21,9 +22,12 @@ export function applySnapshot(editor: SkillEditor, snapshot: RegistrySnapshot | 
 }
 
 export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
-  // F7 seam (G4): no executeCommand is passed, so a published command is intentionally inert
-  // until the routing cell fills RegistryOptions.executeCommand.
-  const registry = createRegistry(ctx, { watchDirectory: nodeWatchFactory })
+  // Invocation routing lives in `src/command-execute.ts`; the registry only hands it the
+  // live target (ADR command R12–R14), so a published command is no longer inert.
+  const registry = createRegistry(ctx, {
+    watchDirectory: nodeWatchFactory,
+    executeCommand: createCommandExecutor(ctx),
+  })
 
   try {
     await registry.activate()
