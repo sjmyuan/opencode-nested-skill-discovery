@@ -201,4 +201,40 @@ describe("command refresh lifecycle", () => {
       await h.dispose()
     }
   })
+
+  it("adds a new subproject's command root from the location root watcher", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+
+    try {
+      await writeCommand(h.ws, "C", "command", "deploy.md")
+      h.watch.emit(h.ws.root)
+
+      await vi.waitFor(() => expect(defined(h.fake)).toContain("C:deploy"), { timeout: 2000 })
+      expect(h.watch.active()).toContain(at(h.ws, "C/.opencode/command"))
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("closes the handle of a command root deleted with its last file", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+    const root = at(h.ws, "A/.opencode/command")
+
+    try {
+      expect(h.watch.active()).toContain(root)
+
+      await rm(root, { recursive: true, force: true })
+      h.watch.emit(root)
+
+      await vi.waitFor(() => expect(defined(h.fake)).toEqual([]), { timeout: 2000 })
+      expect(h.watch.active()).not.toContain(root)
+      expect(h.watch.closed).toContain(root)
+    } finally {
+      await h.dispose()
+    }
+  })
 })
