@@ -20,6 +20,19 @@ vi.mock("../src/scan.ts", async (importOriginal) => {
   }
 })
 
+const auditControl = vi.hoisted(() => ({ failure: undefined as Error | undefined }))
+
+vi.mock("../src/command-audit.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/command-audit.ts")>()
+  return {
+    ...actual,
+    auditReloadedCommands: async (...args: Parameters<typeof actual.auditReloadedCommands>) => {
+      if (auditControl.failure !== undefined) throw auditControl.failure
+      return actual.auditReloadedCommands(...args)
+    },
+  }
+})
+
 const { createRegistry } = await import("../src/registry.ts")
 
 const workspaces: FamilyWorkspace[] = []
@@ -34,8 +47,9 @@ const publish = async (relative = ""): Promise<PublishWorkspace> => {
 const open = (
   directory: string,
   nativeCommands: readonly { readonly name: string; readonly description?: string }[] = [],
+  commands: readonly { readonly name: string; readonly description?: string }[] = [],
 ): { readonly fake: FakeContext; readonly registry: ReturnType<typeof createRegistry> } => {
-  const fake = fakeContext([], { directory, nativeCommands })
+  const fake = fakeContext([], { directory, nativeCommands, commands })
   return { fake, registry: createRegistry(fake.ctx) }
 }
 
@@ -51,6 +65,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs()
   scanControl.scans = 0
+  auditControl.failure = undefined
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
 })
 
@@ -132,6 +147,62 @@ describe("the post-reload command audit", () => {
       expect(fake.commandReloadCalls).toBe(2)
       expect(fake.reloadCalls).toBe(2)
       expect(second.reloads).toBe(1)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A4: a built-in or MCP prompt name is foreign and silent", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [], [{ name: "btw" }, { name: "mcp:prompt" }])
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.diagnostics.filter((line) => line.startsWith("native-shadow-audit:"))).toEqual([])
+      expect(outcome.diagnostics.filter((line) => line.startsWith("command-absent:"))).toEqual([])
+      expect(outcome.commands).toBe(1)
+      expect(names(fake)).toEqual(["btw", "mcp:prompt", "A:deploy"])
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A6: a rejected command.list costs one diagnostic and no reload", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+    fake.fail("command.list", new Error("list down"))
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.diagnostics).toContain("command-audit: list down")
+      expect(fake.commandReloadCalls).toBe(1)
+      expect(fake.reloadCalls).toBe(1)
+      expect(names(fake)).toEqual(["A:deploy"])
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A6b: a throwing audit costs one diagnostic and no reload", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+    auditControl.failure = new Error("audit boom")
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.diagnostics).toContain("command-audit: audit boom")
+      expect(fake.commandReloadCalls).toBe(1)
+      expect(fake.reloadCalls).toBe(1)
+      expect(names(fake)).toEqual(["A:deploy"])
     } finally {
       await registry.dispose()
     }
