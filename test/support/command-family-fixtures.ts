@@ -17,6 +17,17 @@ export async function writeCommand(
   return ws.write(path.posix.join(checkout, ".opencode", root, relName), commandDoc(relName.replace(/\.md$/, "")))
 }
 
+/** The same file with explicit frontmatter and body, for cases that need `agent`/`model`/`subagent`. */
+export async function writeCommandDoc(
+  ws: Workspace,
+  checkout: string,
+  root: "command" | "commands",
+  relName: string,
+  content: string,
+): Promise<string> {
+  return ws.write(path.posix.join(checkout, ".opencode", root, relName), content)
+}
+
 /** The real F1 candidates for a workspace root: no hand-built command objects in tests. */
 export async function scanCommands(
   ws: FamilyWorkspace,

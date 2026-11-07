@@ -81,6 +81,9 @@ with `configured plugin path must be a directory`
 3. **Storage** gains `nested/manifest/version`, `nested/manifest/<scopeToken>`, and
    `nested/subproject/<scopeToken>` — see
    [architecture.md](architecture.md#storage-model) for the raw-key namespace.
+4. **Commands** appear as `subproject:command`: the composer's `ctrl+p commands` list and
+   `GET /api/command` both show one entry per published nested command, and a name that
+   collides with a native command is absent (`src/command-shadow.ts:28-53`).
 
 If nothing appears, work through [limits.md](limits.md) first: confirm the subproject carries
 a marker, that it is within the depth bound, and that no directory in the path is pruned.

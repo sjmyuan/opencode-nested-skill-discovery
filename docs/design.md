@@ -35,11 +35,11 @@ code: the cache is written with each entry's content, and nothing reads it back 
 
 ## Divergences recorded here
 
-- The solution's cache example omits `content`; the code writes it (`src/manifest.ts:59-66`).
+- The solution's cache example omits `content`; the code writes it (`src/manifest.ts:62-69`).
 - The solution and the discovery ADR describe the cache as reloaded on bind; no code path
   reads `nested/subproject/<token>`, so the cache is write-only today.
 - The upstream permissions page says a `skill` rule matches the skill name; at the pinned
   runtime it matches the ID ([permissions.md](permissions.md)).
 - The discovery ADR's R10 manifest shape is `{ id, canonicalPath, name, autoinvoke }`; the
   code writes `{ id, canonicalPath, name, description?, autoinvoke? }` — `description` is
-  optional and present whenever the indexer derived one (`src/manifest.ts:51-57`).
+  optional and present whenever the indexer derived one (`src/manifest.ts:54-60`).

@@ -11,6 +11,20 @@ export const LINT_D = "---\nname: lint\n---\n# Lint\n\nLints deeply.\n"
 export const NATIVE_ROOT = "---\nname: native-root\n---\n# Native root\n"
 export const GLOBAL_DEMO = "---\nname: global-demo\n---\n# Global demo\n"
 
+/**
+ * Native-only name: the plugin's path-only walk shadows `pkg-a:native` from this file,
+ * while the host rejects it at decode (`model` is neither a short form nor a mapping),
+ * so the name is published by nobody and the HTTP invocation must 404.
+ */
+export const COMMAND_NATIVE = "---\ndescription: Native only rejected\nmodel: not-a-model\n---\n# Native\n\nNative only command.\n"
+export const COMMAND_SHADOWED = "---\ndescription: Plugin shadowed definition\n---\n# Native\n\nShadowed command.\n"
+export const COMMAND_DEPLOY_B = "---\ndescription: Deploy to a target\n---\nDeploy $1 to $2\n"
+export const COMMAND_RELEASE_C =
+  "---\ndescription: Release with a mapped model\nmodel: {providerID: deepseek, model: deepseek-flash}\n---\nRelease $ARGUMENTS\n"
+export const COMMAND_TIDY_D = "---\ndescription: Tidy the deepest nest\n---\nTidy the nest.\n"
+
+export const COMMAND_NAMES = Object.freeze(["pkg-b:deploy", "pkg-c:release", "pkg-d:deep:nest:tidy"])
+
 const LOCATION_CONFIG = `${JSON.stringify({ skills: ["./pkg-a/.opencode/skills"] }, null, 2)}\n`
 
 export const MATRIX = [
@@ -22,6 +36,11 @@ export const MATRIX = [
   { path: "pkg-c/.agents/skills/tidy/SKILL.md", content: TIDY_C },
   { path: "pkg-d/AGENTS.md", content: "# pkg-d\n" },
   { path: "pkg-d/deep/nest/.opencode/skill/lint/SKILL.md", content: LINT_D },
+  { path: ".opencode/command/pkg-a:native.md", content: COMMAND_NATIVE },
+  { path: "pkg-a/.opencode/command/native.md", content: COMMAND_SHADOWED },
+  { path: "pkg-b/.opencode/command/deploy.md", content: COMMAND_DEPLOY_B },
+  { path: "pkg-c/.opencode/command/release.md", content: COMMAND_RELEASE_C },
+  { path: "pkg-d/deep/nest/.opencode/command/tidy.md", content: COMMAND_TIDY_D },
 ]
 
 export const GLOBAL_MATRIX = [{ path: "skills/global-demo/SKILL.md", content: GLOBAL_DEMO }]

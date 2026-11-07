@@ -2,7 +2,7 @@
 
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The values
 are constants in `src/contracts.ts`: the refresh passes no `limits` override, so
-`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:520-522`), and this release reads no
+`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:526-528`), and this release reads no
 plugin configuration, so none of them can be changed from `opencode.json`.
 
 ## Summary
@@ -15,7 +15,7 @@ plugin configuration, so none of them can be changed from `opencode.json`.
 | One skill or command file | 128 KiB | that file is skipped, scan continues |
 | Total skill and command bytes | 16 MiB | scan stops, partial index advertised |
 | Diagnostics | 200 in the scan, 200 in the refresh outcome | truncated with a summary line, scan continues |
-| Native command-name walk | shares the directory and file budgets above; reads no content | a truncated walk yields a partial native name set and is advertised as incomplete |
+| Native command-name walk | shares the directory and file budgets above; reads no content | a truncated walk stops early and reports `budget-*`; its `complete` flag is computed and never surfaced (`src/command-native.ts:129-133`) |
 | Display name | 80 code points | leading path segments dropped behind `…/` |
 | Command name | 160 code points (`MAX_COMMAND_NAME_LENGTH`, `src/command-names.ts`) | never truncated: a longer name is kept whole and logged as `name-too-long:`, while skill display names still cut at 80 |
 | Description | 500 code points | truncated |
@@ -28,6 +28,15 @@ The command template is the file body after the closing fence, so it is bounded 
 snapshot reader re-checks the limit on the bytes it read, because a file can grow between the
 scan and the read (`src/command-snapshot.ts:88-91`), and the template is then stored in
 `nested/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
+
+A `model:` selection is canonicalised before storage: both frontmatter forms —
+`providerID/model#variant?` and the `{providerID, model, variant?}` mapping — become the one
+short string (`src/command-model.ts:58-64`), so the cache, the listing, and the routing
+reference can never disagree about which model a command selects.
+
+One divergence is recorded, not fixed: the template is stored verbatim, while native trims it at
+decode (`packages/core/src/config/plugin/command.ts:177`), so a body ending in a newline plus
+trailing arguments expands with one extra blank line (`src/command-expand.ts:71-77`).
 
 ## Depth
 
@@ -78,7 +87,7 @@ marker kinds are `src/contracts.ts:182-189`:
 | `hg` | a real `.hg` directory |
 
 Markers nest and never stop the walk: the deepest marker owner wins, and its relative path
-becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:120`). A symlinked
+becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:122`). A symlinked
 skill-root directory is not a marker and is not followed.
 
 ## Worktree families
@@ -149,10 +158,10 @@ the walk (`src/scan.ts:425-465`, `540-561`). A single file over 128 KiB is skipp
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:524`).
+(`src/registry.ts:530`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:44`, `89-98`, ending
-in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:83-88`),
+in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:85-90`),
 where the overflow is summarised as `truncated: N more diagnostics`. A scan that truncates
 still feeds the outcome budget. Post-reload audit lines share that budget in stage order, so
 a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders them — see
@@ -163,7 +172,7 @@ a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders
 | Field | Cap | Behaviour |
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
-| description | 500 code points | cut (`src/registry.ts:110-115`) |
+| description | 500 code points | cut (`src/registry.ts:115-119`) |
 | scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:45-47`) |
 | skill slug | 40 | cut, same (`src/indexer.ts:49-51`) |
 
@@ -179,7 +188,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:641-647`, `237-253`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:36`, `763-820`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:665-671`, `src/registry.ts:239-255`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:38`, `src/registry.ts:787-843`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -202,5 +211,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:745-761`, `726-738`, `697-724`). Details in
+(`src/registry.ts:769-785`, `src/registry.ts:743-747`, `src/registry.ts:721-748`). Details in
 [architecture.md](architecture.md#refresh-model).

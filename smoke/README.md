@@ -60,6 +60,8 @@ alias, so `process.cwd()` cannot canonicalise it away.
   session row in the shared data database. The CLI prefers `PWD` over its own cwd, so
   the harness pins `PWD` to the canonical fixture to keep the session in the fixture
   location.
+- C7 creates two more session rows; C8 attaches a TUI to the fixture's own server in a PTY
+  and may add one session row of its own. All of them stay in the fixture location.
 
 ## Claims
 
@@ -70,7 +72,32 @@ alias, so `process.cwd()` cannot canonicalise it away.
 | C3 | after a reload, one id per canonical path: 7 fixture entries, native `deploy`/`foo` surviving, `pkg-a` twins suppressed |
 | C4 | a `SKILL.md` edit appears in `/api/skill` within 20 s of polling |
 | C5 | one `opencode run` loads `pkg-b/deploy` by exact id (live or a bound replay) |
+| C6 | `/api/command` lists exactly `pkg-b:deploy`, `pkg-c:release`, `pkg-d:deep:nest:tidy`; the plugin's shadowed definition is absent — its native file is host-rejected, so the name 404s regardless |
+| C7 | `session.command` expands `pkg-b:deploy` to `Deploy prod to --fast now`, switches the session to `deepseek/deepseek-flash` for `pkg-c:release`, and answers 404 for `pkg-a:native` |
+| C8 | the real TUI's composer autocomplete shows `/pkg-b:deploy` for a typed `/pkg-b`, attached to the suite server |
 
 Watcher timing is recorded, never asserted. C1 and C3 are scored on the stable capture
 (`skill-settled.json`); `settle.json` records `{ok, attempts, elapsedMs, stableFor}` and
 a settle timeout is reported as `unproven`, not as a contract failure.
+
+## The TUI capture (C8)
+
+`smoke/tui.mjs` drives the real TUI in an `/usr/bin/expect` PTY. By default it **attaches** to
+the suite's own `opencode serve` (`opencode --server <base> <fixture>/real`), with
+`OPENCODE_PASSWORD` passed through the child environment — never the Tcl script — and
+`OPENCODE_CONFIG_DIR` / `OPENCODE_TEST_HOME` pointing inside the fixture. If three attach
+attempts render nothing, one `--standalone` attempt follows and the mode is recorded; the two
+flags are never combined. The only interactive trick is a terminal-capability responder
+(`ESC[6n` → cursor report, DA1/DA2, and the `opencode …` version preamble), because a bare PTY
+leaves OpenTUI waiting for an answer and renders nothing. The driver waits for the composer,
+types `/pkg-b`, and expects `pkg-b:deploy` on screen.
+
+`tui-transcript.txt` and `tui-screen.txt` are truncated **before** each spawn (`log_file -a`
+appends only within one attempt), so no attempt can pass on an earlier attempt's frames.
+`tui-attempts.json` records `attempt` and `mode` per attempt, `kept` (which attempt produced the
+retained frames), and the submit half: `submit: "observed"` with a session created after the
+pre-run session baseline, or `submit: "unobserved (C7)"`. `run` and `runNote` derive from the
+same predicate, so the record cannot contradict itself. Submit is **evidence, never the pass
+rule**: C8 is scored on rendering, and C7 proves execution on the same
+`POST /api/session/:id/command` endpoint the TUI uses. A screen that yields no printable glyph
+is `unproven` with `tui-equivalence.md`, never a silent pass.
