@@ -91,7 +91,7 @@ published under its qualified name, `/subproject:command`; the `:` keeps the pre
 name a human types. `$1`–`$N` (the highest index absorbing the remaining arguments),
 `$ARGUMENTS`, and `` !`cmd` `` shell interpolation expand exactly as native does, and an
 invocation routes the agent, the model, and a subagent child by the same rules native uses
-(`src/command-execute.ts:36-104`, `src/command-expand.ts:56-80`). A composed name that
+(`src/command-execute.ts:30-104`, `src/command-expand.ts:56-80`). A composed name that
 collides with a native command is dropped, never shadowed
 (`src/command-shadow.ts:28-53`). There is no `command` permission action, so a published
 command needs no rule of its own.
