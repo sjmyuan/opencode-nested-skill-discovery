@@ -2,13 +2,13 @@ import { watch } from "node:fs"
 import { lstat, realpath } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
 import { PRUNE_DIRECTORIES, compareText } from "./contracts.ts"
-import type { ScanCandidate, SkillRootKind } from "./contracts.ts"
+import type { CommandCandidate, CommandRootKind, ScanCandidate, SkillRootKind } from "./contracts.ts"
 
 /**
  * R16 watcher set (F6 PD2): one non-recursive `fs.watch` per location root, per
- * subproject that owns candidates, per candidate's skill root, and per candidate's
- * own directory. The set is derived from the last successful scan and reconciled on
- * every refresh, so a moved or deleted subproject never leaks a handle.
+ * subproject that owns candidates, per candidate's skill or command root, and per
+ * candidate's own directory. The set is derived from the last successful scan and
+ * reconciled on every refresh, so a moved or deleted subproject never leaks a handle.
  */
 
 export interface WatchHandle {
@@ -160,9 +160,16 @@ export const WATCH_ROOT_SEGMENTS: Record<SkillRootKind, readonly [string, string
   "agents-skills": [".agents", "skills"],
 }
 
+/** Kind → the two directory segments that make a command root (mirrors `src/scan.ts`). */
+export const WATCH_COMMAND_ROOT_SEGMENTS: Record<CommandRootKind, readonly [string, string]> = {
+  "opencode-command": [".opencode", "command"],
+  "opencode-commands": [".opencode", "commands"],
+}
+
 export interface DeriveWatchTargetsInput {
   readonly location: string
   readonly candidates: readonly ScanCandidate[]
+  readonly commands?: readonly CommandCandidate[]
   readonly prune?: readonly string[]
 }
 
@@ -185,16 +192,19 @@ const canonical = async (target: string): Promise<string> => {
 }
 
 /**
- * Resolves a candidate's skill root by its last `<leading>/<leaf>` pair, so a nested
- * subproject such as `A/A.1` resolves `A/A.1/.claude/skills` rather than a shallower
- * lookalike. Returns `undefined` when the candidate path carries no such pair.
+ * Resolves a candidate's root (skill or command) by its last `<leading>/<leaf>` pair, so
+ * a nested subproject such as `A/A.1` resolves `A/A.1/.claude/skills` rather than a
+ * shallower lookalike. Returns `undefined` when the candidate path carries no such pair.
  */
-function skillRootOf(root: string, candidatePath: string, kind: SkillRootKind): string | undefined {
+function rootOf(
+  root: string,
+  candidatePath: string,
+  [leading, leaf]: readonly [string, string],
+): string | undefined {
   const segments = candidatePath
     .slice(root.length)
     .split(sep)
     .filter((segment) => segment !== "")
-  const [leading, leaf] = WATCH_ROOT_SEGMENTS[kind]
 
   for (let index = segments.length - 2; index >= 0; index -= 1) {
     if (segments[index] !== leading) continue
@@ -246,6 +256,7 @@ function errorCode(error: unknown): string {
 export async function deriveWatchTargets({
   location,
   candidates,
+  commands,
   prune,
 }: DeriveWatchTargetsInput): Promise<DeriveWatchTargetsResult> {
   const diagnostics: string[] = []
@@ -257,13 +268,28 @@ export async function deriveWatchTargets({
     const candidatePath = resolve(root, candidate.path)
     wanted.add(resolve(root, candidate.subproject === "" ? "." : candidate.subproject))
 
-    const skillRoot = skillRootOf(root, candidatePath, candidate.root)
+    const skillRoot = rootOf(root, candidatePath, WATCH_ROOT_SEGMENTS[candidate.root])
     if (skillRoot === undefined) {
       diagnostics.push(`watch-root-unresolved: ${displayPath(root, candidatePath)}`)
     } else {
       wanted.add(skillRoot)
     }
     wanted.add(dirname(candidatePath))
+  }
+
+  // Commands mirror the skill rule (PD1): subproject, the last `.opencode/{command,commands}`
+  // pair, and the candidate's own directory. One derivation rule, two kinds.
+  for (const command of commands ?? []) {
+    const commandPath = resolve(root, command.path)
+    wanted.add(resolve(root, command.subproject === "" ? "." : command.subproject))
+
+    const commandRoot = rootOf(root, commandPath, WATCH_COMMAND_ROOT_SEGMENTS[command.root])
+    if (commandRoot === undefined) {
+      diagnostics.push(`watch-root-unresolved: ${displayPath(root, commandPath)}`)
+    } else {
+      wanted.add(commandRoot)
+    }
+    wanted.add(dirname(commandPath))
   }
 
   const kept = new Set<string>()

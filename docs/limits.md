@@ -111,6 +111,10 @@ directory, not the one whose `.git` is a `gitdir:` file.
   repeating it (`test/family-checkout.test.ts` A22).
 - Creating a `.git` on an ancestor is outside the watch set, so a nested subproject starts
   deduping at the next prompt or the next file move, not immediately (Q10).
+- A command root created inside an already-existing `.opencode` is outside the watch set, and
+  so is a command file added back into a root whose last file was deleted: both wait for the
+  next prompt. The same shape as a nested `.git` (Q10), accepted rather than pending
+  (`src/watch.ts:256-309`, `test/registry-command-refresh.test.ts`).
 - Residual: a worktree of a **submodule** (`.git/modules/<n>/worktrees/<wt>`) cannot name a
   survivor, so that pair still double-registers (Q8).
 - Residual: deleting the main checkout's `.git` republishes the hidden worktree at the next

@@ -239,7 +239,7 @@ starting a second one, so concurrent triggers cost one scan (`src/registry.ts:69
 | Trigger | Mechanism | Bound |
 |---|---|---|
 | activation | `setup` → `activate()` (`src/plugin.ts:23-37`) | once per location instance |
-| filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:137`) |
+| filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory, per command root, per command directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:137`) |
 | prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts:23-54`) | `PROMPT_THROTTLE_MS = 2_000` (`src/contracts.ts:140`), skipped when any refresh just finished |
 
 The debounce is a single timer (`src/registry.ts:303-306`), not a per-event delay: the first
@@ -269,10 +269,13 @@ swallowed, then disposes the hook and the transform; it is idempotent
 completed refresh without delaying it (`src/registry.ts:726-738`, `697-724`).
 
 Watcher, debounce, and backstop behaviour is implemented in `src/watch.ts` and
-`src/backstop.ts` (`deriveWatchTargets` at `src/watch.ts:246-283`, `createDebouncer` at
+`src/backstop.ts` (`deriveWatchTargets` at `src/watch.ts:256-309`, `createDebouncer` at
 `56-86`, `createWatchSet` at `101-153`, `createBackstop` at `src/backstop.ts:23-54`) and is
 covered by `test/watch-targets.test.ts`, `test/watch-triggers.test.ts`,
-`test/backstop.test.ts`, and `test/registry-refresh.test.ts`.
+`test/backstop.test.ts`, `test/registry-refresh.test.ts`, and
+`test/registry-command-refresh.test.ts`. Command candidates join the derivation from the
+**pre-suppression** scan result (`src/registry.ts:533`), so a repo-family flip changes which
+names publish without opening or closing a handle.
 
 ## Failure model
 
