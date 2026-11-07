@@ -2,12 +2,14 @@ import type { Dirent } from "node:fs"
 import { lstat, readdir, realpath, stat } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 import {
+  COMMAND_ROOT_DIRECTORIES,
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
   SKILL_ROOT_DIRECTORIES,
   SUBPROJECT_MARKERS,
 } from "./contracts.ts"
 import type {
+  CommandCandidate,
   CommandRootKind,
   ScanCandidate,
   ScanLimits,
@@ -31,6 +33,7 @@ export interface ScanOptions {
   readonly prune?: readonly string[]
   readonly markers?: readonly SubprojectMarker[]
   readonly skillRoots?: readonly SkillRootKind[]
+  readonly commandRoots?: readonly CommandRootKind[]
   readonly excludeRoots?: readonly string[]
 }
 
@@ -48,6 +51,7 @@ const DIAGNOSTIC_LIMIT = 200
 
 interface State {
   readonly candidates: ScanCandidate[]
+  readonly commands: CommandCandidate[]
   readonly diagnostics: string[]
   directories: number
   files: number
@@ -61,6 +65,7 @@ interface State {
 interface Ownership {
   readonly rel: string
   readonly markers: readonly SubprojectMarker[]
+  readonly realPath: string
 }
 
 interface Context {
@@ -69,6 +74,7 @@ interface Context {
   readonly prune: ReadonlySet<string>
   readonly markers: ReadonlySet<SubprojectMarker>
   readonly roots: readonly SkillRootKind[]
+  readonly commandRoots: readonly CommandRootKind[]
   readonly excluded: readonly string[]
   readonly state: State
   readonly emit: (message: string) => void
@@ -79,6 +85,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const limits = options.limits ?? DEFAULT_SCAN_LIMITS
   const state: State = {
     candidates: [],
+    commands: [],
     diagnostics: [],
     directories: 0,
     files: 0,
@@ -102,7 +109,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
 
   const finish = (): ScanResult => ({
     candidates: [...state.candidates].sort(compareCandidates),
-    commands: [],
+    commands: [...state.commands].sort(compareCommands),
     stats: {
       directories: state.directories,
       files: state.files,
@@ -129,6 +136,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     prune: new Set(options.prune ?? PRUNE_DIRECTORIES),
     markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
     roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
+    commandRoots: options.commandRoots ?? COMMAND_ROOT_DIRECTORIES,
     excluded: await canonicalRoots(options.excludeRoots ?? []),
     state,
     emit,
@@ -171,7 +179,7 @@ async function walk(
   }
 }
 
-/** Opens every configured skill root whose leading segment is `name` (PD3). */
+/** Opens every configured root whose leading segment is `name` (PD3). */
 async function openRoots(
   context: Context,
   name: string,
@@ -192,6 +200,24 @@ async function openRoots(
     if (probe === "refused") continue
     if (isExcluded(context, root)) continue
     await walkRoot(context, root, rootRel, kind, true, owner)
+  }
+  for (const kind of context.commandRoots) {
+    const [leading, leaf] = ROOT_SEGMENTS[kind]
+    if (leading !== name) continue
+    const root = join(dir, leaf)
+    // PD2: the location's own `.opencode/command(s)` belongs to native discovery, so it is
+    // neither scanned nor reported; it is only claimed so the ordinary walk skips it.
+    if (rel === "") {
+      if (await existsNoFollow(root)) opened = true
+      continue
+    }
+    const rootRel = joinRel(rel, leaf)
+    const probe = await probeRoot(context, root, rootRel)
+    if (probe === "missing") continue
+    opened = true
+    if (probe === "refused") continue
+    if (isExcluded(context, root)) continue
+    await walkCommandRoot(context, root, rootRel, kind, owner, root)
   }
   return opened
 }
@@ -254,6 +280,51 @@ function eligible(name: string, atRoot: boolean): boolean {
   return atRoot ? name.endsWith(".md") : name === "SKILL.md"
 }
 
+/**
+ * Walks one command root the way native globs it — `{command,commands}/**\/*.md`, dots and
+ * all, no depth cap (PD3) — and never probes markers inside it: the owner is the subproject
+ * that opened the root.
+ */
+async function walkCommandRoot(
+  context: Context,
+  dir: string,
+  rel: string,
+  kind: CommandRootKind,
+  parent: Ownership | null,
+  rootDir: string,
+): Promise<void> {
+  const entries = await openDirectory(context, dir, rel)
+  if (entries === null) return
+
+  for (const entry of entries) {
+    if (context.state.stopped) return
+    if (context.prune.has(entry.name)) continue
+    const child = join(dir, entry.name)
+    if (entry.isSymbolicLink()) {
+      await acceptCommandLink(context, child, joinRel(rel, entry.name), kind, parent, rootDir)
+      continue
+    }
+    if (entry.isDirectory()) {
+      if (isExcluded(context, child)) continue
+      await walkCommandRoot(context, child, joinRel(rel, entry.name), kind, parent, rootDir)
+      continue
+    }
+    if (!entry.isFile()) continue
+    if (!commandEligible(entry.name)) continue
+    await acceptCommand(context, child, kind, parent, rootDir)
+  }
+}
+
+/** Every `.md` under a command root is a candidate, at any depth (`dot`). */
+function commandEligible(name: string): boolean {
+  return name.endsWith(".md")
+}
+
+/** Native `decode()` parity (PD6): root-relative, POSIX separators, one trailing `.md` stripped. */
+function deriveCommandName(rootDir: string, path: string): string {
+  return relative(rootDir, path).split(sep).join("/").replace(/\.md$/, "")
+}
+
 type LinkTarget =
   | { readonly type: "directory" }
   | { readonly type: "file"; readonly realPath: string }
@@ -303,6 +374,32 @@ async function acceptLink(
   await accept(context, path, kind, owner, link.realPath)
 }
 
+/** Inside a command root a link may be a candidate file; a directory link is never followed (D2). */
+async function acceptCommandLink(
+  context: Context,
+  path: string,
+  rel: string,
+  kind: CommandRootKind,
+  owner: Ownership | null,
+  rootDir: string,
+): Promise<void> {
+  const link = await resolveLink(path)
+  if (link.type === "directory") {
+    context.emit(`directory-symlink: ${rel}`)
+    return
+  }
+  if (!commandEligible(basename(path))) return
+  if (link.type === "broken") {
+    context.emit(`file-symlink-broken: ${rel}`)
+    return
+  }
+  if (!isInside(context.location, link.realPath)) {
+    context.emit(`file-symlink-outside: ${rel}`)
+    return
+  }
+  await acceptCommand(context, path, kind, owner, rootDir, link.realPath)
+}
+
 function isExcluded(context: Context, path: string): boolean {
   return context.excluded.some((root) => path === root || path.startsWith(`${root}${sep}`))
 }
@@ -317,18 +414,24 @@ function isInside(location: string, target: string): boolean {
   return target === location || target.startsWith(`${location}${sep}`)
 }
 
-async function accept(
+interface Admission {
+  readonly canonicalPath: string
+}
+
+/**
+ * The one budget ladder shared by skill and command candidates: file count, then per-file
+ * bytes, then total bytes, then acceptance. Returns null when the file is not admitted.
+ */
+async function admit(
   context: Context,
   path: string,
-  kind: SkillRootKind,
-  owner: Ownership | null,
   realPath?: string,
-): Promise<void> {
+): Promise<Admission | null> {
   if (context.state.accepted >= context.limits.maxFiles) {
     context.state.truncated = true
     context.state.stopped = true
     context.emit(`budget-files: maxFiles=${context.limits.maxFiles}`)
-    return
+    return null
   }
 
   let info
@@ -336,7 +439,7 @@ async function accept(
     info = await stat(path)
   } catch (error) {
     context.emit(`unreadable-file: ${relativeToLocation(context, path)} (${errorCode(error)})`)
-    return
+    return null
   }
   context.state.files += 1
 
@@ -346,22 +449,55 @@ async function accept(
     context.emit(
       `budget-file-bytes: ${relPath} size=${info.size} maxFileBytes=${context.limits.maxFileBytes}`,
     )
-    return
+    return null
   }
 
   if (context.state.bytes + info.size > context.limits.maxTotalBytes) {
     context.state.truncated = true
     context.state.stopped = true
     context.emit(`budget-total-bytes: maxTotalBytes=${context.limits.maxTotalBytes}`)
-    return
+    return null
   }
 
   context.state.bytes += info.size
   context.state.accepted += 1
+  return { canonicalPath: realPath ?? (await canonical(path)) ?? path }
+}
+
+async function accept(
+  context: Context,
+  path: string,
+  kind: SkillRootKind,
+  owner: Ownership | null,
+  realPath?: string,
+): Promise<void> {
+  const admitted = await admit(context, path, realPath)
+  if (admitted === null) return
   context.state.candidates.push({
     path,
-    realPath: realPath ?? (await canonical(path)) ?? path,
+    realPath: admitted.canonicalPath,
     subproject: owner?.rel ?? "",
+    root: kind,
+    markers: owner === null ? [] : [...owner.markers],
+  })
+}
+
+async function acceptCommand(
+  context: Context,
+  path: string,
+  kind: CommandRootKind,
+  owner: Ownership | null,
+  rootDir: string,
+  realPath?: string,
+): Promise<void> {
+  const admitted = await admit(context, path, realPath)
+  if (admitted === null) return
+  context.state.commands.push({
+    name: deriveCommandName(rootDir, path),
+    path,
+    canonicalPath: admitted.canonicalPath,
+    subproject: owner?.rel ?? "",
+    subprojectRealPath: owner?.realPath ?? context.location,
     root: kind,
     markers: owner === null ? [] : [...owner.markers],
   })
@@ -379,7 +515,9 @@ async function probeMarkers(context: Context, dir: string, rel: string): Promise
     if (!context.markers.has(kind)) continue
     if (await hasMarker(dir, kind)) found.push(kind)
   }
-  return found.length === 0 ? null : { rel, markers: found }
+  if (found.length === 0) return null
+  // Resolved once per subproject, not once per command file (Step 3).
+  return { rel, markers: found, realPath: (await canonical(dir)) ?? dir }
 }
 
 async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> {
@@ -431,6 +569,16 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** lstat existence: a broken or symlinked entry still counts as present. */
+async function existsNoFollow(path: string): Promise<boolean> {
+  try {
+    await lstat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function isFile(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile()
@@ -462,6 +610,12 @@ function joinRel(rel: string, name: string): string {
 
 function compareCandidates(left: ScanCandidate, right: ScanCandidate): number {
   if (left.realPath !== right.realPath) return left.realPath < right.realPath ? -1 : 1
+  if (left.path !== right.path) return left.path < right.path ? -1 : 1
+  return 0
+}
+
+function compareCommands(left: CommandCandidate, right: CommandCandidate): number {
+  if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
   if (left.path !== right.path) return left.path < right.path ? -1 : 1
   return 0
 }
