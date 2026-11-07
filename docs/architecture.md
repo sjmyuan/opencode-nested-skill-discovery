@@ -298,7 +298,7 @@ advertised list is whatever the last completed step produced.
 | A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:816` |
 | A command stage throws (index, snapshot, persist, reload) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:569-619` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
-| A published command never appears | a native name shadows it or a repo family suppresses it before publication; nothing audits `command.list()` after the reload yet, so a late shadow recovers only at the next rescan | `src/registry.ts:618-619`, `src/command-shadow.ts:86-117` |
+| A published command never appears | a native name shadows it or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the audit reports `native-shadow-audit:` and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:628-642`, `src/command-shadow.ts:86-117` |
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
 (`src/registry.ts:193-202`), which also reports `commands` and `commandReloads` next to the
@@ -320,6 +320,7 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | `src/names.ts` | qualified display names, truncation, sanitisation |
 | `src/native.ts` | the native skill roots to exclude |
 | `src/command-native.ts` | the native command names visible from a location: ancestor and global walks, shared budgets, no content read |
+| `src/command-audit.ts` | the post-reload composition: the published set taken from the snapshot, one `command.list()`, handed to the shadow tracker |
 | `src/command-shadow.ts` | native precedence for command names: pre-drop, post-refresh audit, cross-pass denial ledger |
 | `src/command-names.ts` | command-name composition: `composeCommandName` joins `subproject:command`, `composeCommandNames` resolves first-wins collisions, `createNameLedger` silences repeats, and `QualifiedCommand.publishedName` is the key |
 | `src/command-snapshot.ts` | reads each qualified command's content, drops a malformed, unreadable or oversized file, and freezes the per-subproject command snapshot |

@@ -17,9 +17,10 @@ import {
 } from "./contracts.ts"
 import { createBackstop, type Backstop } from "./backstop.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
+import { auditReloadedCommands, EMPTY_NATIVE_COMMANDS } from "./command-audit.ts"
 import { filterCommandFamilies } from "./command-family.ts"
 import { createNameLedger, type QualifiedCommand } from "./command-names.ts"
-import { resolveNativeCommandNames } from "./command-native.ts"
+import { resolveNativeCommandNames, type NativeCommandNameIndex } from "./command-native.ts"
 import { applyCommands, findCommand, type CommandExecutor } from "./command-replay.ts"
 import { createShadowTracker } from "./command-shadow.ts"
 import { buildCommandSnapshot } from "./command-snapshot.ts"
@@ -574,6 +575,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     // Command publication is non-fatal throughout (ADR command R17): a native-walk,
     // read, persist or reload failure costs a diagnostic, never the skill reload.
+    let nativeIndex: NativeCommandNameIndex | undefined
     const commandIndex = await runStage(diagnostics, "command-index", async () => {
       const planned = indexed.value.commands
       if (planned.length === 0) {
@@ -582,6 +584,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
       const composed = nameLedger.compose(planned, base)
       const native = await resolveNativeCommandNames(nativeInput())
+      nativeIndex = native
       const dropped = shadowTracker.drop(
         composed.commands.map((command) => ({ ...command, name: command.publishedName })),
         native,
@@ -623,6 +626,21 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     // F9: audit `ctx.command.list()` once this reload settles, before reporting a shadow.
     const commandReloaded = await runStage(diagnostics, "command-reload", () => ctx.command.reload())
+
+    // F9 (ADR command R4): after the reload settles, classify the listing against the
+    // snapshot we just replayed. A shadow is reported here and denied for the next snapshot.
+    if (commandIndex.ok && commandReloaded.ok && currentCommands !== undefined) {
+      const snapshot = currentCommands
+      const audited = await runStage(diagnostics, "command-audit", () =>
+        auditReloadedCommands({
+          snapshot,
+          list: () => ctx.command.list(),
+          native: nativeIndex ?? EMPTY_NATIVE_COMMANDS,
+          tracker: shadowTracker,
+        }),
+      )
+      if (audited.ok) diagnostics.push(...audited.value.diagnostics)
+    }
 
     const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
     if (!reloaded.ok) return record(fail(diagnostics))

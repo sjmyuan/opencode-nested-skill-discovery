@@ -87,6 +87,7 @@ export interface FakeContextOptions {
   readonly storage?: Iterable<readonly [string, Schema.Json]>
   readonly onReload?: () => void
   readonly commands?: readonly CommandSeed[]
+  readonly nativeCommands?: readonly CommandSeed[]
   readonly onCommandReload?: () => void
   readonly agents?: readonly FakeAgentSeed[]
   readonly sessions?: readonly FakeSessionSeed[]
@@ -114,6 +115,7 @@ export interface FakeContext {
   onReload: (() => void) | undefined
   onCommandReload: (() => void) | undefined
   setLocation(directory: string): void
+  setNativeCommands(commands: readonly CommandSeed[]): void
   hideNatives(reads: number, keep?: readonly string[]): void
   addNative(skill: Skill.Info): void
   removeNative(id: string): void
@@ -238,6 +240,18 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   }
   resetCommands()
 
+  // Registered after the transform replay, the order the host's config plugin uses.
+  let nativeCommandSeeds: readonly CommandSeed[] = options.nativeCommands ?? []
+  const applyNativeCommands = (): void => {
+    for (const seed of nativeCommandSeeds) {
+      commandEntries.set(seed.name, {
+        name: seed.name,
+        ...(seed.description === undefined ? {} : { description: seed.description }),
+        execute: async () => undefined,
+      })
+    }
+  }
+
   const commandEditor = {
     add: (definition: FakeCommandDefinition) => {
       const failure = commandAddFailures.get(definition.name)
@@ -297,6 +311,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         guarded("command.reload", () => {
           resetCommands()
           for (const transform of commandTransforms) transform(commandEditor)
+          applyNativeCommands()
           hooks.onCommandReload?.()
           counters.commandReload += 1
         }),
@@ -450,6 +465,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       location.directory = next
       location.project.directory = next
       location.project.canonical = next
+    },
+    setNativeCommands(commands: readonly CommandSeed[]) {
+      nativeCommandSeeds = commands.map((seed) => ({ ...seed }))
     },
     hideNatives(reads: number, keep: readonly string[] = []) {
       hiddenListReads = reads
