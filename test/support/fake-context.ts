@@ -33,6 +33,8 @@ export type FailureTarget =
   | "storage.remove"
   | "storage.scan"
 
+export type SyncFailureTarget = "command.transform" | "skill.transform"
+
 export interface FakeLocation {
   directory: string
   readonly project: {
@@ -77,6 +79,7 @@ export interface FakeContext {
   addNative(skill: Skill.Info): void
   removeNative(id: string): void
   fail(target: FailureTarget, error?: unknown): void
+  failSync(target: SyncFailureTarget, error?: unknown): void
   failKey(key: string, error?: unknown): void
   failCommandAdd(name: string, error?: unknown): void
   clearFailures(): void
@@ -106,6 +109,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
+  const syncFailures = new Map<SyncFailureTarget, unknown>()
   const keyFailures = new Map<string, unknown>()
   const commandAddFailures = new Map<string, unknown>()
   const values = new Map<string, Schema.Json>(options.storage ?? [])
@@ -179,15 +183,18 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   // Only the five faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
     skill: {
-      transform: async (callback: TransformCallback) =>
-        guarded("skill.transform", () => {
+      transform: (callback: TransformCallback) => {
+        const sync = syncFailures.get("skill.transform")
+        if (sync !== undefined) throw sync
+        return guarded("skill.transform", () => {
           transforms.push(callback)
           return {
             dispose: async () => {
               counters.dispose += 1
             },
           }
-        }),
+        })
+      },
       reload: async () =>
         guarded("skill.reload", () => {
           entries = natives.map((skill) => ({ ...skill }))
@@ -208,15 +215,18 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         }),
     },
     command: {
-      transform: async (callback: CommandTransformCallback) =>
-        guarded("command.transform", () => {
+      transform: (callback: CommandTransformCallback) => {
+        const sync = syncFailures.get("command.transform")
+        if (sync !== undefined) throw sync
+        return guarded("command.transform", () => {
           commandTransforms.push(callback)
           return {
             dispose: async () => {
               counters.commandDispose += 1
             },
           }
-        }),
+        })
+      },
       reload: async () =>
         guarded("command.reload", () => {
           resetCommands()
@@ -327,6 +337,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     fail(target: FailureTarget, error: unknown = new Error(target)) {
       failures.set(target, error)
     },
+    failSync(target: SyncFailureTarget, error: unknown = new Error(target)) {
+      syncFailures.set(target, error)
+    },
     failKey(key: string, error: unknown = new Error(`key ${key}`)) {
       keyFailures.set(key, error)
     },
@@ -335,6 +348,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     clearFailures() {
       failures.clear()
+      syncFailures.clear()
       keyFailures.clear()
       commandAddFailures.clear()
     },

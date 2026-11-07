@@ -433,6 +433,57 @@ describe("command publication from the refresh", () => {
     }
   })
 
+  it("R16b: a synchronously throwing command transform never fails the refresh", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+
+    try {
+      fake.failSync("command.transform", new Error("sync boom"))
+      const first = await registry.activate()
+
+      expect(first.ok).toBe(true)
+      expect(first.skills).toBe(1)
+      expect(first.commandReloads).toBe(1)
+      expect(first.diagnostics).toContain("command-register: sync boom")
+      expect(fake.reloadCalls).toBe(1)
+
+      const second = await registry.refresh()
+
+      expect(second.ok).toBe(true)
+      expect(fake.commandReloadCalls).toBe(2)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("R16c: a failing command reload keeps the swapped snapshot and never fails the refresh", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+
+    try {
+      fake.fail("command.reload", new Error("no reload"))
+      const first = await registry.activate()
+
+      expect(first.ok).toBe(true)
+      expect(first.commands).toBe(1)
+      expect(first.commandReloads).toBe(0)
+      expect(first.reloads).toBe(1)
+      expect(fake.reloadCalls).toBe(1)
+      expect(first.diagnostics).toContain("command-reload: no reload")
+      expect(names(fake)).toEqual([])
+
+      fake.clearFailures()
+      const second = await registry.refresh()
+
+      expect(second.commandReloads).toBe(1)
+      expect(names(fake)).toEqual(["A:deploy"])
+    } finally {
+      await registry.dispose()
+    }
+  })
+
   it("R14: a skill persistence failure keeps the previous commands", async () => {
     const ws = await publish()
     await ws.command("command", "deploy.md")

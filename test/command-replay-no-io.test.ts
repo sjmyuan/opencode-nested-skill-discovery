@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { applyCommands } from "../src/command-replay.ts"
 import type { CommandEntry, CommandSnapshotSet } from "../src/contracts.ts"
-import type { CommandEditor } from "../src/plugin.ts"
+import type { CommandEditor, CommandInvocation } from "../src/plugin.ts"
 
 const fsCalls = vi.hoisted(() => ({
   readFile: 0,
@@ -53,17 +53,20 @@ beforeEach(() => {
   for (const name of Object.keys(fsCalls) as (keyof typeof fsCalls)[]) fsCalls[name] = 0
 })
 
+const invocation = { sessionID: "ses_test", prompt: "go", delivery: "steer" } as unknown as CommandInvocation
+
 describe("command replay without I/O", () => {
-  it("N1: the transform adds every entry with no fs and no storage access", () => {
-    let storageAccesses = 0
-    const storage = new Proxy(
-      {},
+  it("N1: the transform adds every entry without reading fs or any other option", () => {
+    const reads: string[] = []
+    const options = new Proxy(
       {
-        get: () => {
-          storageAccesses += 1
-          return () => {
-            throw new Error("storage must not be read during replay")
-          }
+        lookup: () => undefined,
+        execute: async () => undefined,
+      },
+      {
+        get: (target, property, receiver) => {
+          if (typeof property === "string") reads.push(property)
+          return Reflect.get(target, property, receiver)
         },
       },
     )
@@ -75,14 +78,17 @@ describe("command replay without I/O", () => {
     }
 
     const callback = (target: CommandEditor): void => {
-      void storage
-      applyCommands(target, snapshot, { lookup: () => undefined })
+      applyCommands(target, snapshot, options)
     }
 
     expect(() => callback(editor)).not.toThrow()
     expect(added).toEqual(["A:deploy", "A:release", "A:review"])
-    expect(storageAccesses).toBe(0)
     expect(fsCalls).toEqual({ readFile: 0, realpath: 0, readdir: 0, stat: 0, lstat: 0, open: 0 })
+    expect([...new Set(reads)].sort()).toEqual(["execute", "lookup"])
+
+    // The probe must be live: a storage-shaped reach would have to appear here.
+    void (options as unknown as Record<string, unknown>).storage
+    expect(reads).toContain("storage")
   })
 
   it("N2: the fs stubs are live", async () => {
@@ -101,5 +107,31 @@ describe("command replay without I/O", () => {
 
     expect(result).toBeUndefined()
     expect(typeof result).not.toBe("object")
+  })
+
+  it("N4: a command target is resolved only when the published command runs", async () => {
+    const lookups: string[] = []
+    const added: { name: string; execute: (input: CommandInvocation) => Promise<void> }[] = []
+    const editor: CommandEditor = {
+      add: (definition) => {
+        added.push(definition)
+      },
+    }
+    const options = {
+      lookup: (name: string) => {
+        lookups.push(name)
+        throw new Error(`lookup guard: ${name}`)
+      },
+      execute: async () => {
+        throw new Error("execute guard")
+      },
+    }
+
+    expect(() => applyCommands(editor, snapshot, options)).not.toThrow()
+    expect(added.map((definition) => definition.name)).toEqual(["A:deploy", "A:release", "A:review"])
+    expect(lookups).toEqual([])
+
+    await expect(added[0]!.execute(invocation)).rejects.toThrow("lookup guard: A:deploy")
+    expect(lookups).toEqual(["A:deploy"])
   })
 })
