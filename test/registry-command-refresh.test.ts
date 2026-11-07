@@ -1,9 +1,11 @@
+import { rm } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createRegistry } from "../src/registry.ts"
 import { scanSkills } from "../src/scan.ts"
 import { deriveWatchTargets } from "../src/watch.ts"
 import { writeCommand } from "./support/command-family-fixtures.ts"
+import { commandStorage } from "./support/command-publish-fixtures.ts"
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
 import { createFamilyWorkspace, type FamilyWorkspace } from "./support/family-fixtures.ts"
 import { fakeWatch } from "./support/watch-fixtures.ts"
@@ -24,6 +26,8 @@ vi.mock("../src/scan.ts", async (importOriginal) => {
 
 const DEBOUNCE = 5
 const THROTTLE = 20
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const workspaces: FamilyWorkspace[] = []
 
@@ -102,6 +106,97 @@ describe("command refresh lifecycle", () => {
       h.watch.emit(at(h.ws, "A/.opencode/command"))
 
       await vi.waitFor(() => expect(defined(h.fake)).toContain("A:release"), { timeout: 2000 })
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("republishes an edited command file's description within the debounce window", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+
+    try {
+      expect(h.fake.commandDefinitions[0]?.description).toBe("deploy command")
+
+      await h.ws.write(
+        "A/.opencode/command/deploy.md",
+        "---\ndescription: a rewritten description\n---\n# deploy\n\nnew body.\n",
+      )
+      h.watch.emit(at(h.ws, "A/.opencode/command"))
+
+      await vi.waitFor(
+        () => expect(h.fake.commandDefinitions[0]?.description).toBe("a rewritten description"),
+        { timeout: 2000 },
+      )
+      expect(defined(h.fake)).toEqual(["A:deploy"])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("deleting the last command in a subproject omits the name with exactly one reload", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+
+    try {
+      const reloads = h.fake.commandReloadCalls
+      expect(defined(h.fake)).toEqual(["A:deploy"])
+
+      await rm(at(h.ws, "A/.opencode/command/deploy.md"))
+      h.watch.emit(at(h.ws, "A/.opencode/command"))
+
+      await vi.waitFor(() => expect(defined(h.fake)).toEqual([]), { timeout: 2000 })
+      expect(h.fake.commandReloadCalls).toBe(reloads + 1)
+      expect(JSON.stringify(commandStorage(h.fake))).not.toContain("A:deploy")
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("runs exactly one scan and one command reload for one event burst", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+
+    try {
+      const scans = scanControl.scans
+      const reloads = h.fake.commandReloadCalls
+
+      await writeCommand(h.ws, "A", "command", "release.md")
+      for (let index = 0; index < 5; index += 1) h.watch.emit(at(h.ws, "A/.opencode/command"))
+
+      await vi.waitFor(() => expect(defined(h.fake)).toContain("A:release"), { timeout: 2000 })
+      await sleep(DEBOUNCE * 4)
+
+      expect(scanControl.scans).toBe(scans + 1)
+      expect(h.fake.commandReloadCalls).toBe(reloads + 1)
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("keeps a no-op watcher refresh quiet: identical command keys, no new command diagnostic, no handle churn", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+
+    try {
+      const bytes = JSON.stringify(commandStorage(h.fake))
+      const scans = scanControl.scans
+      const reloads = h.fake.reloadCalls
+      const opened = [...h.watch.opened]
+
+      h.watch.emit(at(h.ws, "A/.opencode/command"))
+
+      await vi.waitFor(() => expect(h.fake.reloadCalls).toBe(reloads + 1), { timeout: 2000 })
+
+      expect(scanControl.scans).toBe(scans + 1)
+      expect(JSON.stringify(commandStorage(h.fake))).toBe(bytes)
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("command-"))).toEqual([])
+      expect(h.watch.opened).toEqual(opened)
+      expect(h.watch.closed).toEqual([])
     } finally {
       await h.dispose()
     }
