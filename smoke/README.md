@@ -60,6 +60,8 @@ alias, so `process.cwd()` cannot canonicalise it away.
   session row in the shared data database. The CLI prefers `PWD` over its own cwd, so
   the harness pins `PWD` to the canonical fixture to keep the session in the fixture
   location.
+- C7 creates two more session rows; C8 starts one private `opencode --standalone` in a
+  PTY and may add one session row of its own. All of them stay in the fixture location.
 
 ## Claims
 
@@ -70,7 +72,26 @@ alias, so `process.cwd()` cannot canonicalise it away.
 | C3 | after a reload, one id per canonical path: 7 fixture entries, native `deploy`/`foo` surviving, `pkg-a` twins suppressed |
 | C4 | a `SKILL.md` edit appears in `/api/skill` within 20 s of polling |
 | C5 | one `opencode run` loads `pkg-b/deploy` by exact id (live or a bound replay) |
+| C6 | `/api/command` lists exactly `pkg-b:deploy`, `pkg-c:release`, `pkg-d:deep:nest:tidy`; the shadowed `pkg-a:native` is published by nobody |
+| C7 | `session.command` expands `pkg-b:deploy` to `Deploy prod to --fast now`, switches the session to `deepseek/deepseek-flash` for `pkg-c:release`, and answers 404 for `pkg-a:native` |
+| C8 | the real TUI's composer autocomplete shows `/pkg-b:deploy` for a typed `/pkg-b` |
 
 Watcher timing is recorded, never asserted. C1 and C3 are scored on the stable capture
 (`skill-settled.json`); `settle.json` records `{ok, attempts, elapsedMs, stableFor}` and
 a settle timeout is reported as `unproven`, not as a contract failure.
+
+## The TUI capture (C8)
+
+`smoke/tui.mjs` drives the real TUI in an `/usr/bin/expect` PTY against a private
+`opencode --standalone <fixture>/real`, with `OPENCODE_CONFIG_DIR` and
+`OPENCODE_TEST_HOME` pointing inside the fixture. The only interactive trick is a
+terminal-capability responder (`ESC[6n` → cursor report, DA1/DA2, and the `opencode
+…` version preamble), because a bare PTY leaves OpenTUI waiting for an answer and
+renders nothing. The driver waits for the composer, types `/pkg-b`, and expects
+`pkg-b:deploy` on screen.
+
+Captures: `tui-transcript.txt` (raw, ANSI included) and `tui-screen.txt` (stripped),
+plus `tui-attempts.json` with up to three attempts. A screen that yields no printable
+glyph is `unproven` with `tui-equivalence.md`, never a silent pass. Keystrokes typed
+after the autocomplete frame are not echoed by the PTY, so the submit half is scored
+by C7, which calls the same `POST /api/session/:id/command` endpoint the TUI uses.

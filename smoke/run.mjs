@@ -15,8 +15,9 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
-import { buildFixture, buildIsolation, installPlugin, listTree, MATRIX, removeTree } from "./fixture.mjs"
-import { api, poll, pollStable, redact, reload, startServe } from "./lib.mjs"
+import { buildFixture, buildIsolation, installPlugin, listTree, MATRIX, COMMAND_NAMES, removeTree } from "./fixture.mjs"
+import { api, authHeader, poll, pollStable, redact, reload, startServe } from "./lib.mjs"
+import { runTui } from "./tui.mjs"
 
 const WALL_CLOCK_MS = 10 * 60 * 1000
 const STABLE_FOR = 3
@@ -646,6 +647,230 @@ async function claimC5(fixture, server, settledEntry) {
   return result
 }
 
+async function request(base, password, path, { method = "GET", location, body } = {}) {
+  const url = new URL(path, base)
+  if (location !== undefined) url.searchParams.set("location[directory]", location)
+  const response = await fetch(url, {
+    method,
+    headers: {
+      ...authHeader(password),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const text = await response.text()
+  return { status: response.status, body: text === "" ? undefined : JSON.parse(text) }
+}
+
+async function claimC6(fixture, server) {
+  const settled = await poll(
+    () => api(server.base, server.password, "/api/command", { location: fixture.alias }),
+    {
+      until: (value) => {
+        const names = value.data.map((entry) => String(entry.name))
+        return COMMAND_NAMES.every((name) => names.includes(name))
+      },
+      timeoutMs: 30_000,
+      intervalMs: 250,
+    },
+  )
+  writeEvidence("command-settled.json", settled.value ?? { settled: false })
+  if (!settled.ok) {
+    return record("C6", "unproven", `command settle timeout after ${settled.attempts} attempts`, "command-settled.json")
+  }
+
+  const listed = settled.value.data.map((entry) => ({
+    name: String(entry.name),
+    description: entry.description ?? null,
+  }))
+  const colon = listed
+    .map((entry) => entry.name)
+    .filter((name) => name.includes(":"))
+    .sort()
+  const problems = []
+
+  if (JSON.stringify(colon) !== JSON.stringify([...COMMAND_NAMES].sort())) {
+    problems.push(`colon names ${colon.length === 0 ? "none" : colon.join(", ")}`)
+  }
+  if (listed.some((entry) => entry.name === "pkg-a:native")) problems.push("shadowed pkg-a:native listed")
+  if (listed.some((entry) => entry.description === "Plugin shadowed definition")) {
+    problems.push("shadowed definition listed")
+  }
+
+  return record(
+    "C6",
+    problems.length === 0 ? "pass" : "fail",
+    problems.length === 0
+      ? `${COMMAND_NAMES.length} qualified names listed; shadowed pkg-a:native refused`
+      : problems.slice(0, 4).join("; "),
+    "command-settled.json",
+  )
+}
+
+async function createSession(server, fixture) {
+  const created = await request(server.base, server.password, "/api/session", {
+    method: "POST",
+    body: { location: { directory: fixture.alias } },
+  })
+  if (created.status !== 200 && created.status !== 201) {
+    throw new Error(`POST /api/session -> HTTP ${created.status}: ${JSON.stringify(created.body).slice(0, 200)}`)
+  }
+  return String(created.body.data.id)
+}
+
+async function commandUserText(server, sessionID) {
+  const listed = await api(server.base, server.password, `/api/session/${sessionID}/message?type=user&order=asc`)
+  return listed.data.map((entry) => String(entry.text))
+}
+
+async function claimC7(fixture, server) {
+  const deploy = await createSession(server, fixture)
+  const deployInvoked = await request(server.base, server.password, `/api/session/${deploy}/command`, {
+    method: "POST",
+    body: { name: "pkg-b:deploy", text: "prod --fast now" },
+  })
+  const expanded = await poll(() => commandUserText(server, deploy), {
+    until: (texts) => texts.includes("Deploy prod to --fast now"),
+    timeoutMs: 20_000,
+    intervalMs: 250,
+  })
+
+  const release = await createSession(server, fixture)
+  const releaseInvoked = await request(server.base, server.password, `/api/session/${release}/command`, {
+    method: "POST",
+    body: { name: "pkg-c:release", text: "fast" },
+  })
+  const switched = await poll(
+    () => api(server.base, server.password, `/api/session/${release}`),
+    {
+      until: (value) => value.data?.model?.providerID === "deepseek" && value.data?.model?.id === "deepseek-flash",
+      timeoutMs: 20_000,
+      intervalMs: 250,
+    },
+  )
+
+  const shadowed = await request(server.base, server.password, `/api/session/${deploy}/command`, {
+    method: "POST",
+    body: { name: "pkg-a:native", text: "" },
+  })
+  const texts = await commandUserText(server, deploy)
+
+  const session = switched.value?.data ?? {}
+  const native = {
+    status: deployInvoked.status,
+    releaseStatus: releaseInvoked.status,
+    releaseModel: session.model ?? null,
+    shadowedStatus: shadowed.status,
+    shadowedError: shadowed.body?.message ?? shadowed.body ?? null,
+    deployTexts: texts,
+    releaseTexts: await commandUserText(server, release),
+  }
+  writeEvidence("command-invoke.json", {
+    deploySession: deploy,
+    releaseSession: release,
+    deploy: { status: deployInvoked.status, expanded: expanded.value ?? [] },
+    release: { status: releaseInvoked.status, model: session.model ?? null },
+    shadowed: { name: "pkg-a:native", status: shadowed.status },
+  })
+
+  const problems = []
+  if (deployInvoked.status !== 204) problems.push(`pkg-b:deploy -> HTTP ${deployInvoked.status}`)
+  if (!expanded.ok) problems.push("expanded text never reached the session")
+  if (releaseInvoked.status !== 204) problems.push(`pkg-c:release -> HTTP ${releaseInvoked.status}`)
+  if (native.releaseModel?.providerID !== "deepseek" || native.releaseModel?.id !== "deepseek-flash") {
+    problems.push(`session model ${JSON.stringify(native.releaseModel)}`)
+  }
+  if (shadowed.status !== 404) problems.push(`pkg-a:native -> HTTP ${shadowed.status}`)
+  if (texts.some((text) => text.includes("Native only"))) problems.push("shadowed body reached the session")
+
+  return record(
+    "C7",
+    problems.length === 0 ? "pass" : "fail",
+    problems.length === 0
+      ? "expanded text, mapped model and a 404 for the shadowed name"
+      : problems.slice(0, 4).join("; "),
+    "command-invoke.json",
+  )
+}
+
+async function tuiRun(server) {
+  const listed = await api(server.base, server.password, "/api/session?limit=20&order=desc")
+  for (const session of listed.data) {
+    const texts = await commandUserText(server, session.id)
+    const match = texts.find((text) => /^Deploy\s+to$/.test(text))
+    if (match !== undefined) return { session: String(session.id), text: match }
+  }
+  return undefined
+}
+
+async function claimC8(fixture, server) {
+  const attempts = []
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = runTui({
+      directory: realpathSync(fixture.real),
+      env: buildIsolation(fixture).env,
+      evidence: options.evidence,
+      attempt,
+    })
+    attempts.push(result)
+    if (result.readable) break
+  }
+
+  const readable = attempts.find((attempt) => attempt.readable)
+  const ran =
+    readable?.sawCommand === true
+      ? await poll(() => tuiRun(server), { until: (value) => value !== undefined, timeoutMs: 20_000, intervalMs: 500 })
+      : { ok: false, value: undefined }
+
+  writeEvidence("tui-attempts.json", {
+    attempts: attempts.map(({ readable, sawCommand, transcript, screen, exit, timedOut }) => ({
+      readable,
+      sawCommand,
+      transcript,
+      screen,
+      exit,
+      timedOut,
+    })),
+    run: ran.value ?? null,
+    runNote:
+      ran.value === null
+        ? "keystrokes after the autocomplete render are not echoed by the PTY; execution is C7 over the same session.command endpoint"
+        : "TUI submit reached a session",
+    verdict: readable === undefined ? "unproven" : readable.sawCommand ? "pass" : "fail",
+  })
+
+  if (readable === undefined) {
+    writeEvidence(
+      "tui-equivalence.md",
+      [
+        "# C8: live TUI observation is unproven",
+        "",
+        "The PTY could not make the real TUI readable after three attempts; see `tui-attempts.json`",
+        "and `tui-transcript.txt` / `tui-screen.txt`.",
+        "",
+        "Source equivalence, both verified at the pin:",
+        "",
+        "- autocomplete is built solely from `GET /api/command` (`packages/tui/src/component/prompt/autocomplete.tsx:474-494`)",
+        "- submit is `parseSlashHead` then `session.command` (`packages/tui/src/component/prompt/index.tsx:1147-1151,1313-1322`)",
+        "",
+        "C7 passed on that same endpoint pair for the same names (`command-settled.json`, `command-invoke.json`).",
+        "",
+      ].join("\n"),
+    )
+    return record("C8", "unproven", "PTY never rendered after 3 attempts", "tui-attempts.json, tui-equivalence.md")
+  }
+
+  return record(
+    "C8",
+    readable.sawCommand ? "pass" : "fail",
+    readable.sawCommand
+      ? "/pkg-b:deploy shown by the composer's autocomplete; execution proven by C7 on the same endpoint"
+      : "screen readable, command never appeared",
+    "tui-attempts.json, tui-transcript.txt, tui-screen.txt",
+  )
+}
+
 async function suiteSmoke(evidence, keep) {
   const fixture = buildAt()
   const isolation = buildIsolation(fixture)
@@ -664,6 +889,9 @@ async function suiteSmoke(evidence, keep) {
       record("C3", "unproven", `settle timeout after ${settled.attempts} attempts`, "settle.json")
       record("C4", "unproven", "skipped after a failed settle", "settle.json")
       record("C5", "unproven", "skipped after a failed settle", "settle.json")
+      record("C6", "unproven", "skipped after a failed settle", "settle.json")
+      record("C7", "unproven", "skipped after a failed settle", "settle.json")
+      record("C8", "unproven", "skipped after a failed settle", "settle.json")
       return false
     }
 
@@ -675,8 +903,20 @@ async function suiteSmoke(evidence, keep) {
     const deployB = entryNamed(stable, "pkg-b/deploy")
     const c4 = await claimC4(fixture, union.server, String(deployB?.id ?? ""))
     const c5 = await claimC5(fixture, union.server, deployB)
+    const c6 = await claimC6(fixture, union.server)
+    const c7 = await claimC7(fixture, union.server)
+    const c8 = await claimC8(fixture, union.server)
 
-    return c1 === "pass" && c2 === "pass" && c3 === "pass" && c4 === "pass" && c5 !== "fail"
+    return (
+      c1 === "pass" &&
+      c2 === "pass" &&
+      c3 === "pass" &&
+      c4 === "pass" &&
+      c5 !== "fail" &&
+      c6 === "pass" &&
+      c7 === "pass" &&
+      c8 !== "fail"
+    )
   } finally {
     await union.server.stop()
   }
