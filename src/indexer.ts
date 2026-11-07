@@ -9,6 +9,7 @@ import {
   MAX_SKILL_SLUG_LENGTH,
 } from "./contracts.ts"
 import { type Frontmatter, parseSkillFrontmatter } from "./frontmatter.ts"
+import { deriveFamilies, selectSurvivorEntries } from "./family.ts"
 
 export interface IndexedSkill {
   readonly id: string
@@ -162,6 +163,20 @@ const dedupeByRealPath = (entries: readonly Prepared[], diagnostics: string[]): 
 const dedupeByNativeId = (entries: readonly Prepared[], diagnostics: string[]): Prepared[] =>
   dedupe(entries, (entry) => `${entry.subprojectRealPath}\u0000${entry.nativeId}`, diagnostics)
 
+const applyFamilies = async (
+  entries: readonly Prepared[],
+  location: string,
+  diagnostics: string[],
+): Promise<readonly Prepared[]> => {
+  if (entries.length === 0) return entries
+  const checkouts = [...new Set(entries.map((entry) => entry.subprojectRealPath))]
+  const derived = await deriveFamilies(checkouts, location)
+  diagnostics.push(...derived.diagnostics)
+  const selected = selectSurvivorEntries(entries, derived.families, derived.location)
+  diagnostics.push(...selected.diagnostics)
+  return selected.kept
+}
+
 const toIndexedSkill = (entry: Prepared): IndexedSkill => {
   const nativeName = entry.frontmatter.name ?? slug(entry.nativeId, MAX_SKILL_SLUG_LENGTH)
   const description = entry.frontmatter.description ?? synthesizeDescription(entry.body) ?? `skill ${nativeName}`
@@ -223,7 +238,9 @@ export async function indexCandidates(
   }
 
   // Dedupe after parsing: a malformed winner must not shadow a valid sibling.
-  const skills = dedupeByNativeId(dedupeByRealPath(prepared, diagnostics), diagnostics)
+  const deduped = dedupeByNativeId(dedupeByRealPath(prepared, diagnostics), diagnostics)
+  const kept = await applyFamilies(deduped, options.location, diagnostics)
+  const skills = kept
     .map(toIndexedSkill)
     .sort((left, right) => comparePath(left.id, right.id))
 
