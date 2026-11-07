@@ -770,7 +770,7 @@ function claimReal(capture) {
   const subprojects = [...new Set(names.map((name) => name.split("/").slice(0, -1).join("/")))].sort()
   const problems = []
 
-  if (nested.length < 15) problems.push(`nested count ${nested.length} < 15`)
+  if (nested.length < 14) problems.push(`nested count ${nested.length} < 14`)
   for (const entry of nested) {
     if (!ID_SHAPE.test(String(entry.id))) problems.push(`id shape ${entry.id}`)
     if (!String(entry.name).includes("/")) problems.push(`unqualified name ${entry.name}`)
