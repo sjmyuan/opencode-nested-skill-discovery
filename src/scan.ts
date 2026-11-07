@@ -321,7 +321,7 @@ function commandEligible(name: string): boolean {
 }
 
 /** Native `decode()` parity (PD6): root-relative, POSIX separators, one trailing `.md` stripped. */
-function deriveCommandName(rootDir: string, path: string): string {
+export function deriveCommandName(rootDir: string, path: string): string {
   return relative(rootDir, path).split(sep).join("/").replace(/\.md$/, "")
 }
 
