@@ -202,4 +202,7 @@ export const STORAGE_KEYS = {
   version: "nested/manifest/version",
   manifest: (scopeToken: string): string => `nested/manifest/${scopeToken}`,
   subproject: (scopeToken: string): string => `nested/subproject/${scopeToken}`,
+  commandVersion: "nested/commands/version",
+  commandManifest: (scopeToken: string): string => `nested/commands/manifest/${scopeToken}`,
+  commandSnapshot: (scopeToken: string): string => `nested/commands/${scopeToken}`,
 }
