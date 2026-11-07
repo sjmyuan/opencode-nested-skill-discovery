@@ -221,6 +221,11 @@ function readModelBlock(
     if (indentOf(line) === 0) break
 
     const content = line.trim()
+    if (content.startsWith("#")) {
+      cursor += 1
+      continue
+    }
+
     const separator = content.indexOf(":")
     if (separator < 0) return invalidModel(filePath)
 

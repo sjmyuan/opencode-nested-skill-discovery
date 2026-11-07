@@ -54,7 +54,7 @@ describe("command frontmatter", () => {
   // invalid value, so the file now publishes with the canonical short string.
   it("F5: a model block mapping canonicalises to the short string", () => {
     const result = parseCommandFrontmatter(
-      doc("model:\n  providerID: anthropic\n  model: claude-sonnet\n  variant: fast\nagent: build"),
+      doc("model:\n  providerID: anthropic\n  # pinned model\n  model: claude-sonnet\n  variant: fast\nagent: build"),
       "deploy.md",
     )
 
