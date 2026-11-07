@@ -84,6 +84,19 @@ async function isDirectoryEntry(target: string, kind: string): Promise<boolean> 
   }
 }
 
+async function familyOfGitdir(root: string, gitdir: string): Promise<FamilyResolution> {
+  if (basename(dirname(gitdir)) !== "worktrees") {
+    return { family: { familyKey: gitdir, survivor: root } }
+  }
+
+  const commonDir = dirname(dirname(gitdir))
+  if (!(await isOwnedCommonDir(commonDir))) {
+    return { diagnostic: `family: ${root}: common dir not a parent .git` }
+  }
+
+  return { family: { familyKey: commonDir, survivor: dirname(commonDir) } }
+}
+
 export async function resolveRepoFamily(checkout: string): Promise<FamilyResolution> {
   const root = await canonical(checkout)
   const gitPath = join(root, ".git")
@@ -106,23 +119,11 @@ export async function resolveRepoFamily(checkout: string): Promise<FamilyResolut
   if ("diagnostic" in line) return line
 
   const target = isAbsolute(line.target) ? line.target : resolve(root, line.target)
-  let gitdir: string
   try {
-    gitdir = await realpath(target)
+    return await familyOfGitdir(root, await realpath(target))
   } catch (error) {
     return { diagnostic: `family: ${root}: gitdir target unresolvable: ${reasonOf(error)}` }
   }
-
-  if (basename(dirname(gitdir)) !== "worktrees") {
-    return { family: { familyKey: gitdir, survivor: root } }
-  }
-
-  const commonDir = dirname(dirname(gitdir))
-  if (!(await isOwnedCommonDir(commonDir))) {
-    return { diagnostic: `family: ${root}: common dir not a parent .git` }
-  }
-
-  return { family: { familyKey: commonDir, survivor: dirname(commonDir) } }
 }
 
 export async function deriveFamilies(
@@ -150,19 +151,26 @@ const isStrictDescendant = (target: string, root: string): boolean => {
 
 const toPosix = (value: string): string => value.split(sep).join("/")
 
+const survivorPathKeys = (
+  entries: readonly FamilyEntry[],
+  families: ReadonlyMap<string, RepoFamily>,
+): ReadonlySet<string> => {
+  const keys = new Set<string>()
+  for (const entry of entries) {
+    const family = families.get(entry.subprojectRealPath)
+    if (family === undefined || entry.subprojectRealPath !== family.survivor) continue
+    const repoRelative = toPosix(relative(entry.subprojectRealPath, entry.candidate.realPath))
+    keys.add(`${family.familyKey}\u0000${repoRelative}`)
+  }
+  return keys
+}
+
 export function selectSurvivorEntries<T extends FamilyEntry>(
   entries: readonly T[],
   families: ReadonlyMap<string, RepoFamily>,
   location: string,
 ): { readonly kept: readonly T[]; readonly diagnostics: readonly string[] } {
-  const survivorPaths = new Set<string>()
-  for (const entry of entries) {
-    const family = families.get(entry.subprojectRealPath)
-    if (family === undefined || entry.subprojectRealPath !== family.survivor) continue
-    const repoRelative = toPosix(relative(entry.subprojectRealPath, entry.candidate.realPath))
-    survivorPaths.add(`${family.familyKey}\u0000${repoRelative}`)
-  }
-
+  const survivorPaths = survivorPathKeys(entries, families)
   const kept: T[] = []
   const diagnostics: string[] = []
 
