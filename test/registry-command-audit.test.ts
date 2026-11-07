@@ -7,7 +7,7 @@ import { commandStorage, publishWorkspace, type PublishWorkspace } from "./suppo
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
 import type { FamilyWorkspace } from "./support/family-fixtures.ts"
 
-const scanControl = vi.hoisted(() => ({ scans: 0 }))
+const scanControl = vi.hoisted(() => ({ scans: 0, diagnostics: 0 }))
 
 vi.mock("../src/scan.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/scan.ts")>()
@@ -15,7 +15,12 @@ vi.mock("../src/scan.ts", async (importOriginal) => {
     ...actual,
     scanSkills: async (options: Parameters<typeof actual.scanSkills>[0]) => {
       scanControl.scans += 1
-      return actual.scanSkills(options)
+      const result = await actual.scanSkills(options)
+      if (scanControl.diagnostics === 0) return result
+      return {
+        ...result,
+        diagnostics: Array.from({ length: scanControl.diagnostics }, (_, index) => `scan-diag-${index}`),
+      }
     },
   }
 })
@@ -65,6 +70,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs()
   scanControl.scans = 0
+  scanControl.diagnostics = 0
   auditControl.failure = undefined
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
 })
@@ -244,6 +250,72 @@ describe("the post-reload command audit", () => {
       expect(fake.reloadCalls).toBe(2)
     } finally {
       await registry.dispose()
+    }
+  })
+
+  it("A8: the audit lines merge into the existing outcome budget in stage order", async () => {
+    const ws = await publish()
+    for (const name of ["deploy", "release", "rollback"]) await ws.command("command", `${name}.md`)
+    const quiet = open(ws.base)
+    const shadowed = open(ws.base, [
+      { name: "A:deploy", description: "native deploy" },
+      { name: "A:release", description: "native release" },
+      { name: "A:rollback", description: "native rollback" },
+    ])
+    scanControl.diagnostics = 195
+
+    try {
+      const before = await quiet.registry.activate()
+      const outcome = await shadowed.registry.activate()
+
+      expect(before.diagnostics).toHaveLength(195)
+      expect(before.diagnostics.filter((line) => line.startsWith("native-shadow-audit:"))).toEqual([])
+      expect(outcome.diagnostics).toHaveLength(before.diagnostics.length + 3)
+      expect(outcome.diagnostics.filter((line) => line.startsWith("native-shadow-audit:"))).toEqual([
+        "native-shadow-audit: A:deploy",
+        "native-shadow-audit: A:release",
+        "native-shadow-audit: A:rollback",
+      ])
+      expect(outcome.diagnostics.some((line) => line.startsWith("truncated:"))).toBe(false)
+    } finally {
+      await quiet.registry.dispose()
+      await shadowed.registry.dispose()
+    }
+  })
+
+  it("A8b: the audit lines still truncate at the outcome cap", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { registry } = open(ws.base, [{ name: "A:deploy", description: "native deploy" }])
+    scanControl.diagnostics = 250
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.diagnostics).toHaveLength(200)
+      expect(outcome.diagnostics.at(-1)).toMatch(/^truncated: \d+ more diagnostics$/)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A9: two registries over one workspace report the same diagnostics in stage order", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const nativeCommands = [{ name: "A:deploy", description: "native deploy" }]
+    const first = open(ws.base, nativeCommands)
+    const second = open(ws.base, nativeCommands)
+    scanControl.diagnostics = 2
+
+    try {
+      const one = await first.registry.activate()
+      const two = await second.registry.activate()
+
+      expect(one.diagnostics).toEqual(["scan-diag-0", "scan-diag-1", "native-shadow-audit: A:deploy"])
+      expect(two.diagnostics).toEqual(one.diagnostics)
+    } finally {
+      await first.registry.dispose()
+      await second.registry.dispose()
     }
   })
 })
