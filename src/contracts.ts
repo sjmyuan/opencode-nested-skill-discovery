@@ -64,6 +64,34 @@ export interface CommandCandidate {
   readonly markers: readonly SubprojectMarker[]
 }
 
+/**
+ * The published command, split into what the snapshot records and what it replays
+ * (ADR command R16; plan PD1). The composed name is the identity.
+ */
+export interface CommandManifestEntry {
+  readonly name: string
+  readonly canonicalPath: string
+  readonly description?: string
+  readonly agent?: string
+  readonly model?: string
+  readonly subagent?: boolean
+}
+
+export interface CommandEntry extends CommandManifestEntry {
+  readonly template: string
+}
+
+export interface CommandSnapshot {
+  readonly scopeToken: string
+  readonly directory: string
+  readonly commands: readonly CommandEntry[]
+}
+
+export interface CommandSnapshotSet {
+  readonly location: string
+  readonly snapshots: readonly CommandSnapshot[]
+}
+
 export interface ScanStats {
   readonly directories: number
   readonly files: number
@@ -174,4 +202,7 @@ export const STORAGE_KEYS = {
   version: "nested/manifest/version",
   manifest: (scopeToken: string): string => `nested/manifest/${scopeToken}`,
   subproject: (scopeToken: string): string => `nested/subproject/${scopeToken}`,
+  commandVersion: "nested/commands/version",
+  commandManifest: (scopeToken: string): string => `nested/commands/manifest/${scopeToken}`,
+  commandSnapshot: (scopeToken: string): string => `nested/commands/${scopeToken}`,
 }

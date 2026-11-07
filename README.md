@@ -19,8 +19,8 @@ Delivered and covered by the test suite: bounded discovery, stable IDs and quali
 display names, add-only advertisement (the transform appends; a nested entry that duplicates
 a native skill's path is suppressed), manifest/cache persistence, and refresh. Refresh
 means a watcher set derived from the last good scan, one coalescing timer at
-`DEBOUNCE_MS = 250` (`src/contracts.ts:84`), and a prompt backstop throttled to one refresh
-per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:87`); the implementation is `src/watch.ts`
+`DEBOUNCE_MS = 250` (`src/contracts.ts:137`), and a prompt backstop throttled to one refresh
+per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:140`); the implementation is `src/watch.ts`
 and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
 projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
 ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes
@@ -138,9 +138,11 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
   [docs/limits.md](docs/limits.md#worktree-families).
 - **You need to see what was discovered.** Read storage: `nested/manifest/version`,
   `nested/manifest/<scopeToken>` (ids and names), `nested/subproject/<scopeToken>` (with
-  content). Raw KV keys carry the host's `plugin:<id>:` prefix, so filter
-  `LIKE 'plugin:%:nested/%'`. A record only disappears when the same location refreshes
-  again after the skill is gone.
+  content). Commands have their own store: `nested/commands/version`,
+  `nested/commands/manifest/<scopeToken>` (names, routing keys) and
+  `nested/commands/<scopeToken>` (with the template). Raw KV keys carry the host's
+  `plugin:<id>:` prefix, so filter `LIKE 'plugin:%:nested/%'`. A record only disappears when
+  the same location refreshes again after the skill or command is gone.
 - **A refresh looks delayed.** Events are coalesced for 250 ms, and a prompt-triggered
   refresh runs at most once per 2 s. Diagnostics are attached to the `RefreshOutcome` that
   `activate()`/`refresh()` return, but no opencode `v2.0.26` surface renders them — see
