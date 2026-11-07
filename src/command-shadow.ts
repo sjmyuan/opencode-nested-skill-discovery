@@ -50,3 +50,67 @@ export function dropNativeCollisions<T extends Nameable>(
 
   return { kept, dropped, diagnostics }
 }
+
+/**
+ * Post-reload classification (ADR command R4; plan PD6, PD10).
+ *
+ * The listing is `ctx.command.list()`'s data, so membership in the published set decides
+ * ours — never the `:` prefix. A differing description is a shadow, an identical one is
+ * indistinguishable, a published name missing from the listing is absent, and every listed
+ * name no published entry explains is foreign and stays silent.
+ */
+export interface ListedCommand {
+  readonly name: string
+  readonly description?: string
+}
+
+export interface PublishedCommand extends Nameable {
+  readonly description?: string
+}
+
+export interface AuditInput {
+  readonly listed: readonly ListedCommand[]
+  readonly published: readonly PublishedCommand[]
+  /** Accepted so F5 passes one index to both stages; a native name is foreign here. */
+  readonly native: NativeCommandNameIndex
+}
+
+export interface AuditOutcome {
+  readonly shadowed: readonly string[]
+  readonly absent: readonly string[]
+  readonly foreign: readonly string[]
+  readonly diagnostics: readonly string[]
+}
+
+export function auditCommandList({ listed, published }: AuditInput): AuditOutcome {
+  const listedByName = new Map<string, ListedCommand>()
+  for (const entry of listed) {
+    if (!listedByName.has(entry.name)) listedByName.set(entry.name, entry)
+  }
+  const publishedNames = new Set(published.map((entry) => entry.name))
+  const shadowed: string[] = []
+  const absent: string[] = []
+  const diagnostics: string[] = []
+
+  const report = (line: string): void => {
+    if (!diagnostics.includes(line)) diagnostics.push(line)
+  }
+
+  for (const entry of published) {
+    const found = listedByName.get(entry.name)
+    if (found === undefined) {
+      if (!absent.includes(entry.name)) absent.push(entry.name)
+      report(`command-absent: ${entry.name}`)
+      continue
+    }
+    if (found.description === entry.description) continue
+    if (!shadowed.includes(entry.name)) shadowed.push(entry.name)
+    report(`native-shadow-audit: ${entry.name}`)
+  }
+
+  const foreign = listed
+    .map((entry) => entry.name)
+    .filter((name, index, names) => !publishedNames.has(name) && names.indexOf(name) === index)
+
+  return { shadowed, absent, foreign, diagnostics }
+}
