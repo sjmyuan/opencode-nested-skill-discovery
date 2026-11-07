@@ -295,6 +295,7 @@ describe("command isolation and order", () => {
     const canonical = result.commands.map((command) => command.canonicalPath)
     expect(canonical).toEqual([...canonical].sort())
     expect(result.commands[2]?.canonicalPath).toBe(result.commands[3]?.canonicalPath)
-    expect(result.commands[2]?.path < result.commands[3]!.path).toBe(true)
+    const [firstAlias, secondAlias] = result.commands.slice(2)
+    expect((firstAlias?.path ?? "") < (secondAlias?.path ?? "")).toBe(true)
   })
 })
