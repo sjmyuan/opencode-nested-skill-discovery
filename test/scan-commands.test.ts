@@ -261,3 +261,40 @@ describe("command budgets", () => {
     expectFrozenGrammar(result.diagnostics, [f.root, f.realRoot])
   })
 })
+
+describe("command isolation and order", () => {
+  it("keeps command files out of the skill candidate list", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/skills/deploy/SKILL.md")
+    await f.write("A/.opencode/command/deploy.md")
+    await f.write("B/.opencode/commands/review/pr.md")
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.candidates.map((candidate) => f.rel(candidate.path))).toEqual([
+      "A/.opencode/skills/deploy/SKILL.md",
+    ])
+    expect(result.commands.map((command) => `${command.subproject}:${command.name}`)).toEqual([
+      "A:deploy",
+      "B:review/pr",
+    ])
+  })
+
+  it("sorts command candidates by canonical path then path", async () => {
+    const f = await fixture()
+    await f.write("A/.opencode/command/a.md")
+    await f.write("A/.opencode/command/a/x.md")
+    const target = await f.write("shared/real.md")
+    await f.symlink("A/.opencode/command/l1.md", target)
+    await f.symlink("A/.opencode/command/l2.md", target)
+
+    const result = await scanSkills({ location: f.root })
+
+    // Read order would put a/x.md before a.md and the two link names in path order.
+    expect(result.commands.map((command) => command.name)).toEqual(["a", "a/x", "l1", "l2"])
+    const canonical = result.commands.map((command) => command.canonicalPath)
+    expect(canonical).toEqual([...canonical].sort())
+    expect(result.commands[2]?.canonicalPath).toBe(result.commands[3]?.canonicalPath)
+    expect(result.commands[2]?.path < result.commands[3]!.path).toBe(true)
+  })
+})
