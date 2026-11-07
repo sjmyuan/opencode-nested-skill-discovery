@@ -135,14 +135,37 @@ describe("command snapshot", () => {
     await ws.write("A/.opencode/command/deploy.md", doc("description: Deploys"))
     await ws.write("A.1/.opencode/command/deploy.md", doc("description: Deploys"))
 
-    const built = await buildCommandSnapshot({ location: ws.root, commands: await qualified(ws) })
+    const commands = await qualified(ws)
+    const built = await buildCommandSnapshot({ location: ws.root, commands })
     const tokens = built.snapshot.snapshots.map((snapshot) => snapshot.scopeToken)
 
+    // One record per subproject, each under its own token.
     expect(tokens).toHaveLength(2)
     expect(new Set(tokens).size).toBe(2)
-    expect(built.snapshot.snapshots.map((snapshot) => snapshot.commands[0]?.name)).toEqual([
-      "A.1:deploy",
-      "A:deploy",
-    ])
+
+    // The token is slug(<subproject basename>) + "-" + hash8(realpath).
+    // Assert only the slug half: hash8 carries the random temp path, the slug is literal.
+    const slugs: ReadonlyArray<readonly [string, string]> = [["A", "a"], ["A.1", "a-1"]]
+    for (const [base, slug] of slugs) {
+      const record = built.snapshot.snapshots.find((snapshot) => path.basename(snapshot.directory) === base)
+      expect(record?.scopeToken.startsWith(`${slug}-`)).toBe(true)
+    }
+
+    // Grouping and published names are asserted per directory, so which token sorts first is irrelevant.
+    const byDirectory = new Map(
+      built.snapshot.snapshots.map(
+        (snapshot) => [path.basename(snapshot.directory), snapshot.commands.map((entry) => entry.name)] as const,
+      ),
+    )
+    expect([...byDirectory.keys()].sort()).toEqual(["A", "A.1"])
+    expect(byDirectory.get("A")).toEqual(["A:deploy"])
+    expect(byDirectory.get("A.1")).toEqual(["A.1:deploy"])
+
+    // Contract: records are sorted by scope token (Array#sort default = compareText's code-unit order).
+    expect(tokens).toEqual([...tokens].sort())
+
+    // Contract: the input order must never leak into the snapshot.
+    const reversed = await buildCommandSnapshot({ location: ws.root, commands: [...commands].reverse() })
+    expect(reversed.snapshot).toEqual(built.snapshot)
   })
 })
