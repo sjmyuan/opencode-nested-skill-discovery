@@ -207,7 +207,7 @@ async function openRoots(
     const root = join(dir, leaf)
     // PD2: the location's own `.opencode/command(s)` belongs to native discovery, so it is
     // neither scanned nor reported; it is only claimed so the ordinary walk skips it.
-    if (rel === "") {
+    if (rel === ".opencode") {
       if (await existsNoFollow(root)) opened = true
       continue
     }
