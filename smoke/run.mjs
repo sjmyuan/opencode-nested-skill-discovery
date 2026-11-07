@@ -770,6 +770,7 @@ function claimReal(capture) {
   const subprojects = [...new Set(names.map((name) => name.split("/").slice(0, -1).join("/")))].sort()
   const problems = []
 
+  if (new Set(names).size !== names.length) problems.push("duplicate nested name")
   if (nested.length < 14) problems.push(`nested count ${nested.length} < 14`)
   for (const entry of nested) {
     if (!ID_SHAPE.test(String(entry.id))) problems.push(`id shape ${entry.id}`)
