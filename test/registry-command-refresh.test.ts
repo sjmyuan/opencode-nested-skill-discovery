@@ -283,4 +283,27 @@ describe("command refresh lifecycle", () => {
       await h.dispose()
     }
   })
+
+  it("picks up a command root created inside an existing .opencode at the next prompt", async () => {
+    const h = await harness(async (ws) => {
+      await writeCommand(ws, "A", "command", "deploy.md")
+    })
+
+    try {
+      expect(defined(h.fake)).toEqual(["A:deploy"])
+      expect(h.watch.active()).not.toContain(at(h.ws, "A/.opencode"))
+
+      await writeCommand(h.ws, "A", "commands", "release.md")
+      expect(defined(h.fake)).toEqual(["A:deploy"])
+
+      h.clock.at += THROTTLE
+      await h.fake.firePrompt()
+
+      await vi.waitFor(() => expect(defined(h.fake)).toContain("A:release"), { timeout: 2000 })
+      expect(h.watch.active()).toContain(at(h.ws, "A/.opencode/commands"))
+      expect(h.watch.active()).not.toContain(at(h.ws, "A/.opencode"))
+    } finally {
+      await h.dispose()
+    }
+  })
 })
