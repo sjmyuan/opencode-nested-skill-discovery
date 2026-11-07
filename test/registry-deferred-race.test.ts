@@ -279,4 +279,103 @@ describe("deferred dedupe against a concurrent refresh", () => {
       await fixture.cleanup()
     }
   })
+
+  it("D3: a queued refresh observes the deferred swap inside the write gate", async () => {
+    pause.reset()
+    const fixture = await createRegistryFixture()
+    const globals = await createRegistryFixture()
+    let registry: ReturnType<typeof createRegistry> | undefined
+    let release: () => void = () => {}
+    let blocked = false
+    let captured: string[] | undefined
+
+    try {
+      await globals.write("skills/global-demo/SKILL.md", DOC)
+      await fixture.write("main/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("wt/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("wt/.opencode/skills/tidy/SKILL.md", DOC)
+      const globalNative = nativeSkill(
+        "global-demo",
+        await globals.realpathOf("skills/global-demo/SKILL.md"),
+      )
+      const twin = nativeSkill(
+        "native-deploy",
+        await fixture.realpathOf("wt/.opencode/skills/deploy/SKILL.md"),
+      )
+      const wtToken = scopeTokenFor(await fixture.realpathOf("wt"))
+      const mainDeployId = await nestedIdFor(
+        `${fixture.root}/main`,
+        `${fixture.root}/main/.opencode/skills/deploy/SKILL.md`,
+      )
+      const wtTidyId = `nested.${wtToken}.${skillTokenFor(
+        "tidy",
+        await fixture.realpathOf("wt/.opencode/skills/tidy/SKILL.md"),
+      )}`
+      const suppressedId = `nested.${wtToken}.${skillTokenFor("deploy", twin.path as string)}`
+      const fake = fakeContext([globalNative, twin], { directory: fixture.root })
+      fake.hideNatives(1, ["global-demo"])
+      const active = createRegistry(fake.ctx)
+      registry = active
+
+      const first = await active.activate()
+
+      expect(first.reloads).toBe(1)
+      expect(idsOf(active)).toHaveLength(3)
+
+      // The deferred pass pauses inside persistRegistry with the write gate held.
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const storagePort = (
+        fake.ctx as unknown as {
+          storage: {
+            get(key: string): Promise<unknown>
+            set(key: string, value: unknown): Promise<void>
+          }
+        }
+      ).storage
+      const readStorage = storagePort.get.bind(storagePort)
+      const writeStorage = storagePort.set.bind(storagePort)
+      const blockedKey = `nested/manifest/${wtToken}`
+      storagePort.set = async (key, value) => {
+        if (!blocked && key === blockedKey) {
+          blocked = true
+          await gate
+        }
+        return writeStorage(key, value)
+      }
+      // DD1: capture at the refresh's first storage access — the version read that
+      // persistRegistry performs before its first set.
+      storagePort.get = async (key) => {
+        if (blocked && captured === undefined && key === "nested/manifest/version") {
+          captured = [...idsOf(active)]
+        }
+        return readStorage(key)
+      }
+
+      await waitUntil(() => blocked)
+
+      const commonDir = await fixture.mkdirp("main/.git/worktrees/linked")
+      await fixture.write("wt/.git", `gitdir: ${commonDir}\n`)
+      fake.removeNative(twin.id)
+
+      const refreshing = active.refresh()
+      await Promise.race([refreshing, new Promise<void>((resolve) => setTimeout(resolve, 250))])
+
+      release()
+      const newer = await refreshing
+      await flushMicrotasks()
+
+      expect(captured).toBeDefined()
+      expect([...(captured ?? [])].sort()).toEqual([mainDeployId, wtTidyId].sort())
+      expect(captured).not.toContain(suppressedId)
+      expect(newer.reloads).toBe(1)
+      expect([...idsOf(active)].sort()).toEqual([mainDeployId])
+      expect(fake.storage.has(blockedKey)).toBe(false)
+    } finally {
+      if (registry !== undefined) await registry.dispose()
+      await globals.cleanup()
+      await fixture.cleanup()
+    }
+  })
 })
