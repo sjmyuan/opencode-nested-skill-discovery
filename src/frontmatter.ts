@@ -1,3 +1,5 @@
+import { canonicalModelSelection } from "./command-model.ts"
+
 export interface Frontmatter {
   readonly name?: string
   readonly description?: string
@@ -35,6 +37,7 @@ const SCALAR_KEYS = new Set(["name", "description", "disable-model-invocation"])
 const COMMAND_SCALAR_KEYS = new Set(["description", "agent", "model"])
 const COMMAND_BOOLEAN_KEYS = new Set(["subagent", "subtask"])
 const COMMAND_KNOWN_KEYS = new Set([...COMMAND_SCALAR_KEYS, ...COMMAND_BOOLEAN_KEYS])
+const MODEL_MAPPING_KEYS = new Set(["providerID", "model", "variant"])
 
 const indentOf = (line: string): number => line.length - line.trimStart().length
 
@@ -167,6 +170,110 @@ export function parseSkillFrontmatter(text: string, filePath: string): Frontmatt
   }
 }
 
+type ModelSelectionResult =
+  | { readonly ok: true; readonly value: string | undefined; readonly next: number }
+  | { readonly ok: false; readonly reason: string }
+
+const invalidModel = (filePath: string): { readonly ok: false; readonly reason: string } => ({
+  ok: false,
+  reason: `unsupported frontmatter: ${filePath}: model`,
+})
+
+/**
+ * G2 (plan PD12–PD14): both pinned schema forms — `provider/model#variant` and
+ * `{providerID, model, variant?}` — become the stored short string. Anything the pinned
+ * grammar rejects drops the file, as native's `Option` decode does.
+ */
+function modelFromMapping(
+  entries: ReadonlyMap<string, string>,
+  filePath: string,
+  next: number,
+): ModelSelectionResult {
+  const providerID = entries.get("providerID")
+  const model = entries.get("model")
+  if (providerID === undefined || model === undefined) return invalidModel(filePath)
+
+  const variant = entries.get("variant")
+  const value = canonicalModelSelection({
+    providerID,
+    model,
+    ...(variant === undefined ? {} : { variant }),
+  })
+  if (value === undefined) return invalidModel(filePath)
+  return { ok: true, value, next }
+}
+
+/** The indented `providerID`/`model`/`variant` block under a bare `model:` key. */
+function readModelBlock(
+  lines: readonly string[],
+  start: number,
+  end: number,
+  filePath: string,
+): ModelSelectionResult {
+  const entries = new Map<string, string>()
+  let cursor = start
+  while (cursor < end) {
+    const line = lines[cursor] ?? ""
+    if (line.trim() === "") {
+      cursor += 1
+      continue
+    }
+    if (indentOf(line) === 0) break
+
+    const content = line.trim()
+    const separator = content.indexOf(":")
+    if (separator < 0) return invalidModel(filePath)
+
+    const key = content.slice(0, separator).trim()
+    const value = content.slice(separator + 1).trim()
+    if (!MODEL_MAPPING_KEYS.has(key) || value === "" || isUnsupported(value)) return invalidModel(filePath)
+
+    entries.set(key, unquote(value))
+    cursor += 1
+  }
+
+  // A bare `model:` with no indented keys stays absent (today's behaviour).
+  if (entries.size === 0) return { ok: true, value: undefined, next: cursor }
+  return modelFromMapping(entries, filePath, cursor)
+}
+
+/** The one-line flow form, `model: {providerID: a, model: b}`. */
+function readModelFlow(value: string, filePath: string, next: number): ModelSelectionResult {
+  if (!value.endsWith("}")) return invalidModel(filePath)
+
+  const entries = new Map<string, string>()
+  for (const part of value.slice(1, -1).split(",")) {
+    if (part.trim() === "") continue
+
+    const separator = part.indexOf(":")
+    if (separator < 0) return invalidModel(filePath)
+
+    const key = part.slice(0, separator).trim()
+    const entry = part.slice(separator + 1).trim()
+    if (!MODEL_MAPPING_KEYS.has(key) || entry === "" || isUnsupported(entry)) return invalidModel(filePath)
+
+    entries.set(key, unquote(entry))
+  }
+
+  return modelFromMapping(entries, filePath, next)
+}
+
+function readModelSelection(
+  lines: readonly string[],
+  index: number,
+  end: number,
+  value: string,
+  filePath: string,
+): ModelSelectionResult {
+  if (value === "") return readModelBlock(lines, index + 1, end, filePath)
+  if (value.startsWith("{")) return readModelFlow(value, filePath, index + 1)
+
+  const canonical = canonicalModelSelection(unquote(value))
+  return canonical === undefined
+    ? invalidModel(filePath)
+    : { ok: true, value: canonical, next: index + 1 }
+}
+
 /**
  * A command file's frontmatter plus its verbatim template (ADR command R16; plan PD2).
  *
@@ -218,6 +325,14 @@ export function parseCommandFrontmatter(text: string, filePath: string): Command
     const value = content.slice(separator + 1).trim()
     parent = key
     excessAllowed = value === "" && !COMMAND_KNOWN_KEYS.has(key)
+
+    if (key === "model") {
+      const selection = readModelSelection(lines, index, close, value, filePath)
+      if (!selection.ok) return selection
+      index = selection.next - 1
+      if (selection.value !== undefined) scalars.set(key, selection.value)
+      continue
+    }
 
     if (value === "|" || value === ">" || value === "|-" || value === ">-") {
       const block = readBlockScalar(lines, index + 1, close, indent, value.startsWith(">"))
