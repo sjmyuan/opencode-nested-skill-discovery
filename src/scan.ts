@@ -8,6 +8,7 @@ import {
   SUBPROJECT_MARKERS,
 } from "./contracts.ts"
 import type {
+  CommandRootKind,
   ScanCandidate,
   ScanLimits,
   ScanResult,
@@ -33,12 +34,14 @@ export interface ScanOptions {
   readonly excludeRoots?: readonly string[]
 }
 
-/** Kind → the two directory segments that make a directory a skill root (PD1). */
-const SKILL_ROOT_SEGMENTS: Record<SkillRootKind, readonly [string, string]> = {
+/** Kind → the two directory segments that make a directory a root (PD1). */
+const ROOT_SEGMENTS: Record<SkillRootKind | CommandRootKind, readonly [string, string]> = {
   "opencode-skills": [".opencode", "skills"],
   "opencode-skill": [".opencode", "skill"],
   "claude-skills": [".claude", "skills"],
   "agents-skills": [".agents", "skills"],
+  "opencode-command": [".opencode", "command"],
+  "opencode-commands": [".opencode", "commands"],
 }
 
 const DIAGNOSTIC_LIMIT = 200
@@ -99,6 +102,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
 
   const finish = (): ScanResult => ({
     candidates: [...state.candidates].sort(compareCandidates),
+    commands: [],
     stats: {
       directories: state.directories,
       files: state.files,
@@ -177,7 +181,7 @@ async function openRoots(
 ): Promise<boolean> {
   let opened = false
   for (const kind of context.roots) {
-    const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
+    const [leading, leaf] = ROOT_SEGMENTS[kind]
     if (leading !== name) continue
     const root = join(dir, leaf)
     const rootRel = joinRel(rel, leaf)
@@ -389,7 +393,7 @@ async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> 
     case "hg":
       return isRealDirectory(join(dir, ".hg"))
     default: {
-      const [leading, leaf] = SKILL_ROOT_SEGMENTS[kind]
+      const [leading, leaf] = ROOT_SEGMENTS[kind]
       return isRealDirectory(join(dir, leading, leaf))
     }
   }

@@ -30,13 +30,37 @@ export interface ManifestRecord {
 
 export type SkillRootKind = "opencode-skills" | "opencode-skill" | "claude-skills" | "agents-skills"
 
-export type SubprojectMarker = SkillRootKind | "agents-md" | "claude-md" | "git" | "hg"
+export type CommandRootKind = "opencode-command" | "opencode-commands"
+
+export type SubprojectMarker =
+  | SkillRootKind
+  | CommandRootKind
+  | "agents-md"
+  | "claude-md"
+  | "git"
+  | "hg"
 
 export interface ScanCandidate {
   readonly path: string
   readonly realPath: string
   readonly subproject: string
   readonly root: SkillRootKind
+  readonly markers: readonly SubprojectMarker[]
+}
+
+/**
+ * A command file found by the shared walk (ADR command R1, R5–R7, R17).
+ *
+ * Identity only: frontmatter is not read in F1, so `description`, `agent`,
+ * `model`, and `subagent` arrive at the index stage (PD4).
+ */
+export interface CommandCandidate {
+  readonly name: string
+  readonly path: string
+  readonly canonicalPath: string
+  readonly subproject: string
+  readonly subprojectRealPath: string
+  readonly root: CommandRootKind
   readonly markers: readonly SubprojectMarker[]
 }
 
@@ -49,6 +73,7 @@ export interface ScanStats {
 
 export interface ScanResult {
   readonly candidates: readonly ScanCandidate[]
+  readonly commands: readonly CommandCandidate[]
   readonly stats: ScanStats
   readonly truncated: boolean
   readonly diagnostics: readonly string[]
@@ -117,11 +142,18 @@ export const SKILL_ROOT_DIRECTORIES: readonly SkillRootKind[] = [
   "agents-skills",
 ]
 
+export const COMMAND_ROOT_DIRECTORIES: readonly CommandRootKind[] = [
+  "opencode-command",
+  "opencode-commands",
+]
+
 // Symbolic kinds, not file names; F2 owns the kind → R6 name map:
 // .opencode/skills, .opencode/skill, .claude/skills, .agents/skills,
+// .opencode/command, .opencode/commands,
 // AGENTS.md, CLAUDE.md, .git (directory or file), .hg
 export const SUBPROJECT_MARKERS: readonly SubprojectMarker[] = [
   ...SKILL_ROOT_DIRECTORIES,
+  ...COMMAND_ROOT_DIRECTORIES,
   "agents-md",
   "claude-md",
   "git",
