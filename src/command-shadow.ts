@@ -1,12 +1,6 @@
 import type { NativeCommandNameIndex } from "./command-native.ts"
 
-/**
- * Native precedence for command names (ADR command R4; plan PD1, PD7, PD8).
- *
- * A planned entry is compared by its published name — never the pre-qualification native
- * name — against the names the filesystem native walk derives and the names an earlier
- * pass already denied. The caller's order is kept, and a drop is reported once per name.
- */
+/** A planned command entry as the caller knows it: the published name plus its identity. */
 export interface Nameable {
   readonly name: string
   readonly canonicalPath: string
@@ -24,6 +18,13 @@ export interface DropOutcome<T extends Nameable> {
   readonly diagnostics: readonly string[]
 }
 
+/**
+ * Native precedence for command names (ADR command R4; plan PD1, PD7, PD8).
+ *
+ * A planned entry is compared by its published name — never the pre-qualification native
+ * name — against the names the filesystem native walk derives and the names an earlier
+ * pass already denied. The caller's order is kept, and a drop is reported once per name.
+ */
 export function dropNativeCollisions<T extends Nameable>(
   planned: readonly T[],
   { native, denied = [] }: DropInput,
@@ -51,14 +52,6 @@ export function dropNativeCollisions<T extends Nameable>(
   return { kept, dropped, diagnostics }
 }
 
-/**
- * Post-reload classification (ADR command R4; plan PD6, PD10).
- *
- * The listing is `ctx.command.list()`'s data, so membership in the published set decides
- * ours — never the `:` prefix. A differing description is a shadow, an identical one is
- * indistinguishable, a published name missing from the listing is absent, and every listed
- * name no published entry explains is foreign and stays silent.
- */
 export interface ListedCommand {
   readonly name: string
   readonly description?: string
@@ -82,6 +75,14 @@ export interface AuditOutcome {
   readonly diagnostics: readonly string[]
 }
 
+/**
+ * Post-reload classification (ADR command R4; plan PD6, PD10).
+ *
+ * The listing is `ctx.command.list()`'s data, so membership in the published set decides
+ * ours — never the `:` prefix. A differing description is a shadow, an identical one is
+ * indistinguishable, a published name missing from the listing is absent, and every listed
+ * name no published entry explains is foreign and stays silent.
+ */
 export function auditCommandList({ listed, published }: AuditInput): AuditOutcome {
   const listedByName = new Map<string, ListedCommand>()
   for (const entry of listed) {
@@ -115,6 +116,11 @@ export function auditCommandList({ listed, published }: AuditInput): AuditOutcom
   return { shadowed, absent, foreign, diagnostics }
 }
 
+export interface ShadowTracker {
+  readonly drop: <T extends Nameable>(planned: readonly T[], native: NativeCommandNameIndex) => DropOutcome<T>
+  readonly audit: (input: AuditInput) => AuditOutcome
+}
+
 /**
  * The cross-pass ledger (ADR command R4; plan PD7, PD8).
  *
@@ -122,11 +128,6 @@ export function auditCommandList({ listed, published }: AuditInput): AuditOutcom
  * and forgotten only when both are gone. Diagnostics are reported once per `reason|name`
  * for the lifetime of the tracker, so an unchanged rescan stays silent.
  */
-export interface ShadowTracker {
-  readonly drop: <T extends Nameable>(planned: readonly T[], native: NativeCommandNameIndex) => DropOutcome<T>
-  readonly audit: (input: AuditInput) => AuditOutcome
-}
-
 export function createShadowTracker(): ShadowTracker {
   const denied = new Set<string>()
   const reported = new Set<string>()
