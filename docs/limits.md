@@ -70,6 +70,29 @@ Markers nest and never stop the walk: the deepest marker owner wins, and its rel
 becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:91`). A symlinked
 skill-root directory is not a marker and is not followed.
 
+## Worktree families
+
+A linked worktree and its main checkout are one repository. From an ancestor location only
+the main working tree's skills are advertised; every skill in the linked worktree is hidden,
+including a skill that exists only there (`src/family.ts:168-196`,
+`test/conformance-family.test.ts`). The main working tree is the checkout whose `.git` is a
+directory, not the one whose `.git` is a `gitdir:` file.
+
+- Derivation is filesystem-only: one `lstat` of `<checkout>/.git` and at most one 4 KB read
+  of a `.git` file, never a `git` subprocess (`src/family.ts:54-127`).
+- The rule applies only when both checkouts are strict descendants of the location; a
+  worktree of a repository outside the workspace, or a session located inside the worktree,
+  sees both checkouts unchanged (`test/indexer-family.test.ts` B7–B8,
+  `test/conformance-family.test.ts` C7).
+- A `.git` that cannot be read, carries no `gitdir:` line in its first 4 KB, points at a
+  missing target, or names a common dir that is not its parent's own `.git` disables the rule
+  for that checkout: the entries are advertised as before and one `family:` diagnostic is
+  recorded (`test/family.test.ts` A9–A12).
+- Residual: a worktree of a **submodule** (`.git/modules/<n>/worktrees/<wt>`) cannot name a
+  survivor, so that pair still double-registers (Q8).
+- Residual: deleting the main checkout's `.git` republishes the hidden worktree at the next
+  rescan (Q9).
+
 ## Candidate files
 
 - directly under a skill root, any `*.md` file
@@ -133,7 +156,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
 from `disable-model-invocation: true` (`src/frontmatter.ts:129-137`,
-`src/indexer.ts:168`). Such an entry stays registered, stays user-invocable, and loads
+`src/indexer.ts:183`). Such an entry stays registered, stays user-invocable, and loads
 normally when you mention it — the guidance block simply does not offer it to the model
 (`packages/core/src/skill/instructions.ts:74-81`).
 

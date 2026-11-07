@@ -12,14 +12,15 @@ The plugin adds entries and removes nothing native. Each refresh scans the locat
 replays the result through the single `skill.transform` it registers, and leaves native,
 global, and session skills exactly as they were (`src/registry.ts:305-324`,
 `src/replay.ts:18-45`). The only entry it ever drops is its own duplicate of a nested skill
-already registered under another path ([Advertisement](#advertisement)). Every entry it adds
-carries an ID starting with `nested.` (`src/contracts.ts:78`).
+already registered under another path ([Advertisement](#advertisement)), and it never
+registers a second checkout of one repository ([Repo families](#repo-families)). Every entry
+it adds carries an ID starting with `nested.` (`src/contracts.ts:78`).
 
 opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` for the
 workspace, its ancestor config roots, and the global ones
 (`packages/core/src/config/plugin/skill.ts:77-88`). The plugin neither disables nor shadows
 those roots: it excludes them from its own scan by realpath (`src/native.ts:28-49`,
-`src/indexer.ts:191`) and contributes only what native discovery cannot reach — the
+`src/indexer.ts:206`) and contributes only what native discovery cannot reach — the
 subprojects *below* the location.
 
 ## Entry and lifecycle
@@ -47,7 +48,7 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:30-36`, `393-394` |
 | 2 | Resolve the native skill roots to exclude | `src/registry.ts:395`, `src/native.ts:37-49` |
 | 3 | Scan the location for skill candidates, then reconcile the watcher set from them | `src/registry.ts:425-432`, `src/scan.ts:74-136` |
-| 4 | Read, parse, and dedupe candidates into indexed skills | `src/registry.ts:434-438`, `src/indexer.ts:180-231` |
+| 4 | Read, parse, and dedupe candidates, then drop every non-survivor checkout of a repo family | `src/registry.ts:434-438`, `src/indexer.ts:195-248`, `src/family.ts:168-196` |
 | 5 | Compose display names and assemble frozen entries | `src/registry.ts:440-444`, `80-99` |
 | 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:111-162` |
 | 7 | Persist manifest, cache, and version | `src/registry.ts:446-451`, `src/manifest.ts:110-187` |
@@ -65,7 +66,7 @@ suppresses one reloads on its own after the refresh has returned (`src/registry.
 ## Discovery bounds
 
 The scan is a sorted pre-order depth-first walk from the location (`src/scan.ts:133-168`).
-It stats only; file content is read later, by the indexer (`src/indexer.ts:200-206`).
+It stats only; file content is read later, by the indexer (`src/indexer.ts:217-223`).
 Depth is counted to the **subproject directory**, not to the skill file: markers nest and
 never stop the walk, and the deepest marker owner wins (`src/scan.ts:147`, `165-166`).
 Inside an opened skill root the walk has no depth cap (`src/scan.ts:216-246`).
@@ -76,7 +77,7 @@ is in [limits.md](limits.md).
 
 ## Identity
 
-An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:170`):
+An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:185`):
 
 - scope token = `slug(basename(subprojectRealPath), 24)` + `-` + first 8 hex of the SHA-256
   of the subproject's canonical path (`src/indexer.ts:45-47`, `28-37`)
@@ -94,7 +95,36 @@ pinned to an exact ID stops matching after such a move ([permissions.md](permiss
 
 The composed maximum is 90 characters (7 + 24 + 1 + 8 + 1 + 40 + 1 + 8), so the declared
 `MAX_ID_LENGTH` of 96 (`src/contracts.ts:79`) is a contract bound rather than a truncation
-step (`src/indexer.ts:170` builds the ID without cutting it).
+step (`src/indexer.ts:185` builds the ID without cutting it).
+
+## Repo families
+
+A linked worktree and its main checkout are one repository, so the plugin advertises one
+checkout view per family and never registers both (`src/family.ts`, ADR R18–R20).
+
+| `lstat(<checkout>/.git)` | Family |
+|---|---|
+| directory | key = realpath of that `.git`, survivor = the checkout |
+| file with `gitdir: <C>/worktrees/<n>` | key = `<C>`, survivor = its parent, accepted only when `<C>` is named `.git` and its parent's `.git` resolves to it |
+| file with any other target | key = the target, survivor = the checkout, so a submodule stays its own family |
+| absent | no family and no diagnostic |
+
+Derivation is `node:fs` only — `lstat`, at most one ≤ 4 KB `.git` read, and `realpath`, never
+a `git` subprocess (`src/family.ts:54-127`). Each distinct subproject is derived once per
+index pass and memoised. The filter then drops every entry whose checkout is not its family
+survivor, in scope, whether or not the survivor holds the same repo-relative path
+(`src/family.ts:168-196`); it runs after realpath and native-ID dedupe and before ID
+assignment (`src/indexer.ts:241-243`), so a suppressed entry is never minted, never enters
+the snapshot, cache, or manifest, and no corrective reload is needed. The rule applies only
+when both checkouts are strict descendants of the location: a session inside the worktree
+has the main checkout outside its subtree, so it still sees the worktree unchanged. Watchers
+derive from the pre-suppression candidates (`src/registry.ts:431-432`), so suppression opens
+and closes no handle.
+
+A `.git` that cannot be read, carries no `gitdir:` line in its first 4 KB, points at a
+missing target, or names a common dir that is not its parent's own `.git` disables the rule
+for that checkout: the pre-suppression entries are advertised and one
+`family: <checkout>: <reason>` diagnostic is recorded, never a failed scan.
 
 ## Names
 
@@ -106,10 +136,10 @@ path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeTex
 500 in `assembleEntries` (`src/registry.ts:80-99`, `src/contracts.ts:82-83`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:89-98`, `211`, `src/indexer.ts:170`).
+canonical path, never on the name (`src/registry.ts:89-98`, `211`, `src/indexer.ts:185`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
-non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `166-168`).
+non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `181-183`).
 The plugin therefore always supplies a description, which matters because opencode drops
 description-less entries from the model's guidance block
 (`packages/core/src/skill/instructions.ts:74-81`).
@@ -150,7 +180,7 @@ Three logical keys (`src/contracts.ts:141-145`):
 A manifest entry is `{ id, canonicalPath, name, description?, autoinvoke? }` and carries no
 `content` (`src/manifest.ts:51-57`). The cache entry adds `content`, the
 markdown body with the frontmatter block removed (`src/manifest.ts:59-66`,
-`src/indexer.ts:176`).
+`src/indexer.ts:191`).
 
 Every successful refresh writes the three keys and then prunes. Pruning scans both prefixes
 page by page, keeps the tokens written in this run plus the version key, and removes a stale
@@ -250,7 +280,8 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers |
 | `src/scan.ts` | bounded DFS, markers, skill roots, budgets, refusals |
 | `src/frontmatter.ts` | minimal frontmatter reader: `name`, `description`, `metadata.opencode/autoinvoke`, `disable-model-invocation` |
-| `src/indexer.ts` | ranks, dedupes, parses candidates; derives IDs and names |
+| `src/family.ts` | repo-family derivation from `.git` and the survivor filter |
+| `src/indexer.ts` | ranks, dedupes, parses candidates; drops non-survivor checkouts; derives IDs and names |
 | `src/names.ts` | qualified display names, truncation, sanitisation |
 | `src/native.ts` | the native skill roots to exclude |
 | `src/registry.ts` | the refresh pipeline, transform registration, snapshot swap, shutdown |
