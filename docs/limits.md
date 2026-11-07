@@ -154,7 +154,8 @@ partial snapshot, so a huge tree degrades into a smaller list rather than an emp
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:44`, `89-98`, ending
 in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:83-88`),
 where the overflow is summarised as `truncated: N more diagnostics`. A scan that truncates
-still feeds the outcome budget. No opencode `v2.0.26` surface renders them — see
+still feeds the outcome budget. Post-reload audit lines share that budget in stage order, so
+a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders them — see
 [architecture.md](architecture.md#failure-model).
 
 ## Display caps
