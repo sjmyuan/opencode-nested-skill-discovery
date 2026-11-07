@@ -157,7 +157,7 @@ export function createShadowTracker(): ShadowTracker {
   }
 }
 
-function diagnosticKey(line: string): string {
+export function diagnosticKey(line: string): string {
   const separator = line.indexOf(": ")
   return separator === -1 ? line : `${line.slice(0, separator)}|${line.slice(separator + 2)}`
 }

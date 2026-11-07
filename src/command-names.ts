@@ -1,4 +1,5 @@
 import { relative, sep } from "node:path"
+import { diagnosticKey } from "./command-shadow.ts"
 import { compareText } from "./contracts.ts"
 import type { CommandCandidate } from "./contracts.ts"
 
@@ -69,6 +70,29 @@ export function composeCommandNames(
   }
 
   return { commands: kept, diagnostics }
+}
+
+export interface NameLedger {
+  readonly compose: (commands: readonly CommandCandidate[], location: string) => CommandNameResult
+}
+
+/**
+ * Cross-pass silence for repeat diagnostics (plan PD10).
+ *
+ * A line is silent when its `reason|name` key appeared in the previous pass, and the
+ * remembered set is rebuilt from each pass, so a returning collision reports again.
+ */
+export function createNameLedger(): NameLedger {
+  let reported = new Set<string>()
+
+  return {
+    compose(commands, location) {
+      const outcome = composeCommandNames(commands, location)
+      const fresh = outcome.diagnostics.filter((line) => !reported.has(diagnosticKey(line)))
+      reported = new Set(outcome.diagnostics.map((line) => diagnosticKey(line)))
+      return { ...outcome, diagnostics: fresh }
+    },
+  }
 }
 
 function normalisePart(value: string): string {
