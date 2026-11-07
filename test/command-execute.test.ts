@@ -265,3 +265,50 @@ describe("command executor: the subagent child branch", () => {
     expect(fake.prompts[0]?.sessionID).toBe("parent")
   })
 })
+
+describe("command executor: shell and failure isolation", () => {
+  it("E14: the shell runs in the owning subproject with the resolved argv shape", async () => {
+    const fake = fixture()
+    const runner = scriptedRunner([{ kind: "ran", exitCode: 0, output: "A" }])
+    const executor = createCommandExecutor(hostOf(fake), {
+      shell: { env: {}, platform: "darwin", run: runner.run },
+    })
+
+    await executor(
+      commandTarget(commandEntry({ name: "A:deploy", template: "Deploy !`pwd`" }), "/repo/A"),
+      invocation({ text: "" }),
+    )
+
+    expect(runner.calls).toEqual([{ file: "/bin/zsh", args: ["-c", "pwd"], cwd: "/repo/A" }])
+    expect(fake.prompts[0]?.text).toBe("Deploy A")
+  })
+
+  it("E15: a shell failure rejects before any switch, create or prompt", async () => {
+    const fake = fixture()
+    const runner = scriptedRunner([{ kind: "failed", message: "boom" }])
+    const executor = createCommandExecutor(hostOf(fake), {
+      shell: { env: {}, platform: "darwin", run: runner.run },
+    })
+
+    await expect(
+      executor(commandTarget(commandEntry({ name: "A:deploy", template: "Run !`echo hi`" })), invocation()),
+    ).rejects.toThrow('Shell interpolation failed for "echo hi": boom')
+
+    expect(fake.sessionCalls).toEqual([])
+    expect(fake.switches).toEqual([])
+    expect(fake.childSessions).toEqual([])
+    expect(fake.prompts).toEqual([])
+  })
+
+  it("E16: a rejected session read surfaces and sends no prompt", async () => {
+    const fake = fixture()
+    fake.failSession("get", new Error("session down"))
+
+    await expect(
+      executorFor(fake)(commandTarget(commandEntry({ name: "A:deploy" })), invocation()),
+    ).rejects.toThrow("session down")
+
+    expect(fake.prompts).toEqual([])
+    expect(fake.switches).toEqual([])
+  })
+})

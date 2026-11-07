@@ -52,6 +52,9 @@ export function createCommandExecutor(host: CommandHost, options: CommandExecute
       },
     })
 
+    // PD10 (native `command.ts:216-240`): a shell failure fails this invocation whole.
+    if (expanded.shellFailed) throw new Error(expanded.diagnostics.join("; "))
+
     // PD4/PD6/PD7 (native `command.ts:98-123`): `??` binds looser than `===`, so an
     // explicit `subagent: false` wins over a subagent-mode agent.
     const session = await host.session.get({ sessionID: invocation.sessionID })
