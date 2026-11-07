@@ -8,6 +8,7 @@ import {
   compareText,
   MAX_NAME_LENGTH,
   PROMPT_THROTTLE_MS,
+  type CommandSnapshotSet,
   type RegistryEntry,
   type RegistrySnapshot,
   type ScanCandidate,
@@ -16,8 +17,13 @@ import {
 import { createBackstop, type Backstop } from "./backstop.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
 import { filterCommandFamilies } from "./command-family.ts"
+import { createNameLedger, type QualifiedCommand } from "./command-names.ts"
+import { resolveNativeCommandNames } from "./command-native.ts"
+import { applyCommands, findCommand, type CommandExecutor } from "./command-replay.ts"
+import { createShadowTracker } from "./command-shadow.ts"
+import { buildCommandSnapshot } from "./command-snapshot.ts"
 import { createFamilyPass } from "./family.ts"
-import { persistRegistry } from "./manifest.ts"
+import { persistCommands, persistRegistry } from "./manifest.ts"
 import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { applyRegistry } from "./replay.ts"
@@ -190,6 +196,8 @@ export interface RefreshOutcome {
   readonly subprojects: number
   readonly version?: number
   readonly reloads: number
+  readonly commands: number
+  readonly commandReloads: number
   readonly diagnostics: readonly string[]
 }
 
@@ -211,6 +219,7 @@ export interface RegistryOptions {
   readonly debounceMs?: number
   readonly throttleMs?: number
   readonly now?: () => number
+  readonly executeCommand?: CommandExecutor
 }
 
 type Registration = Awaited<ReturnType<Plugin.Context["skill"]["transform"]>>
@@ -220,6 +229,8 @@ const EMPTY_OUTCOME: RefreshOutcome = Object.freeze({
   skills: 0,
   subprojects: 0,
   reloads: 0,
+  commands: 0,
+  commandReloads: 0,
   diagnostics: Object.freeze([]),
 })
 
@@ -265,8 +276,11 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     snapshots: Object.freeze([]),
   })
   let outcome = EMPTY_OUTCOME
+  let currentCommands: CommandSnapshotSet | undefined
   let registration: Registration | undefined
   let registering: Promise<void> | undefined
+  let commandRegistration: Registration | undefined
+  let registeringCommand: Promise<void> | undefined
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
   let followUp = false
@@ -277,9 +291,13 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let deferredCorrected = false
   const deferredDiagnostics: string[] = []
   const replayDiagnostics: string[] = []
+  const commandDiagnostics: string[] = []
   const watchDiagnostics: string[] = []
+  const nameLedger = createNameLedger()
+  const shadowTracker = createShadowTracker()
 
   const now = options.now ?? (() => Date.now())
+  const executeCommand = options.executeCommand
   const withWriteGate = createWriteGate()
 
   const debouncer =
@@ -323,6 +341,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     skills: 0,
     subprojects: 0,
     reloads,
+    commands: 0,
+    commandReloads: 0,
     diagnostics: capDiagnostics(diagnostics),
   })
 
@@ -345,6 +365,36 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
         })
     }
     await registering
+  }
+
+  /** One early command transform (ADR command R14; plan PD4). A rejection never blocks skills. */
+  const ensureCommandRegistered = async (): Promise<void> => {
+    if (commandRegistration !== undefined || disposed) return
+    if (registeringCommand === undefined) {
+      registeringCommand = ctx.command
+        .transform((editor) => {
+          try {
+            commandDiagnostics.push(
+              ...applyCommands(editor, currentCommands, {
+                lookup: (name) => findCommand(currentCommands, name),
+                ...(executeCommand === undefined ? {} : { execute: executeCommand }),
+              }),
+            )
+          } catch (error) {
+            commandDiagnostics.push(`command-replay: ${reasonOf(error)}`)
+          }
+        })
+        .then((created) => {
+          commandRegistration = created
+        })
+        .catch((error) => {
+          commandDiagnostics.push(`command-register: ${reasonOf(error)}`)
+        })
+        .finally(() => {
+          registeringCommand = undefined
+        })
+    }
+    await registeringCommand
   }
 
   /** Reconciles the watcher set from a successful scan. Never throws (PD7). */
@@ -411,6 +461,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     const diagnostics: string[] = [
       ...replayDiagnostics.splice(0),
+      ...commandDiagnostics.splice(0),
       ...deferredDiagnostics.splice(0),
       ...watchDiagnostics.splice(0),
     ]
@@ -435,6 +486,17 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       diagnostics.push(...written.diagnostics)
       if (!written.ok) return record(fail(diagnostics))
 
+      const clearedCommands = await withWriteGate(async () => {
+        const result = await persistCommands(ctx.storage, { location: base, snapshots: [] })
+        if (result.ok) {
+          currentCommands = Object.freeze({ location: base, snapshots: Object.freeze([]) })
+        }
+        return result
+      })
+      for (const line of clearedCommands.diagnostics) diagnostics.push(`command-persist: ${line}`)
+
+      const commandReloaded = await runStage(diagnostics, "command-reload", () => ctx.command.reload())
+
       const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
       if (!reloaded.ok) return record(fail(diagnostics))
 
@@ -444,6 +506,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
         subprojects: 0,
         version: written.version,
         reloads: 1,
+        commands: 0,
+        commandReloads: commandReloaded.ok ? 1 : 0,
         diagnostics: capDiagnostics(diagnostics),
       })
     }
@@ -458,8 +522,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     await syncWatchers(base, scanned.value.candidates)
 
     // One family pass per refresh, shared with the skill indexer inside the existing
-    // index stage (ADR command R8). F2 runs its native pre-drop before the
-    // `filterCommandFamilies` call; F5 replaces this seam with publication.
+    // index stage (ADR command R8). Publication composes the survivors' names later.
     const indexed = await runStage(diagnostics, "index", async () => {
       const commands = scanned.value.commands
       const family =
@@ -497,6 +560,54 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (!persisted.ok) return record(fail(diagnostics))
     diagnostics.push(...persisted.value.diagnostics)
     if (!persisted.value.ok) return record(fail(diagnostics))
+
+    // Command publication is non-fatal throughout (ADR command R17): a native-walk,
+    // read, persist or reload failure costs a diagnostic, never the skill reload.
+    const commandIndex = await runStage(diagnostics, "command-index", async () => {
+      const planned = indexed.value.commands
+      if (planned.length === 0) {
+        return { commands: [] as readonly QualifiedCommand[], diagnostics: [] as readonly string[] }
+      }
+
+      const composed = nameLedger.compose(planned, base)
+      const native = await resolveNativeCommandNames(nativeInput())
+      const dropped = shadowTracker.drop(
+        composed.commands.map((command) => ({ ...command, name: command.publishedName })),
+        native,
+      )
+
+      return { commands: dropped.kept, diagnostics: [...composed.diagnostics, ...dropped.diagnostics] }
+    })
+
+    let plannedCommands: readonly QualifiedCommand[] = []
+    if (commandIndex.ok) {
+      plannedCommands = commandIndex.value.commands
+      diagnostics.push(...commandIndex.value.diagnostics)
+    }
+
+    const commandSnapshot = await runStage(diagnostics, "command-snapshot", () =>
+      buildCommandSnapshot({ location: base, commands: plannedCommands }),
+    )
+    if (commandSnapshot.ok) diagnostics.push(...commandSnapshot.value.diagnostics)
+
+    if (commandSnapshot.ok) {
+      const commandPersisted = await runStage(diagnostics, "command-persist", () =>
+        withWriteGate(async () => {
+          const result = await persistCommands(ctx.storage, {
+            location: base,
+            snapshots: commandSnapshot.value.snapshot.snapshots,
+          })
+          if (result.ok) currentCommands = commandSnapshot.value.snapshot
+          return result
+        }),
+      )
+      if (commandPersisted.ok) {
+        for (const line of commandPersisted.value.diagnostics) diagnostics.push(`command-persist: ${line}`)
+      }
+    }
+
+    // F9: audit `ctx.command.list()` once this reload settles, before reporting a shadow.
+    const commandReloaded = await runStage(diagnostics, "command-reload", () => ctx.command.reload())
 
     const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
     if (!reloaded.ok) return record(fail(diagnostics))
@@ -565,6 +676,11 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       subprojects: current.snapshots.length,
       version: persisted.value.version,
       reloads,
+      commands:
+        currentCommands === undefined
+          ? 0
+          : currentCommands.snapshots.reduce((total, subproject) => total + subproject.commands.length, 0),
+      commandReloads: commandReloaded.ok ? 1 : 0,
       diagnostics: capDiagnostics(diagnostics),
     })
   }
@@ -579,6 +695,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       } catch (error) {
         return record(fail([`register: ${reasonOf(error)}`]))
       }
+      await ensureCommandRegistered()
       return runRefresh()
     })()
 
@@ -603,6 +720,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     } catch (error) {
       return record(fail([`register: ${reasonOf(error)}`]))
     }
+    await ensureCommandRegistered()
     const activated = await refresh()
     // Built after the first refresh so activation is already recorded, and regardless of its outcome.
     await ensureBackstop()
@@ -717,6 +835,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     const created = registration
     registration = undefined
     if (created !== undefined) await created.dispose().catch(() => undefined)
+
+    if (registeringCommand !== undefined) await registeringCommand.catch(() => undefined)
+
+    const createdCommand = commandRegistration
+    commandRegistration = undefined
+    if (createdCommand !== undefined) await createdCommand.dispose().catch(() => undefined)
   }
 
   return {
