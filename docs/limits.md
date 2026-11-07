@@ -2,7 +2,7 @@
 
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The values
 are constants in `src/contracts.ts`: the refresh passes no `limits` override, so
-`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:447-449`), and this release reads no
+`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:449-451`), and this release reads no
 plugin configuration, so none of them can be changed from `opencode.json`.
 
 ## Summary
@@ -94,7 +94,10 @@ directory, not the one whose `.git` is a `gitdir:` file.
 - A `.git` that cannot be read, carries no `gitdir:` line in its first 4 KB, points at a
   missing target, or names a common dir that is not its parent's own `.git` disables the rule
   for that checkout: the entries are advertised as before and one `family:` diagnostic is
-  recorded (`test/family.test.ts` A6–A7, A9–A12, A22).
+  recorded (`test/family.test.ts` A6–A7, A9–A12; `test/family-checkout.test.ts` A22).
+- Identical `family:` diagnostics are emitted once per pass: the ancestor walk memoises each
+  checkout, so a nested subproject and its enclosing checkout share one line rather than
+  repeating it (`test/family-checkout.test.ts` A22).
 - Creating a `.git` on an ancestor is outside the watch set, so a nested subproject starts
   deduping at the next prompt or the next file move, not immediately (Q10).
 - Residual: a worktree of a **submodule** (`.git/modules/<n>/worktrees/<wt>`) cannot name a
@@ -160,7 +163,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:507-512`, `203-219`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:28`, `587-638`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:507-512`, `224-240`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:28`, `619-676`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -183,5 +186,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:534-543`, `569-585`, `523-549`). Details in
+(`src/registry.ts:534-543`, `601-617`, `555-581`). Details in
 [architecture.md](architecture.md#refresh-model).

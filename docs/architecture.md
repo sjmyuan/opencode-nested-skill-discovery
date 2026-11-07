@@ -45,15 +45,15 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 
 | # | Stage | Where |
 |---|---|---|
-| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:30-36`, `393-394` |
+| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:30-36`, `415-416` |
 | 2 | Resolve the native skill roots to exclude | `src/registry.ts:417`, `src/native.ts:37-49` |
-| 3 | Scan the location for skill candidates, then reconcile the watcher set from them | `src/registry.ts:447-456`, `src/scan.ts:74-136` |
+| 3 | Scan the location for skill candidates, then reconcile the watcher set from them | `src/registry.ts:449-456`, `src/scan.ts:74-136` |
 | 4 | Read, parse, and dedupe candidates, then drop every non-survivor checkout of a repo family | `src/registry.ts:458-462`, `src/indexer.ts:195-248`, `src/family.ts:240-284` |
 | 5 | Compose display names and assemble frozen entries | `src/registry.ts:464-468`, `101-120` |
 | 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:132-183` |
-| 7 | Persist manifest, cache, and version | `src/registry.ts:470-484`, `src/manifest.ts:110-187` |
+| 7 | Persist manifest, cache, and version | `src/registry.ts:470-482`, `src/manifest.ts:110-187` |
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:476-485` |
-| 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:487-533`, `203-219` |
+| 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:487-543`, `224-240` |
 
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
 the swap must be visible before the host rebuilds its skill list.
@@ -144,7 +144,7 @@ path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeTex
 500 in `assembleEntries` (`src/registry.ts:101-120`, `src/contracts.ts:82-83`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:110-119`, `211`, `src/indexer.ts:185`).
+canonical path, never on the name (`src/registry.ts:110-119`, `232`, `src/indexer.ts:185`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `181-183`).
@@ -166,10 +166,10 @@ description-less entries from the model's guidance block
 
 After the first reload the registry lists what the host actually holds, then compares each
 nested entry's `canonicalPath` with the **realpath** of every foreign entry's `path` and
-suppresses a match (`src/registry.ts:507-512`, `203-219`). Dedupe is two-phase: the immediate
+suppresses a match (`src/registry.ts:507-512`, `224-240`). Dedupe is two-phase: the immediate
 pass runs inside the refresh and emits one `dedupe: <id>` diagnostic per suppressed entry
 (`src/registry.ts:512`); when the foreign tier still looks incomplete a deferred check runs at
-1.5 s and again at 4 s (`src/registry.ts:28`, `502-511`, `587-638`). That check is silent on
+1.5 s and again at 4 s (`src/registry.ts:28`, `534-543`, `619-676`). That check is silent on
 success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:672`).
 `refresh()` returns without waiting for that check (`src/registry.ts:555-581`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
@@ -228,7 +228,7 @@ and a sustained stream yields at most four per second. The backstop awaits an in
 refresh instead of starting a second one, so a prompt never waits for two scans.
 
 The watcher set is derived from the **last good scan** and reconciled immediately after it
-(`src/registry.ts:456`, `327-337`): canonical, deduped, sorted, with pruned segments and
+(`src/registry.ts:456`, `349-359`): canonical, deduped, sorted, with pruned segments and
 symlinked directories dropped. Each reconciliation closes handles that are no longer in the
 set, so a deleted subproject does not leak a watcher.
 
@@ -240,13 +240,13 @@ roughly 0.17 s on the reference workspace.
 
 Watch and hook failures never escape: `syncWatchers` buffers them as `watch: <path>: <code>`
 (`src/registry.ts:349-359`) and `ensureBackstop` buffers `hook: <reason>`
-(`src/registry.ts:365-393`), both drained into the next outcome (`388-392`). The watcher set
+(`src/registry.ts:365-393`), both drained into the next outcome (`410-414`). The watcher set
 advances as soon as the scan succeeds, even if a later stage fails (`src/registry.ts:456`),
 so only a failed scan leaves the previous set watched. `dispose()` clears the deferred timers
 and the debounce timer, closes every handle, awaits any in-flight refresh with errors
 swallowed, then disposes the hook and the transform; it is idempotent
 (`src/registry.ts:678-703`). A deferred dedupe check that is still pending can follow a
-completed refresh without delaying it (`src/registry.ts:601-617`, `523-549`).
+completed refresh without delaying it (`src/registry.ts:601-617`, `555-581`).
 
 Watcher, debounce, and backstop behaviour is implemented in `src/watch.ts` and
 `src/backstop.ts` (`deriveWatchTargets` at `src/watch.ts:246-283`, `createDebouncer` at
@@ -264,14 +264,14 @@ advertised list is whatever the last completed step produced.
 
 | Case | Behaviour | Where |
 |---|---|---|
-| Scan, index, snapshot, or manifest throws | one `<stage>: <reason>` diagnostic, **previous** snapshot kept, `ok: false` | `src/registry.ts:84-95`, `425-451` |
+| Scan, index, snapshot, or manifest throws | one `<stage>: <reason>` diagnostic, **previous** snapshot kept, `ok: false` | `src/registry.ts:84-95`, `426-482` |
 | The location is missing or not a directory | empty snapshot persisted and swapped, `scan: … is not a directory`, `ok: false` | `src/registry.ts:426-446` |
 | Diagnostics exceed 200 | truncated with `truncated: N more diagnostics` | `src/registry.ts:75-80` |
 | Scan diagnostics exceed 200 | truncated with `diagnostics-truncated` | `src/scan.ts:44`, `89-98` |
 | A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:453`, `src/scan.ts:323-355` |
 | The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:476-485` |
-| `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:497`, `487-499` |
-| Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:349-359`, `343-371`, `388-392`, `src/plugin.ts:24-28` |
+| `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:497`, `514-532` |
+| Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:349-359`, `365-393`, `410-414`, `src/plugin.ts:24-28` |
 | A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:672` |
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
