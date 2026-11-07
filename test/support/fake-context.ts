@@ -50,12 +50,46 @@ export interface FakeStorageScanOptions {
   readonly limit?: number
 }
 
+export interface FakeModelRef {
+  readonly id: string
+  readonly providerID: string
+  readonly variant?: string
+}
+
+export interface FakeAgentSeed {
+  readonly id: string
+  readonly mode?: "subagent" | "primary" | "all"
+  readonly model?: FakeModelRef
+}
+
+export interface FakeSessionSeed {
+  readonly id: string
+  readonly agent?: string
+  readonly model?: FakeModelRef
+}
+
+export type SessionOperation = "get" | "create" | "switchAgent" | "switchModel" | "prompt"
+
+export interface FakePromptCall {
+  readonly sessionID: string
+  readonly text: string
+  readonly input: Record<string, unknown>
+}
+
+export interface FakeSwitchCall {
+  readonly kind: "agent" | "model"
+  readonly sessionID: string
+  readonly value: unknown
+}
+
 export interface FakeContextOptions {
   readonly directory?: string
   readonly storage?: Iterable<readonly [string, Schema.Json]>
   readonly onReload?: () => void
   readonly commands?: readonly CommandSeed[]
   readonly onCommandReload?: () => void
+  readonly agents?: readonly FakeAgentSeed[]
+  readonly sessions?: readonly FakeSessionSeed[]
 }
 
 export interface FakeContext {
@@ -72,6 +106,11 @@ export interface FakeContext {
   readonly reloadCalls: number
   readonly commandReloadCalls: number
   readonly commandDisposeCalls: number
+  readonly sessionCalls: readonly SessionOperation[]
+  readonly agentCalls: readonly string[]
+  readonly childSessions: readonly Record<string, unknown>[]
+  readonly prompts: readonly FakePromptCall[]
+  readonly switches: readonly FakeSwitchCall[]
   onReload: (() => void) | undefined
   onCommandReload: (() => void) | undefined
   setLocation(directory: string): void
@@ -82,6 +121,7 @@ export interface FakeContext {
   failSync(target: SyncFailureTarget, error?: unknown): void
   failKey(key: string, error?: unknown): void
   failCommandAdd(name: string, error?: unknown): void
+  failSession(operation: SessionOperation, error?: unknown): void
   clearFailures(): void
   firePrompt(): Promise<void>
   invokeCommand(name: string, input?: unknown): Promise<void>
@@ -112,6 +152,16 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const syncFailures = new Map<SyncFailureTarget, unknown>()
   const keyFailures = new Map<string, unknown>()
   const commandAddFailures = new Map<string, unknown>()
+  const agents = new Map<string, FakeAgentSeed>((options.agents ?? []).map((agent) => [agent.id, { ...agent }]))
+  const sessions = new Map<string, Record<string, unknown>>()
+  for (const session of options.sessions ?? []) sessions.set(session.id, { ...session })
+  const sessionCalls: SessionOperation[] = []
+  const agentCalls: string[] = []
+  const childSessions: Record<string, unknown>[] = []
+  const prompts: FakePromptCall[] = []
+  const switches: FakeSwitchCall[] = []
+  const sessionFailures = new Map<SessionOperation, unknown>()
+  let generatedChildren = 0
   const values = new Map<string, Schema.Json>(options.storage ?? [])
   const hooks: { onReload: (() => void) | undefined; onCommandReload: (() => void) | undefined } = {
     onReload: options.onReload,
@@ -131,6 +181,22 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const guardKey = (key: string): void => {
     if (keyFailures.has(key)) throw keyFailures.get(key)
   }
+
+  const guardedSession = async <T>(operation: SessionOperation, run: () => T | Promise<T>): Promise<T> => {
+    sessionCalls.push(operation)
+    if (sessionFailures.has(operation)) throw sessionFailures.get(operation)
+    return run()
+  }
+
+  const agentInfo = (seed: FakeAgentSeed) => ({
+    id: seed.id,
+    name: seed.id,
+    mode: seed.mode ?? "primary",
+    hidden: false,
+    request: {},
+    permissions: [],
+    ...(seed.model === undefined ? {} : { model: seed.model }),
+  })
 
   const page = ({ prefix, after, limit = DEFAULT_SCAN_LIMIT }: FakeStorageScanOptions) => {
     const keys = [...values.keys()]
@@ -180,7 +246,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
   } as unknown as CommandEditor
 
-  // Only the five faked domains exist: any other host capability in setup is a loud failure.
+  // Only the faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
     skill: {
       transform: (callback: TransformCallback) => {
@@ -243,6 +309,21 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
           })),
         })),
     },
+    agent: {
+      get: async (input: { agentID: string }) => {
+        agentCalls.push("get")
+        const seed = agents.get(input.agentID)
+        if (seed === undefined) throw new Error(`unknown agent ${input.agentID}`)
+        return { location: { directory: location.directory }, data: agentInfo(seed) }
+      },
+      list: async () => {
+        agentCalls.push("list")
+        return {
+          location: { directory: location.directory },
+          data: [...agents.values()].map((seed) => agentInfo(seed)),
+        }
+      },
+    },
     location,
     session: {
       hook: async (name: string, callback: HookCallback) =>
@@ -256,6 +337,38 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
               counters.hookDisposals += 1
             },
           }
+        }),
+      get: async (input: { sessionID: string }) =>
+        guardedSession("get", () => {
+          const existing = sessions.get(input.sessionID)
+          if (existing !== undefined) return existing
+          const created = { id: input.sessionID }
+          sessions.set(input.sessionID, created)
+          return created
+        }),
+      create: async (input: Record<string, unknown>) =>
+        guardedSession("create", () => {
+          generatedChildren += 1
+          const created = { ...input, id: `child-${generatedChildren}` }
+          childSessions.push({ ...input })
+          sessions.set(String(created.id), created)
+          return created
+        }),
+      switchAgent: async (input: { sessionID: string; agent: string }) =>
+        guardedSession("switchAgent", () => {
+          switches.push({ kind: "agent", sessionID: input.sessionID, value: input.agent })
+          const session = sessions.get(input.sessionID)
+          if (session !== undefined) session.agent = input.agent
+        }),
+      switchModel: async (input: { sessionID: string; model: FakeModelRef }) =>
+        guardedSession("switchModel", () => {
+          switches.push({ kind: "model", sessionID: input.sessionID, value: input.model })
+          const session = sessions.get(input.sessionID)
+          if (session !== undefined) session.model = input.model
+        }),
+      prompt: async (input: { sessionID: string; text: string } & Record<string, unknown>) =>
+        guardedSession("prompt", () => {
+          prompts.push({ sessionID: input.sessionID, text: input.text, input: { ...input } })
         }),
     },
     storage: {
@@ -293,6 +406,21 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     get commandDisposeCalls() {
       return counters.commandDispose
+    },
+    get sessionCalls() {
+      return sessionCalls
+    },
+    get agentCalls() {
+      return agentCalls
+    },
+    get childSessions() {
+      return childSessions
+    },
+    get prompts() {
+      return prompts
+    },
+    get switches() {
+      return switches
     },
     get commandDefinitions() {
       return [...commandEntries.values()]
@@ -346,11 +474,15 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     failCommandAdd(name: string, error: unknown = new Error(`command ${name}`)) {
       commandAddFailures.set(name, error)
     },
+    failSession(operation: SessionOperation, error: unknown = new Error(operation)) {
+      sessionFailures.set(operation, error)
+    },
     clearFailures() {
       failures.clear()
       syncFailures.clear()
       keyFailures.clear()
       commandAddFailures.clear()
+      sessionFailures.clear()
     },
     // Surfaces rejections on purpose: a "never rejects" test must be able to fail loudly.
     async firePrompt() {

@@ -50,15 +50,24 @@ describe("command frontmatter", () => {
     expect(result).toEqual({ ok: false, reason: "unterminated fence" })
   })
 
-  it("F5: a nested mapping under model drops the file with one diagnostic", () => {
+  // Rewritten for G2 (plan PD12/PD13): the pinned schema accepts the mapping and drops an
+  // invalid value, so the file now publishes with the canonical short string.
+  it("F5: a model block mapping canonicalises to the short string", () => {
     const result = parseCommandFrontmatter(
-      doc("model:\n  providerID: anthropic\n  model: claude-sonnet\nagent: build"),
+      doc("model:\n  providerID: anthropic\n  # pinned model\n  model: claude-sonnet\n  variant: fast\nagent: build"),
       "deploy.md",
     )
 
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.reason).toContain("model")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.frontmatter).toEqual({ model: "anthropic/claude-sonnet#fast", agent: "build" })
+
+    const withoutVariant = parseCommandFrontmatter(
+      doc("model:\n  providerID: anthropic\n  model: claude-sonnet"),
+      "deploy.md",
+    )
+    expect(withoutVariant.ok).toBe(true)
+    if (withoutVariant.ok) expect(withoutVariant.frontmatter.model).toBe("anthropic/claude-sonnet")
   })
 
   it("F6: an unsupported collection value on an accepted key drops the file", () => {
@@ -130,5 +139,80 @@ describe("command frontmatter", () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.reason).toBe("unparsable line 2: name: deploy")
+  })
+
+  // Plan F12–F16, numbered F13–F17 in this file because F12 predates the model extension.
+  it("F13: a one-line flow mapping canonicalises like the block form", () => {
+    const result = parseCommandFrontmatter(
+      doc("model: {providerID: anthropic, model: claude-sonnet, variant: fast}"),
+      "deploy.md",
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.frontmatter.model).toBe("anthropic/claude-sonnet#fast")
+  })
+
+  it("F14: a mapping missing providerID or model drops the file, naming model", () => {
+    for (const frontmatter of [
+      "model:\n  model: claude-sonnet",
+      "model:\n  providerID: anthropic",
+      "model:\n  providerID: anthropic\n  model:",
+      "model: {model: claude-sonnet}",
+    ]) {
+      const result = parseCommandFrontmatter(doc(frontmatter), "deploy.md")
+
+      expect(result.ok, frontmatter).toBe(false)
+      if (result.ok) continue
+      expect(result.reason).toContain("model")
+    }
+  })
+
+  it("F15: an unknown key or a nested value inside the mapping drops the file", () => {
+    for (const frontmatter of [
+      "model:\n  providerID: anthropic\n  model: claude-sonnet\n  extra: x",
+      "model:\n  providerID: anthropic\n  model:\n    deep: x",
+      "model:\n  providerID:\n    deep: x\n  model: claude-sonnet",
+      "model: {providerID: anthropic, model: claude-sonnet, extra: x}",
+    ]) {
+      const result = parseCommandFrontmatter(doc(frontmatter), "deploy.md")
+
+      expect(result.ok, frontmatter).toBe(false)
+      if (result.ok) continue
+      expect(result.reason).toContain("model")
+    }
+  })
+
+  it("F16: an invalid model scalar drops the file; an empty model: stays absent", () => {
+    for (const value of ["nonsense", "/model", "provider/", "provider/model#", "a#b/model"]) {
+      const result = parseCommandFrontmatter(doc(`model: ${value}`), "deploy.md")
+
+      expect(result.ok, value).toBe(false)
+      if (result.ok) continue
+      expect(result.reason).toContain("model")
+    }
+
+    const absent = parseCommandFrontmatter(doc("model:\ndescription: Deploys"), "deploy.md")
+    expect(absent.ok).toBe(true)
+    if (absent.ok) expect(absent.frontmatter).toEqual({ description: "Deploys" })
+  })
+
+  it("F17: subtask/subagent/description/unknown-key behaviour is unchanged", () => {
+    const aliased = parseCommandFrontmatter(doc("subtask: true"), "deploy.md")
+    const explicit = parseCommandFrontmatter(doc("subtask: true\nsubagent: false"), "deploy.md")
+    const mixed = parseCommandFrontmatter(
+      doc("description: Deploys\nmodel: anthropic/claude-sonnet\ntags:\n  x: y"),
+      "deploy.md",
+    )
+
+    expect(aliased.ok).toBe(true)
+    if (aliased.ok) expect(aliased.frontmatter.subagent).toBe(true)
+    expect(explicit.ok).toBe(true)
+    if (explicit.ok) expect(explicit.frontmatter.subagent).toBe(false)
+    expect(mixed.ok).toBe(true)
+    if (mixed.ok) {
+      expect(mixed.frontmatter).toEqual({ description: "Deploys", model: "anthropic/claude-sonnet" })
+      expect(mixed.diagnostics).toEqual([])
+    }
   })
 })
