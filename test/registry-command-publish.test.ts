@@ -29,6 +29,19 @@ vi.mock("../src/scan.ts", async (importOriginal) => {
   }
 })
 
+const nativeControl = vi.hoisted(() => ({ failure: undefined as Error | undefined }))
+
+vi.mock("../src/command-native.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/command-native.ts")>()
+  return {
+    ...actual,
+    resolveNativeCommandNames: async (...args: Parameters<typeof actual.resolveNativeCommandNames>) => {
+      if (nativeControl.failure !== undefined) throw nativeControl.failure
+      return actual.resolveNativeCommandNames(...args)
+    },
+  }
+})
+
 const manifestControl = vi.hoisted(() => ({ failure: undefined as Error | undefined }))
 
 vi.mock("../src/manifest.ts", async (importOriginal) => {
@@ -75,6 +88,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs()
   scanControl.failure = undefined
+  nativeControl.failure = undefined
   manifestControl.failure = undefined
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
 })
@@ -373,6 +387,49 @@ describe("command publication from the refresh", () => {
       expect(bytes).not.toContain(await realpath(path.join(family.root, "wt")))
     } finally {
       await suppressed.registry.dispose()
+    }
+  })
+
+  it("R15: a failed native walk keeps the previous commands and still reloads once", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+
+    try {
+      await registry.activate()
+      await ws.command("command", "release.md")
+      const reloads = fake.commandReloadCalls
+
+      nativeControl.failure = new Error("walk down")
+      const outcome = await registry.refresh()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.diagnostics.filter((line) => line.startsWith("command-index:"))).toHaveLength(1)
+      expect(names(fake)).toEqual(["A:deploy"])
+      expect(fake.commandReloadCalls).toBe(reloads + 1)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("R16: a rejected command transform registration never fails the refresh", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+
+    try {
+      fake.fail("command.transform", new Error("no transform"))
+      const first = await registry.activate()
+
+      expect(first.ok).toBe(true)
+      expect(first.skills).toBe(1)
+
+      const second = await registry.refresh()
+
+      expect(second.diagnostics).toContain("command-register: no transform")
+      expect(fake.commandReloadCalls).toBe(2)
+    } finally {
+      await registry.dispose()
     }
   })
 

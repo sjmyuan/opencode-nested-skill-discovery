@@ -370,31 +370,36 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   /** One early command transform (ADR command R14; plan PD4). A rejection never blocks skills. */
   const ensureCommandRegistered = async (): Promise<void> => {
     if (commandRegistration !== undefined || disposed) return
-    if (registeringCommand === undefined) {
-      registeringCommand = ctx.command
-        .transform((editor) => {
-          try {
-            commandDiagnostics.push(
-              ...applyCommands(editor, currentCommands, {
-                lookup: (name) => findCommand(currentCommands, name),
-                ...(executeCommand === undefined ? {} : { execute: executeCommand }),
-              }),
-            )
-          } catch (error) {
-            commandDiagnostics.push(`command-replay: ${reasonOf(error)}`)
-          }
-        })
-        .then((created) => {
-          commandRegistration = created
-        })
-        .catch((error) => {
-          commandDiagnostics.push(`command-register: ${reasonOf(error)}`)
-        })
-        .finally(() => {
-          registeringCommand = undefined
-        })
+
+    try {
+      if (registeringCommand === undefined) {
+        registeringCommand = ctx.command
+          .transform((editor) => {
+            try {
+              commandDiagnostics.push(
+                ...applyCommands(editor, currentCommands, {
+                  lookup: (name) => findCommand(currentCommands, name),
+                  ...(executeCommand === undefined ? {} : { execute: executeCommand }),
+                }),
+              )
+            } catch (error) {
+              commandDiagnostics.push(`command-replay: ${reasonOf(error)}`)
+            }
+          })
+          .then((created) => {
+            commandRegistration = created
+          })
+          .catch((error) => {
+            commandDiagnostics.push(`command-register: ${reasonOf(error)}`)
+          })
+          .finally(() => {
+            registeringCommand = undefined
+          })
+      }
+      await registeringCommand
+    } catch (error) {
+      commandDiagnostics.push(`command-register: ${reasonOf(error)}`)
     }
-    await registeringCommand
   }
 
   /** Reconciles the watcher set from a successful scan. Never throws (PD7). */
@@ -585,24 +590,28 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       diagnostics.push(...commandIndex.value.diagnostics)
     }
 
-    const commandSnapshot = await runStage(diagnostics, "command-snapshot", () =>
-      buildCommandSnapshot({ location: base, commands: plannedCommands }),
-    )
-    if (commandSnapshot.ok) diagnostics.push(...commandSnapshot.value.diagnostics)
-
-    if (commandSnapshot.ok) {
-      const commandPersisted = await runStage(diagnostics, "command-persist", () =>
-        withWriteGate(async () => {
-          const result = await persistCommands(ctx.storage, {
-            location: base,
-            snapshots: commandSnapshot.value.snapshot.snapshots,
-          })
-          if (result.ok) currentCommands = commandSnapshot.value.snapshot
-          return result
-        }),
+    // A failed composition keeps the previous command snapshot: an empty planned list is
+    // "nothing published", a failed one is "unknown", and only the first may clear commands.
+    if (commandIndex.ok) {
+      const commandSnapshot = await runStage(diagnostics, "command-snapshot", () =>
+        buildCommandSnapshot({ location: base, commands: plannedCommands }),
       )
-      if (commandPersisted.ok) {
-        for (const line of commandPersisted.value.diagnostics) diagnostics.push(`command-persist: ${line}`)
+      if (commandSnapshot.ok) diagnostics.push(...commandSnapshot.value.diagnostics)
+
+      if (commandSnapshot.ok) {
+        const commandPersisted = await runStage(diagnostics, "command-persist", () =>
+          withWriteGate(async () => {
+            const result = await persistCommands(ctx.storage, {
+              location: base,
+              snapshots: commandSnapshot.value.snapshot.snapshots,
+            })
+            if (result.ok) currentCommands = commandSnapshot.value.snapshot
+            return result
+          }),
+        )
+        if (commandPersisted.ok) {
+          for (const line of commandPersisted.value.diagnostics) diagnostics.push(`command-persist: ${line}`)
+        }
       }
     }
 
