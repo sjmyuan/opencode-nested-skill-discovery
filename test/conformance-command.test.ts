@@ -1,9 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry, type Registry } from "../src/registry.ts"
 import { commandDoc, writeCommand, writeCommandDoc } from "./support/command-family-fixtures.ts"
+import { commandStorage } from "./support/command-publish-fixtures.ts"
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
 import { createFamilyWorkspace, type FamilyWorkspace } from "./support/family-fixtures.ts"
 
@@ -76,6 +78,51 @@ describe("conformance: the published command set", () => {
       expect(outcome.commands).toBe(2)
       expect(outcome.reloads).toBe(1)
       expect(outcome.commandReloads).toBe(1)
+    } finally {
+      await registry.dispose()
+    }
+  })
+})
+
+describe("conformance: family suppression across a worktree and a nested subproject", () => {
+  it("CC2: a non-survivor checkout publishes nothing, the flip restores it, and restoring .git suppresses it again", async () => {
+    const ws = await buildLocation()
+    const wtReal = await realpath(path.join(ws.root, "wt"))
+    const { fake, registry } = open(ws)
+
+    try {
+      const first = await registry.activate()
+      const suppressed = first.diagnostics.filter((line) => line.startsWith("family: suppressed"))
+
+      expect(namesOf(fake.commandDefinitions).sort()).toEqual(["main:packages:app:tidy", "main:release"])
+      expect(suppressed).toHaveLength(3)
+      expect(suppressed.filter((line) => line.includes("(missing at survivor"))).toHaveLength(1)
+      expect(fake.storage.has(`nested/commands/${scopeTokenFor(wtReal)}`)).toBe(false)
+      expect(JSON.stringify(commandStorage(fake))).not.toContain(wtReal)
+      expect(fake.commandReloadCalls).toBe(1)
+
+      await rm(path.join(ws.root, "wt", ".git"))
+
+      const flipped = await registry.refresh()
+
+      expect(namesOf(fake.commandDefinitions).sort()).toEqual([
+        "main:packages:app:tidy",
+        "main:release",
+        "wt:packages:app:tidy",
+        "wt:release",
+        "wt:wtonly",
+      ])
+      expect(flipped.diagnostics.filter((line) => line.startsWith("family:"))).toEqual([])
+      expect(flipped.reloads).toBe(1)
+      expect(fake.commandReloadCalls).toBe(2)
+
+      await ws.worktree("wt", "main", "linked")
+
+      const restored = await registry.refresh()
+
+      expect(namesOf(fake.commandDefinitions).sort()).toEqual(["main:packages:app:tidy", "main:release"])
+      expect(restored.diagnostics.filter((line) => line.startsWith("family: suppressed"))).toHaveLength(3)
+      expect(fake.commandReloadCalls).toBe(3)
     } finally {
       await registry.dispose()
     }
