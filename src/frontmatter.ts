@@ -34,6 +34,7 @@ const FENCE = "---"
 const SCALAR_KEYS = new Set(["name", "description", "disable-model-invocation"])
 const COMMAND_SCALAR_KEYS = new Set(["description", "agent", "model"])
 const COMMAND_BOOLEAN_KEYS = new Set(["subagent", "subtask"])
+const COMMAND_KNOWN_KEYS = new Set([...COMMAND_SCALAR_KEYS, ...COMMAND_BOOLEAN_KEYS])
 
 const indentOf = (line: string): number => line.length - line.trimStart().length
 
@@ -171,7 +172,8 @@ export function parseSkillFrontmatter(text: string, filePath: string): Frontmatt
  *
  * Command documents share the skill fence grammar but accept a different key set, so a
  * syntactic problem drops the whole file instead of a single key: an unparsable line, an
- * unterminated fence, a collection or nested mapping, or a non-boolean flag.
+ * unterminated fence, a collection, a nested mapping under a known key, or a non-boolean
+ * flag. An unknown key's mapping is ignored, as the native schema ignores unknown keys.
  */
 export function parseCommandFrontmatter(text: string, filePath: string): CommandFrontmatterResult {
   const lines = text.split("\n")
@@ -192,6 +194,7 @@ export function parseCommandFrontmatter(text: string, filePath: string): Command
   const scalars = new Map<string, string>()
   const flags = new Map<string, boolean>()
   let parent = ""
+  let excessAllowed = false
 
   for (let index = 1; index < close; index += 1) {
     const line = lines[index] ?? ""
@@ -200,6 +203,8 @@ export function parseCommandFrontmatter(text: string, filePath: string): Command
     const indent = indentOf(line)
     const content = line.trim()
     if (indent > 0) {
+      // An unknown key's block is an excess property the native schema ignores.
+      if (excessAllowed) continue
       return {
         ok: false,
         reason: parent === "" ? `unparsable line ${index + 1}: ${content}` : `nested mapping under ${parent}`,
@@ -212,6 +217,7 @@ export function parseCommandFrontmatter(text: string, filePath: string): Command
     const key = content.slice(0, separator).trim()
     const value = content.slice(separator + 1).trim()
     parent = key
+    excessAllowed = value === "" && !COMMAND_KNOWN_KEYS.has(key)
 
     if (value === "|" || value === ">" || value === "|-" || value === ">-") {
       const block = readBlockScalar(lines, index + 1, close, indent, value.startsWith(">"))

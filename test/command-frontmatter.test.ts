@@ -102,4 +102,33 @@ describe("command frontmatter", () => {
     if (!result.ok) return
     expect(result.frontmatter).toEqual({ description: "Deploys" })
   })
+
+  it("F10: an unknown key's nested mapping is ignored, as the native schema ignores it", () => {
+    const result = parseCommandFrontmatter(doc("metadata:\n  x: y\ndescription: Deploys"), "deploy.md")
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.frontmatter).toEqual({ description: "Deploys" })
+    expect(result.diagnostics).toEqual([])
+  })
+
+  // Anti-regression lock: passes before and after the F10 fix, pinning the known-key edge.
+  it("F11: a nested mapping under a known key still drops the file", () => {
+    for (const key of ["description", "agent", "subagent"]) {
+      const result = parseCommandFrontmatter(doc(`${key}:\n  x: y`), "deploy.md")
+
+      expect(result.ok).toBe(false)
+      if (result.ok) continue
+      expect(result.reason).toBe(`nested mapping under ${key}`)
+    }
+  })
+
+  // Anti-regression lock: the unknown-key rule must not swallow a parentless indented line.
+  it("F12: an indented first frontmatter line is still unparsable", () => {
+    const result = parseCommandFrontmatter(doc("  name: deploy"), "deploy.md")
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe("unparsable line 2: name: deploy")
+  })
 })
