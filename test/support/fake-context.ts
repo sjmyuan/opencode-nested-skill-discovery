@@ -83,9 +83,17 @@ export interface FakeSessionSeed {
   readonly id: string
   readonly agent?: string
   readonly model?: FakeModelRef
+  readonly location?: { readonly directory: string }
+  readonly time?: { readonly created: number; readonly updated: number; readonly busy?: number }
 }
 
-export type SessionOperation = "get" | "create" | "switchAgent" | "switchModel" | "prompt"
+export type SessionOperation = "get" | "create" | "switchAgent" | "switchModel" | "prompt" | "move"
+export type MoveMode = "apply" | "hold" | "reject"
+
+export interface FakeMoveCall {
+  readonly sessionID: string
+  readonly directory: string
+}
 
 export interface FakePromptCall {
   readonly sessionID: string
@@ -111,6 +119,7 @@ export interface FakeContextOptions {
   readonly agents?: readonly FakeAgentSeed[]
   readonly sessions?: readonly FakeSessionSeed[]
   readonly tools?: readonly FakeToolSeed[]
+  readonly onSessionOperation?: (operation: SessionOperation) => void
 }
 
 export interface FakeContext {
@@ -137,6 +146,7 @@ export interface FakeContext {
   readonly childSessions: readonly Record<string, unknown>[]
   readonly prompts: readonly FakePromptCall[]
   readonly switches: readonly FakeSwitchCall[]
+  readonly moves: readonly FakeMoveCall[]
   onReload: (() => void) | undefined
   onCommandReload: (() => void) | undefined
   setLocation(directory: string): void
@@ -149,6 +159,9 @@ export interface FakeContext {
   failKey(key: string, error?: unknown): void
   failCommandAdd(name: string, error?: unknown): void
   failSession(operation: SessionOperation, error?: unknown): void
+  setMoveMode(mode: MoveMode, error?: unknown): void
+  releaseMove(): void
+  markBusy(sessionID: string): void
   clearFailures(): void
   firePrompt(): Promise<void>
   invokeCommand(name: string, input?: unknown): Promise<void>
@@ -179,25 +192,40 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const syncFailures = new Map<SyncFailureTarget, unknown>()
   const keyFailures = new Map<string, unknown>()
   const commandAddFailures = new Map<string, unknown>()
+  const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), "nested-fake-")))
+  const location: FakeLocation = {
+    directory,
+    project: { id: "project-fake", directory, canonical: directory },
+  }
+  const sessionInfo = (input: Record<string, unknown>): Record<string, unknown> => {
+    const id = String(input.id)
+    const time = (input.time as Record<string, unknown> | undefined) ?? {}
+    const seeded = (input.location as { directory?: string } | undefined) ?? {}
+    return {
+      ...input,
+      id,
+      location: { ...seeded, directory: seeded.directory ?? directory },
+      time: { created: 0, updated: 0, ...time },
+    }
+  }
   const agents = new Map<string, FakeAgentSeed>((options.agents ?? []).map((agent) => [agent.id, { ...agent }]))
   const sessions = new Map<string, Record<string, unknown>>()
-  for (const session of options.sessions ?? []) sessions.set(session.id, { ...session })
+  for (const session of options.sessions ?? []) sessions.set(session.id, sessionInfo({ ...session }))
   const sessionCalls: SessionOperation[] = []
   const agentCalls: string[] = []
   const childSessions: Record<string, unknown>[] = []
   const prompts: FakePromptCall[] = []
   const switches: FakeSwitchCall[] = []
   const sessionFailures = new Map<SessionOperation, unknown>()
+  const moves: FakeMoveCall[] = []
+  let moveMode: MoveMode = "apply"
+  let moveError: unknown = new Error("move rejected")
+  const heldMoves: Array<() => void> = []
   let generatedChildren = 0
   const values = options.storageMap ?? new Map<string, Schema.Json>(options.storage ?? [])
   const hooks: { onReload: (() => void) | undefined; onCommandReload: (() => void) | undefined } = {
     onReload: options.onReload,
     onCommandReload: options.onCommandReload,
-  }
-  const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), "nested-fake-")))
-  const location: FakeLocation = {
-    directory,
-    project: { id: "project-fake", directory, canonical: directory },
   }
 
   const guarded = async <T>(target: FailureTarget, run: () => T | Promise<T>): Promise<T> => {
@@ -211,6 +239,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
 
   const guardedSession = async <T>(operation: SessionOperation, run: () => T | Promise<T>): Promise<T> => {
     sessionCalls.push(operation)
+    options.onSessionOperation?.(operation)
     if (sessionFailures.has(operation)) throw sessionFailures.get(operation)
     return run()
   }
@@ -432,18 +461,28 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       get: async (input: { sessionID: string }) =>
         guardedSession("get", () => {
           const existing = sessions.get(input.sessionID)
-          if (existing !== undefined) return existing
-          const created = { id: input.sessionID }
+          if (existing !== undefined) return sessionInfo(existing)
+          const created = sessionInfo({ id: input.sessionID })
           sessions.set(input.sessionID, created)
           return created
         }),
       create: async (input: Record<string, unknown>) =>
         guardedSession("create", () => {
           generatedChildren += 1
-          const created = { ...input, id: `child-${generatedChildren}` }
+          const created = sessionInfo({ ...input, id: `child-${generatedChildren}` })
           childSessions.push({ ...input })
           sessions.set(String(created.id), created)
           return created
+        }),
+      move: async (input: { sessionID: string; directory: string }) =>
+        guardedSession("move", async () => {
+          moves.push({ sessionID: input.sessionID, directory: input.directory })
+          if (moveMode === "reject") throw moveError
+          if (moveMode === "hold") await new Promise<void>((resolve) => heldMoves.push(resolve))
+          const session = sessions.get(input.sessionID)
+          if (session !== undefined) {
+            session.location = { ...(session.location as Record<string, unknown>), directory: input.directory }
+          }
         }),
       switchAgent: async (input: { sessionID: string; agent: string }) =>
         guardedSession("switchAgent", () => {
@@ -516,6 +555,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     get switches() {
       return switches
     },
+    get moves() {
+      return moves
+    },
     get commandDefinitions() {
       return [...commandEntries.values()]
     },
@@ -585,6 +627,18 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     failSession(operation: SessionOperation, error: unknown = new Error(operation)) {
       sessionFailures.set(operation, error)
+    },
+    setMoveMode(mode: MoveMode, error: unknown = new Error("move rejected")) {
+      moveMode = mode
+      moveError = error
+    },
+    releaseMove() {
+      for (const resolve of heldMoves.splice(0)) resolve()
+    },
+    markBusy(sessionID: string) {
+      const session = sessions.get(sessionID)
+      if (session === undefined) return
+      session.time = { ...(session.time as Record<string, unknown>), busy: Date.now() }
     },
     clearFailures() {
       failures.clear()
