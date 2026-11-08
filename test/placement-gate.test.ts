@@ -148,10 +148,13 @@ const fieldOf = (message: string, label: string): string => {
 const ask = { agent: "general", description: "task", prompt: "do it" }
 
 const rejectionOf = async (h: Harness): Promise<Error> => {
-  const failure = await h.execute({ ...ask, directory: h.destination }).catch((error: unknown) => error)
+  const failure = await failureOf(h)
   expect(failure).toBeInstanceOf(Error)
   return failure as Error
 }
+
+const failureOf = (h: Harness): Promise<unknown> =>
+  h.execute({ ...ask, directory: h.destination }).catch((error: unknown) => error)
 
 describe("placement gate: one batched skill assert before the move", () => {
   it("asserts the destination's indexed nested IDs with the call session, the child agent and a tool source", async () => {
@@ -262,5 +265,80 @@ describe("placement gate: a deny refuses the placement", () => {
     expect(isPermissionDenial(new Error("boom"))).toBe(false)
     expect(isPermissionDenial(undefined)).toBe(false)
     expect(isPermissionDenial({})).toBe(false)
+  })
+})
+
+describe("placement gate: ask and the non-denial rejections", () => {
+  const proceeds = async (outcome: FakePermissionOutcome): Promise<void> => {
+    const h = await harness({ permission: outcome })
+
+    const result = await h.execute({ ...ask, directory: h.destination })
+
+    expect(h.fake.permissionCalls).toHaveLength(1)
+    expect(h.fake.moves).toEqual([{ sessionID: "child-1", directory: h.destination }])
+    expect(h.fake.prompts.map((prompt) => prompt.text)).toEqual(["do it"])
+    expect(result).toBe(h.results[0])
+  }
+
+  it("proceeds on an allow", async () => {
+    await proceeds({ kind: "allow" })
+  })
+
+  it("proceeds on an ask the user approves", async () => {
+    await proceeds({ kind: "ask" })
+  })
+
+  it("rethrows a user decline unchanged instead of relabelling it as a deny", async () => {
+    const decline = permissionDecline()
+    const h = await harness({ permission: { kind: "reject", error: decline } })
+
+    const failure = await failureOf(h)
+
+    expect(failure).toBe(decline)
+    expect(String((failure as { message?: string }).message ?? "")).not.toMatch(/Subagent placement denied/)
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
+  })
+
+  it("does not dress the host's own decline outcome as a deny", async () => {
+    const h = await harness({ permission: { kind: "decline" } })
+
+    const failure = (await failureOf(h)) as { _tag?: string; message?: string }
+
+    expect(failure._tag).toBe("Permission.DeclinedError")
+    expect(String(failure.message ?? "")).not.toMatch(/Subagent placement denied/)
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
+  })
+
+  it("rethrows a user correction unchanged", async () => {
+    const correction = permissionCorrection("change the agent")
+    const h = await harness({ permission: { kind: "reject", error: correction } })
+
+    expect(await failureOf(h)).toBe(correction)
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
+  })
+
+  it("rethrows a missing-session rejection unchanged", async () => {
+    const missing = {
+      _tag: "Tool.Error",
+      message: "Session not found: parent",
+      error: { _tag: "Session.NotFoundError" },
+    }
+    const h = await harness({ permission: { kind: "reject", error: missing } })
+
+    expect(await failureOf(h)).toBe(missing)
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
+  })
+
+  it("rethrows an unrecognised rejection unchanged", async () => {
+    const boom = new Error("boom")
+    const h = await harness({ permission: { kind: "reject", error: boom } })
+
+    expect(await failureOf(h)).toBe(boom)
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
   })
 })
