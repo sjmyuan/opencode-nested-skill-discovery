@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { RegistrySnapshot } from "../src/contracts.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
@@ -148,5 +149,70 @@ describe("snapshot replay", () => {
     expect(Object.isFrozen(core.EMPTY_SNAPSHOT)).toBe(true)
     expect(Object.isFrozen(core.EMPTY_SNAPSHOT.skills)).toBe(true)
     expect(core.EMPTY_SNAPSHOT.skills).toHaveLength(0)
+  })
+})
+
+describe("placement gate wiring", () => {
+  it("feeds the live registry snapshot to the gate", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
+      let fake: ReturnType<typeof fakeContext>
+
+      const native = async (
+        raw: unknown,
+        context: {
+          readonly sessionID: string
+          readonly signal: AbortSignal
+          readonly progress: (update: Record<string, unknown>) => Promise<void>
+        },
+      ) => {
+        const input = raw as Record<string, unknown>
+        const child = await fake.ctx.session.create({ parentID: context.sessionID })
+        await context.progress({ sessionID: String(child.id), status: "running" })
+        await fake.ctx.session.prompt({ sessionID: String(child.id), text: String(input.prompt) })
+        return { output: "done" }
+      }
+
+      fake = fakeContext([], {
+        directory: fixture.realRoot,
+        tools: [
+          { id: "subagent", description: subagentTool.description, input: subagentTool.input, execute: native },
+        ],
+      })
+      const cleanup = await entry.default.setup(fake.ctx)
+      if (typeof cleanup !== "function") return
+
+      try {
+        const nested = fake
+          .editor.list()
+          .map((skill) => String(skill.id))
+          .filter((id) => id.startsWith("nested.") && id.includes("deploy"))
+        expect(nested).toHaveLength(1)
+
+        const tool = fake.tool("subagent") as {
+          execute: (input: unknown, context: Record<string, unknown>) => Promise<unknown>
+        }
+        await tool.execute(
+          { agent: "general", description: "task", prompt: "do it", directory: join(fixture.realRoot, "A") },
+          {
+            sessionID: "parent",
+            messageID: "message-1",
+            id: "call-1",
+            signal: new AbortController().signal,
+            progress: async () => undefined,
+          },
+        )
+
+        expect(fake.permissionCalls).toHaveLength(1)
+        expect(fake.permissionCalls[0]?.agent).toBe("general")
+        expect(fake.permissionCalls[0]?.resources).toContain(nested[0])
+      } finally {
+        await cleanup()
+      }
+    } finally {
+      await fixture.cleanup()
+    }
   })
 })
