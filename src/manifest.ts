@@ -11,6 +11,7 @@ import {
   type SkillEntry,
   type Snapshot,
 } from "./contracts.ts"
+import { locationTokenFor } from "./indexer.ts"
 
 export interface StorageScanOptions {
   readonly prefix: string
@@ -84,7 +85,7 @@ async function prunePrefix(
   prefix: string,
   active: ReadonlySet<string>,
   location: string,
-  skipKey: (key: string) => boolean = (key) => key === STORAGE_KEYS.version,
+  skipKey: (key: string) => boolean = () => false,
 ): Promise<number> {
   let removed = 0
   let after: string | undefined
@@ -111,17 +112,24 @@ async function prunePrefix(
   }
 }
 
+/**
+ * Writes this location's manifest and cache, then prunes its own stale tokens.
+ *
+ * `location` must already be canonical: the key segment is derived from it verbatim,
+ * so one directory reached through two paths would own two key sets.
+ */
 export async function persistRegistry(
   storage: StoragePort,
   { location, snapshots, now, version: reuse }: PersistInput,
 ): Promise<PersistResult> {
+  const locationToken = locationTokenFor(location)
   let version = reuse
 
   if (version === undefined) {
     let current: Schema.Json | undefined
 
     try {
-      current = await storage.get(STORAGE_KEYS.version)
+      current = await storage.get(STORAGE_KEYS.version(locationToken))
     } catch (error) {
       return { ok: false, version: 0, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
     }
@@ -130,7 +138,7 @@ export async function persistRegistry(
   }
 
   try {
-    await storage.set(STORAGE_KEYS.version, version)
+    await storage.set(STORAGE_KEYS.version(locationToken), version)
   } catch (error) {
     return { ok: false, version, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
   }
@@ -152,7 +160,7 @@ export async function persistRegistry(
     }
 
     try {
-      await storage.set(STORAGE_KEYS.manifest(snapshot.scopeToken), asJson(manifest))
+      await storage.set(STORAGE_KEYS.manifest(locationToken, snapshot.scopeToken), asJson(manifest))
     } catch (error) {
       return {
         ok: false,
@@ -163,7 +171,7 @@ export async function persistRegistry(
     }
 
     try {
-      await storage.set(STORAGE_KEYS.subproject(snapshot.scopeToken), asJson(cached))
+      await storage.set(STORAGE_KEYS.subproject(locationToken, snapshot.scopeToken), asJson(cached))
     } catch (error) {
       return {
         ok: false,
@@ -180,8 +188,9 @@ export async function persistRegistry(
   let pruned = 0
 
   try {
-    pruned += await prunePrefix(storage, STORAGE_KEYS.manifest(""), active, location)
-    pruned += await prunePrefix(storage, STORAGE_KEYS.subproject(""), active, location)
+    const skipVersion = (key: string): boolean => key === STORAGE_KEYS.version(locationToken)
+    pruned += await prunePrefix(storage, STORAGE_KEYS.manifest(locationToken, ""), active, location, skipVersion)
+    pruned += await prunePrefix(storage, STORAGE_KEYS.subproject(locationToken, ""), active, location)
   } catch (error) {
     diagnostics.push(`prune: ${reasonOf(error)}`)
     return { ok: true, version, pruned: 0, diagnostics }

@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs"
 import { symlink, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { nativeIdFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, nativeIdFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
 import { setup } from "../src/plugin.ts"
 import { createRegistry, selectSuppressed } from "../src/registry.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
@@ -42,8 +42,12 @@ describe("native dedupe after reload", () => {
       expect(outcome.skills).toBe(0)
       expect(outcome.diagnostics).toContain(`dedupe: ${await expectedIdOf(fixture)}`)
       expect(fake.editor.list()).toEqual([native])
-      expect(fake.storage.has(`nested/manifest/${scopeTokenFor(subproject)}`)).toBe(false)
-      expect(fake.storage.has(`nested/subproject/${scopeTokenFor(subproject)}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationTokenFor(fixture.realRoot)}/manifest/${scopeTokenFor(subproject)}`)).toBe(
+        false,
+      )
+      expect(
+        fake.storage.has(`nested/${locationTokenFor(fixture.realRoot)}/subproject/${scopeTokenFor(subproject)}`),
+      ).toBe(false)
     } finally {
       await fixture.cleanup()
     }

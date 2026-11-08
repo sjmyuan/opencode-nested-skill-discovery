@@ -325,6 +325,8 @@ describe("command publication from the refresh", () => {
       const secondOutcome = await second.activate()
 
       expect(skillSignature(withCommands)).toBe(skillSignature(without))
+      expect(withWrites.filter(isSkillKey).length).toBeGreaterThan(0)
+      expect(withWrites.filter(isCommandKey).length).toBeGreaterThan(0)
       expect(withWrites.filter(isSkillKey)).toEqual(withoutWrites.filter(isSkillKey))
       expect(secondOutcome.skills).toBe(firstOutcome.skills)
       expect(secondOutcome.subprojects).toBe(firstOutcome.subprojects)

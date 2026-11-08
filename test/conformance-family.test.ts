@@ -1,7 +1,7 @@
 import { realpath, rm } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
-import { scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
 import { createRegistry } from "../src/registry.ts"
 import { scanSkills } from "../src/scan.ts"
 import { deriveWatchTargets } from "../src/watch.ts"
@@ -87,18 +87,22 @@ describe("conformance: one checkout view per repo family", () => {
     const ws = await buildWorkspace()
     const token = await worktreeToken(ws)
     const directory = await realpath(path.join(ws.root, WORKTREE_DIR))
+    const locationToken = locationTokenFor(await realpath(ws.root))
     const fake = fakeContext([], {
       directory: ws.root,
       storage: [
-        [`nested/manifest/${token}`, { manifestVersion: 1, scopeToken: token, directory, entries: [] }],
-        [`nested/subproject/${token}`, { scopeToken: token, directory, skills: [] }],
+        [
+          `nested/${locationToken}/manifest/${token}`,
+          { manifestVersion: 1, scopeToken: token, directory, entries: [] },
+        ],
+        [`nested/${locationToken}/subproject/${token}`, { scopeToken: token, directory, skills: [] }],
       ],
     })
 
     await createRegistry(fake.ctx).activate()
 
-    expect(fake.storage.has(`nested/manifest/${token}`)).toBe(false)
-    expect(fake.storage.has(`nested/subproject/${token}`)).toBe(false)
+    expect(fake.storage.has(`nested/${locationToken}/manifest/${token}`)).toBe(false)
+    expect(fake.storage.has(`nested/${locationToken}/subproject/${token}`)).toBe(false)
   })
 
   it("C4: suppression needs exactly one reload", async () => {

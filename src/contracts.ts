@@ -199,9 +199,9 @@ export const DEFAULT_PLUGIN_CONFIG: PluginConfig = {
 }
 
 export const STORAGE_KEYS = {
-  version: "nested/manifest/version",
-  manifest: (scopeToken: string): string => `nested/manifest/${scopeToken}`,
-  subproject: (scopeToken: string): string => `nested/subproject/${scopeToken}`,
+  version: (locationToken: string): string => `nested/${locationToken}/manifest/version`,
+  manifest: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/manifest/${scopeToken}`,
+  subproject: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/subproject/${scopeToken}`,
   commandVersion: "nested/commands/version",
   commandManifest: (scopeToken: string): string => `nested/commands/manifest/${scopeToken}`,
   commandSnapshot: (scopeToken: string): string => `nested/commands/${scopeToken}`,

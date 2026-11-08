@@ -46,7 +46,7 @@ function recording(storage: StoragePort): { readonly port: StoragePort; readonly
 }
 
 const isSkillKey = (key: string): boolean =>
-  key.startsWith("nested/manifest/") || key.startsWith("nested/subproject/")
+  !key.startsWith("nested/commands/") && (key.includes("/manifest/") || key.includes("/subproject/"))
 
 describe("command persistence", () => {
   it("M1: writes the counter, the manifest and the cache under the command keys", async () => {
@@ -217,7 +217,7 @@ describe("command persistence", () => {
 
     expect(writes.length).toBeGreaterThan(0)
     expect(writes.filter(isSkillKey)).toEqual([])
-    expect(writes).not.toContain(STORAGE_KEYS.version)
+    expect(writes.some((key) => key.endsWith("/manifest/version"))).toBe(false)
   })
 
   it("M9: an empty snapshot set removes a previously written token", async () => {
