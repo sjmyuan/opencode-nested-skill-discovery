@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { createCommandExecutor, type CommandHost } from "../src/command-execute.ts"
 import { SUBAGENT_PREFIX } from "../src/command-model.ts"
 import { STORAGE_KEYS } from "../src/contracts.ts"
-import { scopeTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, scopeTokenFor } from "../src/indexer.ts"
 import type { CommandInvocation } from "../src/plugin.ts"
 import { createRegistry, type Registry } from "../src/registry.ts"
 import { ran, scriptedRunner, type FakeRunner } from "./support/command-fixtures.ts"
@@ -210,7 +210,8 @@ describe("conformance: agent, model and child routing", () => {
 
     try {
       await registry.activate()
-      const stored = fake.storage.get(STORAGE_KEYS.commandSnapshot(token)) as
+      const locationToken = locationTokenFor(await realpath(ws.root))
+      const stored = fake.storage.get(STORAGE_KEYS.commandSnapshot(locationToken, token)) as
         | { readonly commands?: ReadonlyArray<{ readonly name?: string; readonly model?: string }> }
         | undefined
       const models = Object.fromEntries(

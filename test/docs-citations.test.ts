@@ -148,7 +148,7 @@ const ANCHORS: ReadonlyArray<{
   { doc: "docs/architecture.md", target: "src/command-audit.ts", ranges: "5-10", marker: "EMPTY_NATIVE_COMMANDS" },
   { doc: "README.md", target: "src/command-execute.ts", ranges: "30-104", marker: "export function createCommandExecutor" },
   { doc: "docs/limits.md", target: "src/command-model.ts", ranges: "58-64", marker: "export function canonicalModelSelection" },
-  { doc: "docs/architecture.md", target: "src/contracts.ts", ranges: "205-207", marker: 'commandVersion: "nested/commands/version"' },
+  { doc: "docs/architecture.md", target: "src/contracts.ts", ranges: "205-207", marker: "commandVersion: (locationToken: string): string =>" },
   { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "export async function expandCommand" },
   { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "return { text: expanded, diagnostics, shellFailed: diagnostics.length > 0 }" },
 ]

@@ -5,10 +5,12 @@ import {
   type CommandEntry,
   type CommandSnapshot,
 } from "../src/contracts.ts"
+import { locationTokenFor } from "../src/indexer.ts"
 import { persistCommands, type StoragePort } from "../src/manifest.ts"
 import { fakeContext } from "./support/fake-context.ts"
 
 const LOCATION = "/loc/root"
+const TOKEN = locationTokenFor(LOCATION)
 
 const entry = (name: string, overrides: Partial<CommandEntry> = {}): CommandEntry => ({
   name,
@@ -27,7 +29,7 @@ const snapshotOf = (
 function seeded(seed?: Schema.Json) {
   return fakeContext(
     [],
-    seed === undefined ? {} : { storage: [[STORAGE_KEYS.commandVersion, seed]] },
+    seed === undefined ? {} : { storage: [[STORAGE_KEYS.commandVersion(TOKEN), seed]] },
   )
 }
 
@@ -46,7 +48,7 @@ function recording(storage: StoragePort): { readonly port: StoragePort; readonly
 }
 
 const isSkillKey = (key: string): boolean =>
-  !key.startsWith("nested/commands/") && (key.includes("/manifest/") || key.includes("/subproject/"))
+  !key.includes("/commands/") && (key.includes("/manifest/") || key.includes("/subproject/"))
 
 describe("command persistence", () => {
   it("M1: writes the counter, the manifest and the cache under the command keys", async () => {
@@ -58,16 +60,16 @@ describe("command persistence", () => {
       now: 1000,
     })
 
-    const manifest = fake.storage.get(STORAGE_KEYS.commandManifest("token-a")) as unknown as {
+    const manifest = fake.storage.get(STORAGE_KEYS.commandManifest(TOKEN, "token-a")) as unknown as {
       manifestVersion: number
       entries: readonly Record<string, unknown>[]
     }
-    const cached = fake.storage.get(STORAGE_KEYS.commandSnapshot("token-a")) as unknown as {
+    const cached = fake.storage.get(STORAGE_KEYS.commandSnapshot(TOKEN, "token-a")) as unknown as {
       commands: readonly CommandEntry[]
     }
 
     expect(result).toEqual({ ok: true, version: 1000, written: true, pruned: 0, diagnostics: [] })
-    expect(fake.storage.get(STORAGE_KEYS.commandVersion)).toBe(1000)
+    expect(fake.storage.get(STORAGE_KEYS.commandVersion(TOKEN))).toBe(1000)
     expect(manifest.manifestVersion).toBe(1000)
     expect("template" in (manifest.entries[0] ?? {})).toBe(false)
     expect(cached.commands[0]?.template).toBe("# token-a\n")
@@ -102,18 +104,18 @@ describe("command persistence", () => {
 
     expect(first.version).toBe(1000)
     expect(second).toMatchObject({ ok: true, version: 1001, written: true })
-    expect(fake.storage.get(STORAGE_KEYS.commandVersion)).toBe(1001)
+    expect(fake.storage.get(STORAGE_KEYS.commandVersion(TOKEN))).toBe(1001)
   })
 
   it("M4: prunes a stale in-location token from both prefixes and keeps the counter", async () => {
     const fake = seeded(1000)
-    fake.storage.set(STORAGE_KEYS.commandManifest("token-old"), {
+    fake.storage.set(STORAGE_KEYS.commandManifest(TOKEN, "token-old"), {
       manifestVersion: 1000,
       scopeToken: "token-old",
       directory: `${LOCATION}/Old`,
       entries: [],
     })
-    fake.storage.set(STORAGE_KEYS.commandSnapshot("token-old"), {
+    fake.storage.set(STORAGE_KEYS.commandSnapshot(TOKEN, "token-old"), {
       manifestVersion: 1000,
       scopeToken: "token-old",
       directory: `${LOCATION}/Old`,
@@ -127,9 +129,9 @@ describe("command persistence", () => {
     })
 
     expect(result.pruned).toBe(2)
-    expect(fake.storage.has(STORAGE_KEYS.commandManifest("token-old"))).toBe(false)
-    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot("token-old"))).toBe(false)
-    expect(fake.storage.get(STORAGE_KEYS.commandVersion)).toBe(1001)
+    expect(fake.storage.has(STORAGE_KEYS.commandManifest(TOKEN, "token-old"))).toBe(false)
+    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot(TOKEN, "token-old"))).toBe(false)
+    expect(fake.storage.get(STORAGE_KEYS.commandVersion(TOKEN))).toBe(1001)
   })
 
   it("M5: pruning the snapshot prefix never removes an active manifest", async () => {
@@ -140,7 +142,7 @@ describe("command persistence", () => {
       snapshots: [snapshotOf("token-a", `${LOCATION}/A`)],
       now: 1000,
     })
-    const before = fake.storage.get(STORAGE_KEYS.commandManifest("token-a"))
+    const before = fake.storage.get(STORAGE_KEYS.commandManifest(TOKEN, "token-a"))
     const result = await persistCommands(fake.ctx.storage, {
       location: LOCATION,
       snapshots: [snapshotOf("token-a", `${LOCATION}/A`)],
@@ -148,19 +150,19 @@ describe("command persistence", () => {
     })
 
     expect(result.pruned).toBe(0)
-    expect(fake.storage.get(STORAGE_KEYS.commandManifest("token-a"))).toEqual(before)
-    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot("token-a"))).toBe(true)
+    expect(fake.storage.get(STORAGE_KEYS.commandManifest(TOKEN, "token-a"))).toEqual(before)
+    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot(TOKEN, "token-a"))).toBe(true)
   })
 
   it("M6: keeps a record whose directory is outside the location", async () => {
     const fake = seeded()
-    fake.storage.set(STORAGE_KEYS.commandManifest("token-other"), {
+    fake.storage.set(STORAGE_KEYS.commandManifest(TOKEN, "token-other"), {
       manifestVersion: 1,
       scopeToken: "token-other",
       directory: "/elsewhere/project",
       entries: [],
     })
-    fake.storage.set(STORAGE_KEYS.commandSnapshot("token-other"), {
+    fake.storage.set(STORAGE_KEYS.commandSnapshot(TOKEN, "token-other"), {
       manifestVersion: 1,
       scopeToken: "token-other",
       directory: "/elsewhere/project",
@@ -174,8 +176,8 @@ describe("command persistence", () => {
     })
 
     expect(result.pruned).toBe(0)
-    expect(fake.storage.has(STORAGE_KEYS.commandManifest("token-other"))).toBe(true)
-    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot("token-other"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.commandManifest(TOKEN, "token-other"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot(TOKEN, "token-other"))).toBe(true)
   })
 
   it("M7: a failed write returns ok:false with one diagnostic and leaves the previous counter", async () => {
@@ -183,7 +185,7 @@ describe("command persistence", () => {
     const port: StoragePort = {
       ...fake.ctx.storage,
       set: async (key, value) => {
-        if (key === STORAGE_KEYS.commandVersion) throw new Error("storage down")
+        if (key === STORAGE_KEYS.commandVersion(TOKEN)) throw new Error("storage down")
         await fake.ctx.storage.set(key, value)
       },
     }
@@ -201,8 +203,8 @@ describe("command persistence", () => {
       pruned: 0,
       diagnostics: ["version: storage down"],
     })
-    expect(fake.storage.get(STORAGE_KEYS.commandVersion)).toBe(1000)
-    expect(fake.storage.has(STORAGE_KEYS.commandManifest("token-a"))).toBe(false)
+    expect(fake.storage.get(STORAGE_KEYS.commandVersion(TOKEN))).toBe(1000)
+    expect(fake.storage.has(STORAGE_KEYS.commandManifest(TOKEN, "token-a"))).toBe(false)
   })
 
   it("M8: no skill key is written", async () => {
@@ -236,8 +238,8 @@ describe("command persistence", () => {
 
     expect(first.version).toBe(1000)
     expect(second).toMatchObject({ ok: true, version: 1001, written: true, pruned: 2 })
-    expect(fake.storage.has(STORAGE_KEYS.commandManifest("token-a"))).toBe(false)
-    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot("token-a"))).toBe(false)
-    expect(fake.storage.get(STORAGE_KEYS.commandVersion)).toBe(1001)
+    expect(fake.storage.has(STORAGE_KEYS.commandManifest(TOKEN, "token-a"))).toBe(false)
+    expect(fake.storage.has(STORAGE_KEYS.commandSnapshot(TOKEN, "token-a"))).toBe(false)
+    expect(fake.storage.get(STORAGE_KEYS.commandVersion(TOKEN))).toBe(1001)
   })
 })

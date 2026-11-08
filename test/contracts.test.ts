@@ -140,6 +140,14 @@ describe("storage keys", () => {
   it("namespaces subproject keys", () => {
     expect(STORAGE_KEYS.subproject("ws-fce99486", "abc123")).toBe("nested/ws-fce99486/subproject/abc123")
   })
+
+  it("namespaces command keys", () => {
+    expect(STORAGE_KEYS.commandVersion("ws-fce99486")).toBe("nested/ws-fce99486/commands/version")
+    expect(STORAGE_KEYS.commandManifest("ws-fce99486", "abc123")).toBe(
+      "nested/ws-fce99486/commands/manifest/abc123",
+    )
+    expect(STORAGE_KEYS.commandSnapshot("ws-fce99486", "abc123")).toBe("nested/ws-fce99486/commands/abc123")
+  })
 })
 
 describe("manifest record", () => {

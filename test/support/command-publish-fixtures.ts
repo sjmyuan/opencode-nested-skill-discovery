@@ -38,7 +38,7 @@ export const skillSignature = (fake: FakeContext): string => JSON.stringify(fake
 export const isSkillKey = (key: string): boolean =>
   !key.includes("/commands/") && (key.includes("/manifest/") || key.includes("/subproject/"))
 
-export const isCommandKey = (key: string): boolean => key.startsWith("nested/commands/")
+export const isCommandKey = (key: string): boolean => key.includes("/commands/")
 
 /** Records every `storage.set` key in order, leaving the storage behaviour untouched. */
 export function recordStorage(fake: FakeContext): readonly string[] {

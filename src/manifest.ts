@@ -329,24 +329,28 @@ const tokensOf = (
   return tokens
 }
 
-const skipNestedCommandManifest = (key: string): boolean =>
-  key === STORAGE_KEYS.commandVersion || key.startsWith(STORAGE_KEYS.commandManifest(""))
+const skipNestedCommandManifest =
+  (locationToken: string) =>
+  (key: string): boolean =>
+    key === STORAGE_KEYS.commandVersion(locationToken) ||
+    key.startsWith(STORAGE_KEYS.commandManifest(locationToken, ""))
 
 /**
  * The command manifest store (ADR command R16; plan PD9).
  *
  * The command counter is separate from the skill counter and moves only when the desired
  * state differs from the stored one. Pruning is in-location and must skip the keys nested
- * under the cache prefix, because `nested/commands/manifest/` is pruned as `nested/commands/`.
+ * under the cache prefix, because `…/commands/manifest/` is pruned as `…/commands/`.
  */
 export async function persistCommands(
   storage: StoragePort,
   { location, snapshots, now }: PersistCommandsInput,
 ): Promise<PersistCommandsResult> {
+  const locationToken = locationTokenFor(location)
   let current: Schema.Json | undefined
 
   try {
-    current = await storage.get(STORAGE_KEYS.commandVersion)
+    current = await storage.get(STORAGE_KEYS.commandVersion(locationToken))
   } catch (error) {
     return { ok: false, version: 0, written: false, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
   }
@@ -360,7 +364,7 @@ export async function persistCommands(
     let value: Schema.Json | undefined
 
     try {
-      value = await storage.get(STORAGE_KEYS.commandSnapshot(snapshot.scopeToken))
+      value = await storage.get(STORAGE_KEYS.commandSnapshot(locationToken, snapshot.scopeToken))
     } catch (error) {
       return {
         ok: false,
@@ -377,16 +381,16 @@ export async function persistCommands(
   if (!changed) {
     try {
       const inManifests = tokensOf(
-        await scanPrefix(storage, STORAGE_KEYS.commandManifest("")),
-        STORAGE_KEYS.commandManifest(""),
+        await scanPrefix(storage, STORAGE_KEYS.commandManifest(locationToken, "")),
+        STORAGE_KEYS.commandManifest(locationToken, ""),
         location,
         () => false,
       )
       const inCaches = tokensOf(
-        await scanPrefix(storage, STORAGE_KEYS.commandSnapshot("")),
-        STORAGE_KEYS.commandSnapshot(""),
+        await scanPrefix(storage, STORAGE_KEYS.commandSnapshot(locationToken, "")),
+        STORAGE_KEYS.commandSnapshot(locationToken, ""),
         location,
-        skipNestedCommandManifest,
+        skipNestedCommandManifest(locationToken),
       )
       const existing = new Set([...inManifests, ...inCaches])
       changed = existing.size !== desired.size || [...existing].some((token) => !desired.has(token))
@@ -402,7 +406,7 @@ export async function persistCommands(
     version = Math.max(stored + 1, now ?? Date.now())
 
     try {
-      await storage.set(STORAGE_KEYS.commandVersion, version)
+      await storage.set(STORAGE_KEYS.commandVersion(locationToken), version)
     } catch (error) {
       return {
         ok: false,
@@ -428,7 +432,7 @@ export async function persistCommands(
       }
 
       try {
-        await storage.set(STORAGE_KEYS.commandManifest(snapshot.scopeToken), asJson(manifest))
+        await storage.set(STORAGE_KEYS.commandManifest(locationToken, snapshot.scopeToken), asJson(manifest))
       } catch (error) {
         return {
           ok: false,
@@ -440,7 +444,7 @@ export async function persistCommands(
       }
 
       try {
-        await storage.set(STORAGE_KEYS.commandSnapshot(snapshot.scopeToken), asJson(cached))
+        await storage.set(STORAGE_KEYS.commandSnapshot(locationToken, snapshot.scopeToken), asJson(cached))
       } catch (error) {
         return {
           ok: false,
@@ -459,8 +463,14 @@ export async function persistCommands(
   let pruned = 0
 
   try {
-    pruned += await prunePrefix(storage, STORAGE_KEYS.commandManifest(""), desired, location)
-    pruned += await prunePrefix(storage, STORAGE_KEYS.commandSnapshot(""), desired, location, skipNestedCommandManifest)
+    pruned += await prunePrefix(storage, STORAGE_KEYS.commandManifest(locationToken, ""), desired, location)
+    pruned += await prunePrefix(
+      storage,
+      STORAGE_KEYS.commandSnapshot(locationToken, ""),
+      desired,
+      location,
+      skipNestedCommandManifest(locationToken),
+    )
   } catch (error) {
     diagnostics.push(`prune: ${reasonOf(error)}`)
     return { ok: true, version, written, pruned: 0, diagnostics }
