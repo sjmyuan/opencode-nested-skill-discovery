@@ -53,11 +53,12 @@ const harness = async (options: HarnessOptions = {}): Promise<Harness> => {
   const results: unknown[] = []
   let fake: FakeContext
 
-  const native = async (input: Record<string, unknown>, context: ExecuteContext) => {
+  const native = async (raw: unknown, context: ExecuteContext) => {
+    const input = raw as Record<string, unknown>
     received.push(input)
     const child =
       input.sessionID === undefined
-        ? await fake.ctx.session.create({ parentID: context.sessionID, title: input.description })
+        ? await fake.ctx.session.create({ parentID: context.sessionID, title: String(input.description) })
         : await fake.ctx.session.get({ sessionID: String(input.sessionID) })
     events.push("progress")
     await context.progress({ sessionID: String(child.id), status: "running" })
