@@ -83,14 +83,8 @@ const directoryOf = (value: Schema.Json): string | undefined => {
   return typeof directory === "string" ? directory : undefined
 }
 
-async function prunePrefix(
-  storage: StoragePort,
-  prefix: string,
-  active: ReadonlySet<string>,
-  location: string,
-  skipKey: (key: string) => boolean = () => false,
-): Promise<number> {
-  let removed = 0
+/** Every page under `prefix`, one bounded scan at a time (host paging: `after` is exclusive). */
+async function* pages(storage: StoragePort, prefix: string): AsyncGenerator<readonly StoredEntry[]> {
   let after: string | undefined
 
   for (;;) {
@@ -99,8 +93,23 @@ async function prunePrefix(
       limit: PRUNE_PAGE_SIZE,
       ...(after === undefined ? {} : { after }),
     })
+    yield page.entries
+    if (page.next === undefined || page.next === after) return
+    after = page.next
+  }
+}
 
-    for (const entry of page.entries) {
+async function prunePrefix(
+  storage: StoragePort,
+  prefix: string,
+  active: ReadonlySet<string>,
+  location: string,
+  skipKey: (key: string) => boolean = () => false,
+): Promise<number> {
+  let removed = 0
+
+  for await (const entries of pages(storage, prefix)) {
+    for (const entry of entries) {
       if (skipKey(entry.key)) continue
       const token = entry.key.slice(prefix.length)
       if (token.length === 0 || active.has(token)) continue
@@ -109,10 +118,9 @@ async function prunePrefix(
       await storage.remove(entry.key)
       removed += 1
     }
-
-    if (page.next === undefined || page.next === after) return removed
-    after = page.next
   }
+
+  return removed
 }
 
 /**
@@ -300,19 +308,8 @@ interface StoredEntry {
 }
 
 async function removePrefix(storage: StoragePort, prefix: string): Promise<void> {
-  let after: string | undefined
-
-  for (;;) {
-    const page = await storage.scan({
-      prefix,
-      limit: PRUNE_PAGE_SIZE,
-      ...(after === undefined ? {} : { after }),
-    })
-
-    for (const entry of page.entries) await storage.remove(entry.key)
-
-    if (page.next === undefined || page.next === after) return
-    after = page.next
+  for await (const entries of pages(storage, prefix)) {
+    for (const entry of entries) await storage.remove(entry.key)
   }
 }
 
@@ -350,18 +347,10 @@ async function migrateLegacy(storage: StoragePort): Promise<readonly string[]> {
 
 async function scanPrefix(storage: StoragePort, prefix: string): Promise<readonly StoredEntry[]> {
   const entries: StoredEntry[] = []
-  let after: string | undefined
 
-  for (;;) {
-    const page = await storage.scan({
-      prefix,
-      limit: PRUNE_PAGE_SIZE,
-      ...(after === undefined ? {} : { after }),
-    })
-    entries.push(...page.entries)
-    if (page.next === undefined || page.next === after) return entries
-    after = page.next
-  }
+  for await (const page of pages(storage, prefix)) entries.push(...page)
+
+  return entries
 }
 
 const tokensOf = (

@@ -103,7 +103,7 @@ the code it loaded.
 Remove the symlink or the copied directory and, if you added one, the `opencode.json`
 entry. The plugin owns no state outside storage: its `nested/*` records stay behind until a
 later refresh **of that same location** prunes the tokens that are no longer active
-(`src/manifest.ts:79-108`, `178-184`). Records belonging to another location are never
+(`src/manifest.ts:79-117`, `186-192`). Records belonging to another location are never
 removed, and no record is read back as an advertisement input.
 
 ## Development

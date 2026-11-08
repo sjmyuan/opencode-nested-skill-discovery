@@ -52,7 +52,7 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 4 | Read, parse, and dedupe candidates, then drop every non-survivor checkout of a repo family | `src/registry.ts:553-569`, `src/indexer.ts:205-258`, `src/family.ts:276-304` |
 | 5 | Compose display names and assemble frozen entries | `src/registry.ts:571-573`, `src/registry.ts:111-130` |
 | 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:142-193` |
-| 7 | Persist manifest, cache, and version | `src/registry.ts:577-589`, `src/manifest.ts:124-205` |
+| 7 | Persist manifest, cache, and version | `src/registry.ts:577-589`, `src/manifest.ts:132-213` |
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:583-661` |
 | 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:671-719`, `src/registry.ts:239-255` |
 
@@ -208,12 +208,12 @@ Three skill keys (`src/contracts.ts:201-204`) and three command keys
 
 | Key | Contents |
 |---|---|
-| `nested/<locationToken>/manifest/version` | this location's counter: `max(current + 1, Date.now())` (`src/manifest.ts:129-141`) |
-| `nested/<locationToken>/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }` (`src/contracts.ts:24-29`, `src/manifest.ts:153-166`) |
-| `nested/<locationToken>/subproject/<scopeToken>` | the same grouping with each entry's `content` (`src/manifest.ts:66-73`, `159-177`) |
-| `nested/<locationToken>/commands/version` | the command store's own counter; it moves only when the command set changes (`src/manifest.ts:412-472`) |
-| `nested/<locationToken>/commands/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }`, no `template` (`src/manifest.ts:475-480`) |
-| `nested/<locationToken>/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:71-93`, `src/manifest.ts:481-486`) |
+| `nested/<locationToken>/manifest/version` | this location's counter: `max(current + 1, Date.now())` (`src/manifest.ts:137-149`) |
+| `nested/<locationToken>/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }` (`src/contracts.ts:24-29`, `src/manifest.ts:161-174`) |
+| `nested/<locationToken>/subproject/<scopeToken>` | the same grouping with each entry's `content` (`src/manifest.ts:66-73`, `167-185`) |
+| `nested/<locationToken>/commands/version` | the command store's own counter; it moves only when the command set changes (`src/manifest.ts:401-461`) |
+| `nested/<locationToken>/commands/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }`, no `template` (`src/manifest.ts:464-469`) |
+| `nested/<locationToken>/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:71-93`, `src/manifest.ts:470-475`) |
 
 The token is the slug of the canonical location's basename cut to 24 characters, plus the
 first 8 hex digits of its sha256: one key segment, no `/`. The plugin derives it verbatim
@@ -231,11 +231,11 @@ markdown body with the frontmatter block removed (`src/manifest.ts:66-73`,
 Every successful refresh writes this location's three skill keys and then prunes them.
 Pruning scans the location's two prefixes page by page, keeps the tokens written in this run
 plus its own version key, and removes a stale record only when its recorded `directory` is
-inside the location being scanned (`src/manifest.ts:86-116`, `193-200`). The command store
+inside the location being scanned (`src/manifest.ts:102-124`, `201-208`). The command store
 instead compares a canonical signature and writes nothing at all when the records already
-match, counter included (`src/manifest.ts:417-454`). It prunes this location's two command
+match, counter included (`src/manifest.ts:406-443`). It prunes this location's two command
 prefixes in-location, and its cache-prefix prune skips `…/commands/manifest/` because that
-prefix is nested inside the cache prefix (`src/manifest.ts:386-390`, `519-531`). Both stores
+prefix is nested inside the cache prefix (`src/manifest.ts:375-379`, `508-520`). Both stores
 are qualified, so two locations that bind the same directory write it under two tokens: each
 keeps its own record and its own counter, and neither prune can reach the other. A record
 whose token is still active is never touched, and nested locations still share one
@@ -246,7 +246,7 @@ The skill cache is written but not read back: no code path calls `storage.get` o
 `nested/<locationToken>/subproject/<token>`, so nothing is served from storage. ADR R15 and solution §4.7
 describe that cache as reloaded on bind; those documents are stale on that point — the only
 storage reads in the plugin are the two version counters, the format marker, and the command
-cache the change comparison inspects (`src/manifest.ts:404-433`). The manifest is likewise an
+cache the change comparison inspects (`src/manifest.ts:393-422`). The manifest is likewise an
 audit and diagnostics artifact — it is never a filter for what gets advertised
 (`src/registry.ts:482-734` reads only live scan output).
 
