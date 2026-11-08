@@ -133,12 +133,20 @@ describe("discovery rules", () => {
 
 describe("storage keys", () => {
   it("namespaces manifest keys", () => {
-    expect(STORAGE_KEYS.version).toBe("nested/manifest/version")
-    expect(STORAGE_KEYS.manifest("abc123")).toBe("nested/manifest/abc123")
+    expect(STORAGE_KEYS.version("ws-fce99486")).toBe("nested/ws-fce99486/manifest/version")
+    expect(STORAGE_KEYS.manifest("ws-fce99486", "abc123")).toBe("nested/ws-fce99486/manifest/abc123")
   })
 
   it("namespaces subproject keys", () => {
-    expect(STORAGE_KEYS.subproject("abc123")).toBe("nested/subproject/abc123")
+    expect(STORAGE_KEYS.subproject("ws-fce99486", "abc123")).toBe("nested/ws-fce99486/subproject/abc123")
+  })
+
+  it("namespaces command keys", () => {
+    expect(STORAGE_KEYS.commandVersion("ws-fce99486")).toBe("nested/ws-fce99486/commands/version")
+    expect(STORAGE_KEYS.commandManifest("ws-fce99486", "abc123")).toBe(
+      "nested/ws-fce99486/commands/manifest/abc123",
+    )
+    expect(STORAGE_KEYS.commandSnapshot("ws-fce99486", "abc123")).toBe("nested/ws-fce99486/commands/abc123")
   })
 })
 

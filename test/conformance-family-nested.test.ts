@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
-import { scopeTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext } from "./support/fake-context.ts"
 import { checkoutSkill, createFamilyWorkspace, nestedCheckoutSkill, type FamilyWorkspace } from "./support/family-fixtures.ts"
@@ -44,11 +44,15 @@ describe("conformance: nested subprojects share one checkout view", () => {
     const nestedReal = await realpath(absolute(ws, "wt/packages/app"))
     const wtToken = scopeTokenFor(wtReal)
     const nestedToken = scopeTokenFor(nestedReal)
+    const locationToken = locationTokenFor(await realpath(ws.root))
     const fake = fakeContext([], {
       directory: ws.root,
       storage: [
-        [`nested/manifest/${nestedToken}`, { manifestVersion: 1, scopeToken: nestedToken, directory: nestedReal, entries: [] }],
-        [`nested/subproject/${nestedToken}`, { scopeToken: nestedToken, directory: nestedReal, skills: [] }],
+        [
+          `nested/${locationToken}/manifest/${nestedToken}`,
+          { manifestVersion: 1, scopeToken: nestedToken, directory: nestedReal, entries: [] },
+        ],
+        [`nested/${locationToken}/subproject/${nestedToken}`, { scopeToken: nestedToken, directory: nestedReal, skills: [] }],
       ],
     })
     const registry = createRegistry(fake.ctx)
@@ -72,10 +76,10 @@ describe("conformance: nested subprojects share one checkout view", () => {
       expect([...names].sort()).toEqual(["main/deploy", "main/packages/app/tidy"])
       expect(new Set(names).size).toBe(names.length)
       expect(directories.filter((directory) => directory === wtReal || directory.startsWith(`${wtReal}/`))).toEqual([])
-      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(false)
-      expect(fake.storage.has(`nested/subproject/${wtToken}`)).toBe(false)
-      expect(fake.storage.has(`nested/manifest/${nestedToken}`)).toBe(false)
-      expect(fake.storage.has(`nested/subproject/${nestedToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/manifest/${wtToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/subproject/${wtToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/manifest/${nestedToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/subproject/${nestedToken}`)).toBe(false)
     } finally {
       await registry.dispose()
     }

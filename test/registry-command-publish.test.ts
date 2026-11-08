@@ -13,6 +13,7 @@ import {
   type PublishWorkspace,
 } from "./support/command-publish-fixtures.ts"
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
+import { locationTokenFor } from "../src/indexer.ts"
 import { checkoutSkill, createFamilyWorkspace, type FamilyWorkspace } from "./support/family-fixtures.ts"
 
 const scanControl = vi.hoisted(() => ({ failure: undefined as Error | undefined, scans: 0 }))
@@ -267,7 +268,7 @@ describe("command publication from the refresh", () => {
       await registry.activate()
       await ws.command("command", "release.md")
       const skillReloads = fake.reloadCalls
-      fake.failKey(STORAGE_KEYS.commandVersion, new Error("store down"))
+      fake.failKey(STORAGE_KEYS.commandVersion(locationTokenFor(await realpath(ws.base))), new Error("store down"))
 
       const outcome = await registry.refresh()
 
@@ -325,6 +326,8 @@ describe("command publication from the refresh", () => {
       const secondOutcome = await second.activate()
 
       expect(skillSignature(withCommands)).toBe(skillSignature(without))
+      expect(withWrites.filter(isSkillKey).length).toBeGreaterThan(0)
+      expect(withWrites.filter(isCommandKey).length).toBeGreaterThan(0)
       expect(withWrites.filter(isSkillKey)).toEqual(withoutWrites.filter(isSkillKey))
       expect(secondOutcome.skills).toBe(firstOutcome.skills)
       expect(secondOutcome.subprojects).toBe(firstOutcome.subprojects)

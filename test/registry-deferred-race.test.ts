@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { describe, expect, it, vi } from "vitest"
-import { skillTokenFor, scopeTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, skillTokenFor, scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext, nativeSkill } from "./support/fake-context.ts"
 import { createRegistryFixture } from "./support/registry-fixtures.ts"
@@ -105,6 +105,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
       fake = fakeContext([globalNative, twin], { directory: fixture.root })
       fake.hideNatives(1, ["global-demo"])
       registry = createRegistry(fake.ctx)
+      const locationToken = locationTokenFor(await fixture.realpathOf("."))
 
       const first = await registry.activate()
 
@@ -128,7 +129,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
       await flushMicrotasks()
 
       expect(idsOf(registry)).toContain(nestedId)
-      expect(await fake.storage.get("nested/manifest/version")).toBe(newer.version)
+      expect(await fake.storage.get(`nested/${locationToken}/manifest/version`)).toBe(newer.version)
       expect(fake.reloadCalls).toBe(reloadsBeforeRelease)
     } finally {
       vi.useRealTimers()
@@ -159,6 +160,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
         await fixture.realpathOf("wt/.opencode/skills/deploy/SKILL.md"),
       )
       const wtToken = scopeTokenFor(await fixture.realpathOf("wt"))
+      const locationToken = locationTokenFor(await fixture.realpathOf("."))
       const suppressedId = `nested.${wtToken}.${skillTokenFor("deploy", twin.path as string)}`
       const survivorId = await nestedIdFor(
         `${fixture.root}/main`,
@@ -180,7 +182,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
         fake.ctx as unknown as { storage: { set(key: string, value: unknown): Promise<void> } }
       ).storage
       const writeStorage = storagePort.set.bind(storagePort)
-      const blockedKey = `nested/manifest/${wtToken}`
+      const blockedKey = `nested/${locationToken}/manifest/${wtToken}`
       storagePort.set = async (key, value) => {
         if (!blocked && key === blockedKey) {
           blocked = true
@@ -211,9 +213,9 @@ describe("deferred dedupe against a concurrent refresh", () => {
           .map((entry) => String(entry.id))
           .filter((id) => id.startsWith("nested.")),
       ).toEqual([survivorId])
-      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(false)
-      expect(fake.storage.has(`nested/subproject/${wtToken}`)).toBe(false)
-      expect(await fake.storage.get("nested/manifest/version")).toBe(newer.version)
+      expect(fake.storage.has(`nested/${locationToken}/manifest/${wtToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/subproject/${wtToken}`)).toBe(false)
+      expect(await fake.storage.get(`nested/${locationToken}/manifest/version`)).toBe(newer.version)
     } finally {
       if (registry !== undefined) await registry.dispose()
       await globals.cleanup()
@@ -243,6 +245,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
         await fixture.realpathOf("wt/.opencode/skills/deploy/SKILL.md"),
       )
       const wtToken = scopeTokenFor(await fixture.realpathOf("wt"))
+      const locationToken = locationTokenFor(await fixture.realpathOf("."))
       const survivorId = await nestedIdFor(
         `${fixture.root}/main`,
         `${fixture.root}/main/.opencode/skills/deploy/SKILL.md`,
@@ -260,7 +263,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
       await vi.waitFor(() => expect(idsOf(active)).toHaveLength(2))
 
       expect(idsOf(registry)).toHaveLength(2)
-      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(true)
+      expect(fake.storage.has(`nested/${locationToken}/manifest/${wtToken}`)).toBe(true)
 
       fake.removeNative(twin.id)
       const commonDir = await fixture.mkdirp("main/.git/worktrees/linked")
@@ -269,9 +272,9 @@ describe("deferred dedupe against a concurrent refresh", () => {
 
       expect(newer.reloads).toBe(1)
       expect([...idsOf(active)].sort()).toEqual([survivorId])
-      expect(fake.storage.has(`nested/manifest/${wtToken}`)).toBe(false)
-      expect(fake.storage.has(`nested/subproject/${wtToken}`)).toBe(false)
-      expect(await fake.storage.get("nested/manifest/version")).toBe(newer.version)
+      expect(fake.storage.has(`nested/${locationToken}/manifest/${wtToken}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/subproject/${wtToken}`)).toBe(false)
+      expect(await fake.storage.get(`nested/${locationToken}/manifest/version`)).toBe(newer.version)
     } finally {
       vi.useRealTimers()
       if (registry !== undefined) await registry.dispose()
@@ -303,6 +306,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
         await fixture.realpathOf("wt/.opencode/skills/deploy/SKILL.md"),
       )
       const wtToken = scopeTokenFor(await fixture.realpathOf("wt"))
+      const locationToken = locationTokenFor(await fixture.realpathOf("."))
       const mainDeployId = await nestedIdFor(
         `${fixture.root}/main`,
         `${fixture.root}/main/.opencode/skills/deploy/SKILL.md`,
@@ -336,7 +340,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
       ).storage
       const readStorage = storagePort.get.bind(storagePort)
       const writeStorage = storagePort.set.bind(storagePort)
-      const blockedKey = `nested/manifest/${wtToken}`
+      const blockedKey = `nested/${locationToken}/manifest/${wtToken}`
       storagePort.set = async (key, value) => {
         if (!blocked && key === blockedKey) {
           blocked = true
@@ -347,7 +351,7 @@ describe("deferred dedupe against a concurrent refresh", () => {
       // DD1: capture at the refresh's first storage access — the version read that
       // persistRegistry performs before its first set.
       storagePort.get = async (key) => {
-        if (blocked && captured === undefined && key === "nested/manifest/version") {
+        if (blocked && captured === undefined && key === `nested/${locationToken}/manifest/version`) {
           captured = [...idsOf(active)]
         }
         return readStorage(key)

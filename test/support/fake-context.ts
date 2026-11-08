@@ -85,6 +85,8 @@ export interface FakeSwitchCall {
 export interface FakeContextOptions {
   readonly directory?: string
   readonly storage?: Iterable<readonly [string, Schema.Json]>
+  /** Share one store across instances, as the plugin-id-namespaced host storage does. */
+  readonly storageMap?: Map<string, Schema.Json>
   readonly onReload?: () => void
   readonly commands?: readonly CommandSeed[]
   readonly nativeCommands?: readonly CommandSeed[]
@@ -165,7 +167,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const switches: FakeSwitchCall[] = []
   const sessionFailures = new Map<SessionOperation, unknown>()
   let generatedChildren = 0
-  const values = new Map<string, Schema.Json>(options.storage ?? [])
+  const values = options.storageMap ?? new Map<string, Schema.Json>(options.storage ?? [])
   const hooks: { onReload: (() => void) | undefined; onCommandReload: (() => void) | undefined } = {
     onReload: options.onReload,
     onCommandReload: options.onCommandReload,

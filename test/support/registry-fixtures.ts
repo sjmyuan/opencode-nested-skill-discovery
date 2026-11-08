@@ -34,6 +34,7 @@ export interface RegistryFixture {
   write(rel: string, content?: string): Promise<string>
   mkdirp(rel: string): Promise<string>
   realpathOf(rel: string): Promise<string>
+  remove(rel: string): Promise<void>
   cleanup(): Promise<void>
 }
 
@@ -58,6 +59,9 @@ export async function createRegistryFixture(): Promise<RegistryFixture> {
     },
     async realpathOf(rel) {
       return realpath(absolute(rel))
+    },
+    async remove(rel) {
+      await rm(absolute(rel), { recursive: true, force: true })
     },
     async cleanup() {
       await rm(root, { recursive: true, force: true })

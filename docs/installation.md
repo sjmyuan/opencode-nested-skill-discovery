@@ -80,8 +80,9 @@ with `configured plugin path must be a directory`
 2. **The `@` menu** in the composer shows `@<id>`, for example
    `@nested.vscode-1a2b3c4d.deploy-9f8e7d6c`
    (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`).
-3. **Storage** gains `nested/manifest/version`, `nested/manifest/<scopeToken>`, and
-   `nested/subproject/<scopeToken>` — see
+3. **Storage** gains `nested/<locationToken>/manifest/version`,
+   `nested/<locationToken>/manifest/<scopeToken>`, and
+   `nested/<locationToken>/subproject/<scopeToken>` — see
    [architecture.md](architecture.md#storage-model) for the raw-key namespace.
 4. **Commands** appear as `subproject:command`: the composer's `ctrl+p commands` list and
    `GET /api/command` both show one entry per published nested command, and a name that
@@ -104,8 +105,10 @@ the code it loaded.
 Remove the symlink or the copied directory and, if you added one, the `opencode.json`
 entry. The plugin owns no state outside storage: its `nested/*` records stay behind until a
 later refresh **of that same location** prunes the tokens that are no longer active
-(`src/manifest.ts:79-108`, `178-184`). Records belonging to another location are never
-removed, and no record is read back as an advertisement input.
+(`src/manifest.ts:79-117`, `201-208`). Records belonging to another location are never
+removed, and no record is read back as an advertisement input. Records are keyed by the
+location's canonical path, so a workspace you move or rename keeps its old records until a
+refresh of the old location prunes them.
 
 ## Development
 

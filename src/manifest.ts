@@ -1,6 +1,9 @@
 import { isAbsolute, relative, sep } from "node:path"
 import type { Schema } from "effect"
 import {
+  LEGACY_STORAGE_PREFIXES,
+  STORAGE_FORMAT,
+  STORAGE_FORMAT_KEY,
   STORAGE_KEYS,
   compareText,
   type CommandEntry,
@@ -11,6 +14,7 @@ import {
   type SkillEntry,
   type Snapshot,
 } from "./contracts.ts"
+import { locationTokenFor } from "./indexer.ts"
 
 export interface StorageScanOptions {
   readonly prefix: string
@@ -79,14 +83,8 @@ const directoryOf = (value: Schema.Json): string | undefined => {
   return typeof directory === "string" ? directory : undefined
 }
 
-async function prunePrefix(
-  storage: StoragePort,
-  prefix: string,
-  active: ReadonlySet<string>,
-  location: string,
-  skipKey: (key: string) => boolean = (key) => key === STORAGE_KEYS.version,
-): Promise<number> {
-  let removed = 0
+/** Every page under `prefix`, one bounded scan at a time (host paging: `after` is exclusive). */
+async function* pages(storage: StoragePort, prefix: string): AsyncGenerator<readonly StoredEntry[]> {
   let after: string | undefined
 
   for (;;) {
@@ -95,8 +93,23 @@ async function prunePrefix(
       limit: PRUNE_PAGE_SIZE,
       ...(after === undefined ? {} : { after }),
     })
+    yield page.entries
+    if (page.next === undefined || page.next === after) return
+    after = page.next
+  }
+}
 
-    for (const entry of page.entries) {
+async function prunePrefix(
+  storage: StoragePort,
+  prefix: string,
+  active: ReadonlySet<string>,
+  location: string,
+  skipKey: (key: string) => boolean = () => false,
+): Promise<number> {
+  let removed = 0
+
+  for await (const entries of pages(storage, prefix)) {
+    for (const entry of entries) {
       if (skipKey(entry.key)) continue
       const token = entry.key.slice(prefix.length)
       if (token.length === 0 || active.has(token)) continue
@@ -105,23 +118,30 @@ async function prunePrefix(
       await storage.remove(entry.key)
       removed += 1
     }
-
-    if (page.next === undefined || page.next === after) return removed
-    after = page.next
   }
+
+  return removed
 }
 
+/**
+ * Writes this location's manifest and cache, prunes its own stale tokens, then removes the
+ * unqualified records of every pre-location build once.
+ *
+ * `location` must already be canonical: the key segment is derived from it verbatim,
+ * so one directory reached through two paths would own two key sets.
+ */
 export async function persistRegistry(
   storage: StoragePort,
   { location, snapshots, now, version: reuse }: PersistInput,
 ): Promise<PersistResult> {
+  const locationToken = locationTokenFor(location)
   let version = reuse
 
   if (version === undefined) {
     let current: Schema.Json | undefined
 
     try {
-      current = await storage.get(STORAGE_KEYS.version)
+      current = await storage.get(STORAGE_KEYS.version(locationToken))
     } catch (error) {
       return { ok: false, version: 0, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
     }
@@ -130,7 +150,7 @@ export async function persistRegistry(
   }
 
   try {
-    await storage.set(STORAGE_KEYS.version, version)
+    await storage.set(STORAGE_KEYS.version(locationToken), version)
   } catch (error) {
     return { ok: false, version, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
   }
@@ -152,7 +172,7 @@ export async function persistRegistry(
     }
 
     try {
-      await storage.set(STORAGE_KEYS.manifest(snapshot.scopeToken), asJson(manifest))
+      await storage.set(STORAGE_KEYS.manifest(locationToken, snapshot.scopeToken), asJson(manifest))
     } catch (error) {
       return {
         ok: false,
@@ -163,7 +183,7 @@ export async function persistRegistry(
     }
 
     try {
-      await storage.set(STORAGE_KEYS.subproject(snapshot.scopeToken), asJson(cached))
+      await storage.set(STORAGE_KEYS.subproject(locationToken, snapshot.scopeToken), asJson(cached))
     } catch (error) {
       return {
         ok: false,
@@ -180,12 +200,15 @@ export async function persistRegistry(
   let pruned = 0
 
   try {
-    pruned += await prunePrefix(storage, STORAGE_KEYS.manifest(""), active, location)
-    pruned += await prunePrefix(storage, STORAGE_KEYS.subproject(""), active, location)
+    const skipVersion = (key: string): boolean => key === STORAGE_KEYS.version(locationToken)
+    pruned += await prunePrefix(storage, STORAGE_KEYS.manifest(locationToken, ""), active, location, skipVersion)
+    pruned += await prunePrefix(storage, STORAGE_KEYS.subproject(locationToken, ""), active, location)
   } catch (error) {
     diagnostics.push(`prune: ${reasonOf(error)}`)
     return { ok: true, version, pruned: 0, diagnostics }
   }
+
+  diagnostics.push(...(await migrateLegacy(storage)))
 
   return { ok: true, version, pruned, diagnostics }
 }
@@ -285,20 +308,50 @@ interface StoredEntry {
   readonly value: Schema.Json
 }
 
+async function removePrefix(storage: StoragePort, prefix: string): Promise<void> {
+  for await (const entries of pages(storage, prefix)) {
+    for (const entry of entries) await storage.remove(entry.key)
+  }
+}
+
+/**
+ * Removes the unqualified records of every pre-location build, once (adr-exposure-02 S6).
+ *
+ * Unscoped by design: a legacy record has no owner to attribute it to. The marker is
+ * written only after a complete sweep, so an interrupted migration is retried.
+ */
+async function migrateLegacy(storage: StoragePort): Promise<readonly string[]> {
+  let marker: Schema.Json | undefined
+
+  try {
+    marker = await storage.get(STORAGE_FORMAT_KEY)
+  } catch (error) {
+    return [`migrate: ${reasonOf(error)}`]
+  }
+
+  if (marker === STORAGE_FORMAT) return []
+
+  try {
+    for (const prefix of LEGACY_STORAGE_PREFIXES) await removePrefix(storage, prefix)
+  } catch (error) {
+    return [`migrate: ${reasonOf(error)}`]
+  }
+
+  try {
+    await storage.set(STORAGE_FORMAT_KEY, STORAGE_FORMAT)
+  } catch (error) {
+    return [`migrate: ${reasonOf(error)}`]
+  }
+
+  return []
+}
+
 async function scanPrefix(storage: StoragePort, prefix: string): Promise<readonly StoredEntry[]> {
   const entries: StoredEntry[] = []
-  let after: string | undefined
 
-  for (;;) {
-    const page = await storage.scan({
-      prefix,
-      limit: PRUNE_PAGE_SIZE,
-      ...(after === undefined ? {} : { after }),
-    })
-    entries.push(...page.entries)
-    if (page.next === undefined || page.next === after) return entries
-    after = page.next
-  }
+  for await (const page of pages(storage, prefix)) entries.push(...page)
+
+  return entries
 }
 
 const tokensOf = (
@@ -320,24 +373,28 @@ const tokensOf = (
   return tokens
 }
 
-const skipNestedCommandManifest = (key: string): boolean =>
-  key === STORAGE_KEYS.commandVersion || key.startsWith(STORAGE_KEYS.commandManifest(""))
+const skipNestedCommandManifest =
+  (locationToken: string) =>
+  (key: string): boolean =>
+    key === STORAGE_KEYS.commandVersion(locationToken) ||
+    key.startsWith(STORAGE_KEYS.commandManifest(locationToken, ""))
 
 /**
  * The command manifest store (ADR command R16; plan PD9).
  *
  * The command counter is separate from the skill counter and moves only when the desired
  * state differs from the stored one. Pruning is in-location and must skip the keys nested
- * under the cache prefix, because `nested/commands/manifest/` is pruned as `nested/commands/`.
+ * under the cache prefix, because `…/commands/manifest/` is pruned as `…/commands/`.
  */
 export async function persistCommands(
   storage: StoragePort,
   { location, snapshots, now }: PersistCommandsInput,
 ): Promise<PersistCommandsResult> {
+  const locationToken = locationTokenFor(location)
   let current: Schema.Json | undefined
 
   try {
-    current = await storage.get(STORAGE_KEYS.commandVersion)
+    current = await storage.get(STORAGE_KEYS.commandVersion(locationToken))
   } catch (error) {
     return { ok: false, version: 0, written: false, pruned: 0, diagnostics: [`version: ${reasonOf(error)}`] }
   }
@@ -351,7 +408,7 @@ export async function persistCommands(
     let value: Schema.Json | undefined
 
     try {
-      value = await storage.get(STORAGE_KEYS.commandSnapshot(snapshot.scopeToken))
+      value = await storage.get(STORAGE_KEYS.commandSnapshot(locationToken, snapshot.scopeToken))
     } catch (error) {
       return {
         ok: false,
@@ -368,16 +425,16 @@ export async function persistCommands(
   if (!changed) {
     try {
       const inManifests = tokensOf(
-        await scanPrefix(storage, STORAGE_KEYS.commandManifest("")),
-        STORAGE_KEYS.commandManifest(""),
+        await scanPrefix(storage, STORAGE_KEYS.commandManifest(locationToken, "")),
+        STORAGE_KEYS.commandManifest(locationToken, ""),
         location,
         () => false,
       )
       const inCaches = tokensOf(
-        await scanPrefix(storage, STORAGE_KEYS.commandSnapshot("")),
-        STORAGE_KEYS.commandSnapshot(""),
+        await scanPrefix(storage, STORAGE_KEYS.commandSnapshot(locationToken, "")),
+        STORAGE_KEYS.commandSnapshot(locationToken, ""),
         location,
-        skipNestedCommandManifest,
+        skipNestedCommandManifest(locationToken),
       )
       const existing = new Set([...inManifests, ...inCaches])
       changed = existing.size !== desired.size || [...existing].some((token) => !desired.has(token))
@@ -393,7 +450,7 @@ export async function persistCommands(
     version = Math.max(stored + 1, now ?? Date.now())
 
     try {
-      await storage.set(STORAGE_KEYS.commandVersion, version)
+      await storage.set(STORAGE_KEYS.commandVersion(locationToken), version)
     } catch (error) {
       return {
         ok: false,
@@ -419,7 +476,7 @@ export async function persistCommands(
       }
 
       try {
-        await storage.set(STORAGE_KEYS.commandManifest(snapshot.scopeToken), asJson(manifest))
+        await storage.set(STORAGE_KEYS.commandManifest(locationToken, snapshot.scopeToken), asJson(manifest))
       } catch (error) {
         return {
           ok: false,
@@ -431,7 +488,7 @@ export async function persistCommands(
       }
 
       try {
-        await storage.set(STORAGE_KEYS.commandSnapshot(snapshot.scopeToken), asJson(cached))
+        await storage.set(STORAGE_KEYS.commandSnapshot(locationToken, snapshot.scopeToken), asJson(cached))
       } catch (error) {
         return {
           ok: false,
@@ -450,8 +507,14 @@ export async function persistCommands(
   let pruned = 0
 
   try {
-    pruned += await prunePrefix(storage, STORAGE_KEYS.commandManifest(""), desired, location)
-    pruned += await prunePrefix(storage, STORAGE_KEYS.commandSnapshot(""), desired, location, skipNestedCommandManifest)
+    pruned += await prunePrefix(storage, STORAGE_KEYS.commandManifest(locationToken, ""), desired, location)
+    pruned += await prunePrefix(
+      storage,
+      STORAGE_KEYS.commandSnapshot(locationToken, ""),
+      desired,
+      location,
+      skipNestedCommandManifest(locationToken),
+    )
   } catch (error) {
     diagnostics.push(`prune: ${reasonOf(error)}`)
     return { ok: true, version, written, pruned: 0, diagnostics }

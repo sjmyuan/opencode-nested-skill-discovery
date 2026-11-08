@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { STORAGE_KEYS } from "../src/contracts.ts"
-import { scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
 import { setup } from "../src/plugin.ts"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext } from "./support/fake-context.ts"
@@ -113,7 +113,7 @@ describe("failure retention", () => {
       expect(outcome.ok).toBe(false)
       expect(outcome.diagnostics).toEqual(["version: get down"])
       expect(registry.snapshot).toBe(stable)
-      expect(fake.storage.get(STORAGE_KEYS.version)).toBe(first.version)
+      expect(fake.storage.get(STORAGE_KEYS.version(locationTokenFor(fixture.realRoot)))).toBe(first.version)
     } finally {
       await fixture.cleanup()
     }
@@ -128,14 +128,16 @@ describe("failure retention", () => {
       const first = await registry.activate()
       const stable = registry.snapshot
       const token = scopeTokenFor(await fixture.realpathOf("A"))
-      fake.failKey(STORAGE_KEYS.manifest(token), new Error("manifest down"))
+      fake.failKey(STORAGE_KEYS.manifest(locationTokenFor(fixture.realRoot), token), new Error("manifest down"))
 
       const outcome = await registry.refresh()
 
       expect(outcome.ok).toBe(false)
       expect(outcome.diagnostics).toEqual([`manifest: ${token}: manifest down`])
       expect(registry.snapshot).toBe(stable)
-      expect(fake.storage.get(STORAGE_KEYS.version)).toBeGreaterThan(first.version ?? 0)
+      expect(fake.storage.get(STORAGE_KEYS.version(locationTokenFor(fixture.realRoot)))).toBeGreaterThan(
+        first.version ?? 0,
+      )
     } finally {
       await fixture.cleanup()
     }
@@ -150,14 +152,14 @@ describe("failure retention", () => {
       await registry.activate()
       const stable = registry.snapshot
       const token = scopeTokenFor(await fixture.realpathOf("A"))
-      fake.failKey(STORAGE_KEYS.subproject(token), new Error("cache down"))
+      fake.failKey(STORAGE_KEYS.subproject(locationTokenFor(fixture.realRoot), token), new Error("cache down"))
 
       const outcome = await registry.refresh()
 
       expect(outcome.ok).toBe(false)
       expect(outcome.diagnostics).toEqual([`snapshot: ${token}: cache down`])
       expect(registry.snapshot).toBe(stable)
-      expect(fake.storage.get(STORAGE_KEYS.manifest(token))).toBeDefined()
+      expect(fake.storage.get(STORAGE_KEYS.manifest(locationTokenFor(fixture.realRoot), token))).toBeDefined()
     } finally {
       await fixture.cleanup()
     }

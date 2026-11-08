@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { scopeTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry } from "../src/registry.ts"
 import { writeCommand } from "./support/command-family-fixtures.ts"
 import { fakeContext } from "./support/fake-context.ts"
@@ -83,6 +83,7 @@ describe("the refresh runs the command family filter once per pass", () => {
     const ws = await buildWorkspace()
     const wtReal = await realpath(absolute(ws, "wt"))
     const mainReal = await realpath(absolute(ws, "main"))
+    const locationToken = locationTokenFor(await realpath(ws.root))
     const fake = fakeContext([], { directory: ws.root })
     const registry = createRegistry(fake.ctx)
 
@@ -94,8 +95,8 @@ describe("the refresh runs the command family filter once per pass", () => {
       expect(entries.map((entry) => String(entry.name))).toEqual(["main/deploy"])
       expect(entries.every((entry) => String(entry.path).startsWith(`${mainReal}/`))).toBe(true)
       expect(JSON.stringify([...fake.storage.values()])).not.toContain(wtReal)
-      expect(fake.storage.has(`nested/manifest/${scopeTokenFor(wtReal)}`)).toBe(false)
-      expect(fake.storage.has(`nested/subproject/${scopeTokenFor(wtReal)}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/manifest/${scopeTokenFor(wtReal)}`)).toBe(false)
+      expect(fake.storage.has(`nested/${locationToken}/subproject/${scopeTokenFor(wtReal)}`)).toBe(false)
     } finally {
       await registry.dispose()
     }

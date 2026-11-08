@@ -27,7 +27,7 @@ The command template is the file body after the closing fence, so it is bounded 
 128 KiB per-file limit (`src/contracts.ts:142-148`) rather than by a budget of its own. The
 snapshot reader re-checks the limit on the bytes it read, because a file can grow between the
 scan and the read (`src/command-snapshot.ts:88-91`), and the template is then stored in
-`nested/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
+`nested/<locationToken>/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
 
 A `model:` selection is canonicalised before storage: both frontmatter forms —
 `providerID/model#variant?` and the `{providerID, model, variant?}` mapping — become the one
@@ -194,7 +194,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
 from `disable-model-invocation: true` (`src/frontmatter.ts:153-155`,
-`src/indexer.ts:183`). Such an entry stays registered, stays user-invocable, and loads
+`src/indexer.ts:193`). Such an entry stays registered, stays user-invocable, and loads
 normally when you mention it — the guidance block simply does not offer it to the model
 (`packages/core/src/skill/instructions.ts:74-81`).
 

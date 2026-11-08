@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ID_PREFIX } from "../src/contracts.ts"
-import { scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
+import { locationTokenFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
 import { setup } from "../src/plugin.ts"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext } from "./support/fake-context.ts"
@@ -67,7 +67,9 @@ describe("registry controller wiring", () => {
       expect(entry?.name).toBe("A/deploy")
       expect(entry?.canonicalPath).toBe(skillPath)
       expect(fake.editor.get(expectedId)?.content).toContain("# Deploy")
-      expect(fake.storage.get(`nested/manifest/${scopeTokenFor(subproject)}`)).toBeDefined()
+      expect(
+        fake.storage.get(`nested/${locationTokenFor(root)}/manifest/${scopeTokenFor(subproject)}`),
+      ).toBeDefined()
     } finally {
       await fixture.cleanup()
     }
@@ -107,7 +109,9 @@ describe("registry controller wiring", () => {
       expect(registry.snapshot).not.toBe(firstSnapshot)
       expect(first.version).toBeTypeOf("number")
       expect(second.version).toBeGreaterThan(first.version ?? 0)
-      expect(fake.storage.get("nested/manifest/version")).toBe(second.version)
+      expect(fake.storage.get(`nested/${locationTokenFor(await fixture.realpathOf("."))}/manifest/version`)).toBe(
+        second.version,
+      )
       expect(fake.reloadCalls).toBe(2)
     } finally {
       await fixture.cleanup()

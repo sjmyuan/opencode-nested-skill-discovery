@@ -49,6 +49,16 @@ export function scopeTokenFor(subprojectRealPath: string): string {
   return `${slug(path.basename(subprojectRealPath), MAX_SCOPE_SLUG_LENGTH)}-${hash8(subprojectRealPath)}`
 }
 
+/**
+ * Key segment for one plugin instance's storage (ADR discovery R15, exposure D2 S1).
+ *
+ * The input must already be canonical: one directory reached through two paths would
+ * otherwise own two key sets.
+ */
+export function locationTokenFor(locationRealPath: string): string {
+  return `${slug(path.basename(locationRealPath), MAX_SCOPE_SLUG_LENGTH)}-${hash8(locationRealPath)}`
+}
+
 export function skillTokenFor(nativeId: string, skillRealPath: string): string {
   return `${slug(nativeId, MAX_SKILL_SLUG_LENGTH)}-${hash8(skillRealPath)}`
 }

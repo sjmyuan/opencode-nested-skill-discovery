@@ -36,9 +36,9 @@ export async function publishWorkspace(relative = ""): Promise<PublishWorkspace>
 export const skillSignature = (fake: FakeContext): string => JSON.stringify(fake.editor.list())
 
 export const isSkillKey = (key: string): boolean =>
-  key.startsWith("nested/manifest/") || key.startsWith("nested/subproject/")
+  !key.includes("/commands/") && (key.includes("/manifest/") || key.includes("/subproject/"))
 
-export const isCommandKey = (key: string): boolean => key.startsWith("nested/commands/")
+export const isCommandKey = (key: string): boolean => key.includes("/commands/")
 
 /** Records every `storage.set` key in order, leaving the storage behaviour untouched. */
 export function recordStorage(fake: FakeContext): readonly string[] {

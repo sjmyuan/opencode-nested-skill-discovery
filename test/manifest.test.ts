@@ -1,11 +1,13 @@
 import type { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { STORAGE_KEYS, type ManifestRecord, type Snapshot } from "../src/contracts.ts"
+import { locationTokenFor } from "../src/indexer.ts"
 import { persistRegistry, type StoragePort } from "../src/manifest.ts"
 import { fakeContext } from "./support/fake-context.ts"
 import { registryEntry } from "./support/registry-fixtures.ts"
 
 const LOCATION = "/loc/root"
+const TOKEN = locationTokenFor(LOCATION)
 
 const snapshotOf = (
   scopeToken: string,
@@ -14,7 +16,7 @@ const snapshotOf = (
 ): Snapshot => ({ scopeToken, directory, skills })
 
 function seeded(seed?: Schema.Json) {
-  return fakeContext([], seed === undefined ? {} : { storage: [[STORAGE_KEYS.version, seed]] })
+  return fakeContext([], seed === undefined ? {} : { storage: [[STORAGE_KEYS.version(TOKEN), seed]] })
 }
 
 function forcedLimit(storage: StoragePort, limit: number): StoragePort {
@@ -35,12 +37,12 @@ describe("registry persistence", () => {
       now: 1000,
     })
 
-    const manifest = fake.storage.get(STORAGE_KEYS.manifest("token-a")) as unknown as ManifestRecord
-    const cached = fake.storage.get(STORAGE_KEYS.subproject("token-a")) as unknown as Snapshot
+    const manifest = fake.storage.get(STORAGE_KEYS.manifest(TOKEN, "token-a")) as unknown as ManifestRecord
+    const cached = fake.storage.get(STORAGE_KEYS.subproject(TOKEN, "token-a")) as unknown as Snapshot
     const manifestEntry = manifest.entries[0]
 
     expect(result).toEqual({ ok: true, version: 1000, pruned: 0, diagnostics: [] })
-    expect(fake.storage.get(STORAGE_KEYS.version)).toBe(1000)
+    expect(fake.storage.get(STORAGE_KEYS.version(TOKEN))).toBe(1000)
     expect(manifest).toMatchObject({
       manifestVersion: 1000,
       scopeToken: "token-a",
@@ -66,7 +68,7 @@ describe("registry persistence", () => {
     })
 
     const versions = ["token-a", "token-b"].map(
-      (token) => (fake.storage.get(STORAGE_KEYS.manifest(token)) as unknown as ManifestRecord).manifestVersion,
+      (token) => (fake.storage.get(STORAGE_KEYS.manifest(TOKEN, token)) as unknown as ManifestRecord).manifestVersion,
     )
 
     expect(result.version).toBe(1000)
@@ -82,7 +84,7 @@ describe("registry persistence", () => {
 
     expect(first.version).toBe(1000)
     expect(second.version).toBe(1001)
-    expect(fake.storage.get(STORAGE_KEYS.version)).toBe(1001)
+    expect(fake.storage.get(STORAGE_KEYS.version(TOKEN))).toBe(1001)
   })
 
   it.each([
@@ -105,14 +107,14 @@ describe("registry persistence", () => {
     })
 
     expect(result.version).toBe(expected)
-    expect(fake.storage.get(STORAGE_KEYS.version)).toBe(expected)
+    expect(fake.storage.get(STORAGE_KEYS.version(TOKEN))).toBe(expected)
   })
 
   it("prunes inactive records of this location from both prefixes", async () => {
     const fake = seeded()
     const stale = { directory: `${LOCATION}/Old`, manifestVersion: 1, scopeToken: "token-old" }
-    fake.storage.set(STORAGE_KEYS.manifest("token-old"), stale)
-    fake.storage.set(STORAGE_KEYS.subproject("token-old"), { directory: `${LOCATION}/Old` })
+    fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-old"), stale)
+    fake.storage.set(STORAGE_KEYS.subproject(TOKEN, "token-old"), { directory: `${LOCATION}/Old` })
 
     const result = await persistRegistry(fake.ctx.storage, {
       location: LOCATION,
@@ -121,21 +123,21 @@ describe("registry persistence", () => {
     })
 
     expect(result.pruned).toBe(2)
-    expect(fake.storage.has(STORAGE_KEYS.manifest("token-old"))).toBe(false)
-    expect(fake.storage.has(STORAGE_KEYS.subproject("token-old"))).toBe(false)
-    expect(fake.storage.has(STORAGE_KEYS.manifest("token-a"))).toBe(true)
-    expect(fake.storage.has(STORAGE_KEYS.subproject("token-a"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-old"))).toBe(false)
+    expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-old"))).toBe(false)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-a"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-a"))).toBe(true)
   })
 
   it("keeps records that belong to another location", async () => {
     const fake = seeded()
-    fake.storage.set(STORAGE_KEYS.manifest("token-other"), {
+    fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-other"), {
       manifestVersion: 1,
       scopeToken: "token-other",
       directory: "/elsewhere/project",
       entries: [],
     })
-    fake.storage.set(STORAGE_KEYS.subproject("token-other"), { directory: "/elsewhere/project" })
+    fake.storage.set(STORAGE_KEYS.subproject(TOKEN, "token-other"), { directory: "/elsewhere/project" })
 
     const result = await persistRegistry(fake.ctx.storage, {
       location: LOCATION,
@@ -144,13 +146,13 @@ describe("registry persistence", () => {
     })
 
     expect(result.pruned).toBe(0)
-    expect(fake.storage.has(STORAGE_KEYS.manifest("token-other"))).toBe(true)
-    expect(fake.storage.has(STORAGE_KEYS.subproject("token-other"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-other"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-other"))).toBe(true)
   })
 
   it("keeps the version counter and unparsable values", async () => {
     const fake = seeded(42)
-    fake.storage.set(STORAGE_KEYS.manifest("token-broken"), "not a record")
+    fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-broken"), "not a record")
 
     const result = await persistRegistry(fake.ctx.storage, {
       location: LOCATION,
@@ -159,15 +161,15 @@ describe("registry persistence", () => {
     })
 
     expect(result).toEqual({ ok: true, version: 1000, pruned: 0, diagnostics: [] })
-    expect(fake.storage.get(STORAGE_KEYS.version)).toBe(1000)
-    expect(fake.storage.get(STORAGE_KEYS.manifest("token-broken"))).toBe("not a record")
+    expect(fake.storage.get(STORAGE_KEYS.version(TOKEN))).toBe(1000)
+    expect(fake.storage.get(STORAGE_KEYS.manifest(TOKEN, "token-broken"))).toBe("not a record")
   })
 
   it("prunes every stale page when the store returns bounded pages", async () => {
     const fake = seeded()
     for (let index = 0; index < 5; index += 1) {
-      fake.storage.set(STORAGE_KEYS.manifest(`token-${index}`), { directory: `${LOCATION}/${index}` })
-      fake.storage.set(STORAGE_KEYS.subproject(`token-${index}`), { directory: `${LOCATION}/${index}` })
+      fake.storage.set(STORAGE_KEYS.manifest(TOKEN, `token-${index}`), { directory: `${LOCATION}/${index}` })
+      fake.storage.set(STORAGE_KEYS.subproject(TOKEN, `token-${index}`), { directory: `${LOCATION}/${index}` })
     }
 
     const result = await persistRegistry(forcedLimit(fake.ctx.storage, 2), {
@@ -178,15 +180,15 @@ describe("registry persistence", () => {
 
     expect(result.pruned).toBe(10)
     for (let index = 0; index < 5; index += 1) {
-      expect(fake.storage.has(STORAGE_KEYS.manifest(`token-${index}`))).toBe(false)
-      expect(fake.storage.has(STORAGE_KEYS.subproject(`token-${index}`))).toBe(false)
+      expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, `token-${index}`))).toBe(false)
+      expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, `token-${index}`))).toBe(false)
     }
-    expect(fake.storage.has(STORAGE_KEYS.manifest("token-live"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-live"))).toBe(true)
   })
 
   it("keeps the records and reports a prune failure", async () => {
     const fake = seeded()
-    fake.storage.set(STORAGE_KEYS.manifest("token-old"), { directory: `${LOCATION}/Old` })
+    fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-old"), { directory: `${LOCATION}/Old` })
     fake.fail("storage.scan", new Error("scan down"))
 
     const result = await persistRegistry(fake.ctx.storage, {
@@ -197,8 +199,8 @@ describe("registry persistence", () => {
 
     expect(result.pruned).toBe(0)
     expect(result.diagnostics).toEqual(["prune: scan down"])
-    expect(fake.storage.has(STORAGE_KEYS.manifest("token-a"))).toBe(true)
-    expect(fake.storage.has(STORAGE_KEYS.subproject("token-a"))).toBe(true)
-    expect(fake.storage.has(STORAGE_KEYS.manifest("token-old"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-a"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-a"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-old"))).toBe(true)
   })
 })

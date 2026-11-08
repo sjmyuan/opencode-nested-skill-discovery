@@ -199,10 +199,23 @@ export const DEFAULT_PLUGIN_CONFIG: PluginConfig = {
 }
 
 export const STORAGE_KEYS = {
-  version: "nested/manifest/version",
-  manifest: (scopeToken: string): string => `nested/manifest/${scopeToken}`,
-  subproject: (scopeToken: string): string => `nested/subproject/${scopeToken}`,
-  commandVersion: "nested/commands/version",
-  commandManifest: (scopeToken: string): string => `nested/commands/manifest/${scopeToken}`,
-  commandSnapshot: (scopeToken: string): string => `nested/commands/${scopeToken}`,
+  version: (locationToken: string): string => `nested/${locationToken}/manifest/version`,
+  manifest: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/manifest/${scopeToken}`,
+  subproject: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/subproject/${scopeToken}`,
+  commandVersion: (locationToken: string): string => `nested/${locationToken}/commands/version`,
+  commandManifest: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/commands/manifest/${scopeToken}`,
+  commandSnapshot: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/commands/${scopeToken}`,
 }
+
+/** Every unqualified prefix a pre-location build could have written (adr-exposure-02 S6). */
+export const LEGACY_STORAGE_PREFIXES = [
+  "nested/manifest/",
+  "nested/subproject/",
+  "nested/commands/version",
+  "nested/commands/manifest/",
+  "nested/commands/",
+] as const
+
+export const STORAGE_FORMAT_KEY = "nested/format"
+
+export const STORAGE_FORMAT = 2
