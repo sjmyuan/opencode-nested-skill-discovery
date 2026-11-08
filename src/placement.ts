@@ -1,6 +1,8 @@
 import type { Plugin } from "@opencode/plugin"
 import { Schema } from "effect"
 import type { JsonSchema } from "effect"
+import { realpath, stat } from "node:fs/promises"
+import path from "node:path"
 
 /**
  * Placement narrows the child to its destination, so the host stays cut down to the
@@ -61,6 +63,58 @@ export function extendInput(input: unknown): JsonSchema.JsonSchema {
 
 export function extendDescription(description: string): string {
   return description.endsWith(GUIDANCE) ? description : `${description}\n\n${GUIDANCE}`
+}
+
+export type PlacementResolution =
+  | { readonly kind: "absent" }
+  | { readonly kind: "refused"; readonly directory: string; readonly reason: string }
+  | { readonly kind: "resolved"; readonly directory: string }
+
+export interface ResolvePlacementInput {
+  readonly directory: unknown
+  readonly caller: string
+  readonly home: string
+}
+
+/** Same expansion the host applies to a file read: `~`, `~/x`, then resolve against the caller. */
+export async function resolvePlacement(input: ResolvePlacementInput): Promise<PlacementResolution> {
+  const value = input.directory
+  if (value === undefined || value === "") return { kind: "absent" }
+  if (typeof value !== "string") {
+    return { kind: "refused", directory: String(value), reason: "directory must be a string" }
+  }
+  if (value.trim() === "") return { kind: "refused", directory: value, reason: "directory is blank" }
+  const expanded =
+    value === "~" ? input.home : value.startsWith("~/") ? path.join(input.home, value.slice(2)) : value
+  const directory = path.resolve(input.caller, expanded)
+
+  try {
+    const info = await stat(directory)
+    if (!info.isDirectory()) return { kind: "refused", directory, reason: "not a directory" }
+  } catch {
+    return { kind: "refused", directory, reason: "directory does not exist" }
+  }
+  return { kind: "resolved", directory: await realpath(directory) }
+}
+
+export interface BoundaryInput {
+  readonly destination: string
+  readonly location: string
+  readonly project: string
+  readonly worktrees: readonly string[]
+}
+
+const isInside = (parent: string, child: string): boolean => {
+  const relative = path.relative(parent, child)
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+/** The set `FileAccess.resolve` treats as internal: the location, the project, its worktrees. */
+export function withinBoundary(input: BoundaryInput): boolean {
+  if (isInside(input.location, input.destination)) return true
+  const root = path.parse(input.project).root
+  if (input.project !== root && isInside(input.project, input.destination)) return true
+  return input.worktrees.some((worktree) => isInside(worktree, input.destination))
 }
 
 export function createPlacement(host: PlacementHost): Placement {
