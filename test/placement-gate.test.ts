@@ -63,6 +63,7 @@ interface HarnessOptions {
   readonly permission?: FakePermissionOutcome
   readonly snapshot?: RegistrySnapshot
   readonly sessions?: readonly FakeSessionSeed[]
+  readonly promptFirst?: boolean
 }
 
 interface Harness {
@@ -95,8 +96,14 @@ const harness = async (options: HarnessOptions = {}): Promise<Harness> => {
       input.sessionID === undefined
         ? await fake.ctx.session.create({ parentID: context.sessionID, title: String(input.description) })
         : await fake.ctx.session.get({ sessionID: String(input.sessionID) })
+    if (options.promptFirst === true) fake.markBusy(String(child.id))
     events.push("progress")
     await context.progress({ sessionID: String(child.id), status: "running" })
+    if (options.promptFirst === true) {
+      const result = { output: "done", sessionID: String(child.id) }
+      results.push(result)
+      return result
+    }
     await fake.ctx.session.prompt({ sessionID: String(child.id), text: String(input.prompt) })
     events.push("prompt")
     const result = { output: "done", sessionID: String(child.id) }
@@ -421,5 +428,44 @@ describe("placement gate: the cases it cannot decide", () => {
 
     expect(h.fake.permissionCalls).toHaveLength(0)
     expect(h.fake.childSessions).toHaveLength(0)
+  })
+})
+
+describe("placement gate: the gate is on the path even without a move", () => {
+  const seated = async (options: HarnessOptions = {}): Promise<{ h: Harness; id: string }> => {
+    const h = await harness(options)
+    const child = await h.fake.ctx.session.create({ parentID: "parent" })
+    await h.fake.ctx.session.move({ sessionID: String(child.id), directory: h.destination })
+    return { h, id: String(child.id) }
+  }
+
+  it("asserts for a child that already sits at the destination and issues no second move", async () => {
+    const { h, id } = await seated()
+
+    await h.execute({ ...ask, sessionID: id, directory: h.destination })
+
+    expect(h.fake.permissionCalls).toHaveLength(1)
+    expect(h.fake.moves).toHaveLength(1)
+    expect(h.fake.prompts.map((prompt) => prompt.sessionID)).toEqual([id])
+  })
+
+  it("refuses a no-op placement on a deny", async () => {
+    const { h, id } = await seated({ permission: { kind: "deny" } })
+
+    const failure = await h.execute({ ...ask, sessionID: id, directory: h.destination }).catch((error: unknown) => error)
+
+    expect((failure as Error).message).toMatch(/^Subagent placement denied/)
+    expect(h.fake.moves).toHaveLength(1)
+    expect(h.fake.prompts).toHaveLength(0)
+  })
+
+  it("reports the already-started failure ahead of a deny when the child is busy", async () => {
+    const h = await harness({ promptFirst: true, permission: { kind: "deny" } })
+
+    const failure = await rejectionOf(h)
+
+    expect(failure.message).toMatch(/^Subagent placement failed/)
+    expect(failure.message).not.toMatch(/placement denied/)
+    expect(h.fake.permissionCalls).toHaveLength(0)
   })
 })
