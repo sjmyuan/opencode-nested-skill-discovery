@@ -149,6 +149,27 @@ Symlinks are inspected, never followed blindly (`src/scan.ts:196-214`, `269-300`
 | `file-symlink-broken: <rel>` | a skill file link whose target does not resolve |
 | `unreadable-directory` / `unreadable-file` / `location-unreadable` | the path could not be read; the walk continues |
 
+## Placement
+
+`subagent({..., directory})` moves the child session to the destination before this call's
+task is admitted (`src/placement.ts`). The destination is absolute, relative to the calling
+session, or a `~/` path; the resolved value is `realpath`-normalised and must be a directory.
+
+- the boundary is the caller's location, the project directory (never `/` itself), or one of
+  the project's worktrees — the same internal set `FileAccess.resolve` uses
+- a placed child **narrows**: it sees the destination's instructions, skills, same-id agents,
+  config and permissions, and loses sibling subprojects; a destination's own skills appear as
+  native entries, not as `nested.…` unions
+- re-placement with `sessionID` keeps the conversation history, but relative paths in that
+  history are not rewritten
+- a failure — refused path, move rejection, unconfirmed move, or a child that had already
+  started — leaves the child created and unprompted; nothing is rolled back, and the error
+  names the child session, the requested directory and the observed location
+- one 120 s budget covers the `session.move` call **and** its confirmation, because the host
+  probes and boots the destination graph inside the call
+- this is a context boundary, not a security boundary: the model can still read outside it,
+  and the native `opencode_session_move` tool is unchanged
+
 ## Budgets and truncation
 
 The scan counts directories, accepted files, and bytes against the budgets in
