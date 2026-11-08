@@ -344,7 +344,7 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 |---|---|
 | `index.ts` | default export for the host loader |
 | `src/plugin.ts` | plugin ID, `setup`, placement activation, cleanup, empty snapshot |
-| `src/placement.ts` | native `subagent` extension: `directory` schema and guidance, destination resolution and project/worktree boundary, move-and-confirm inside the native awaited progress |
+| `src/placement.ts` | native `subagent` extension: `directory` schema and guidance, destination resolution and project/worktree boundary, move-and-confirm inside the native awaited progress, and the pre-placement `skill` gate |
 | `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers, command root kinds, candidate and command-snapshot shapes |
 | `src/scan.ts` | bounded DFS, markers, skill roots, command roots and candidates, budgets, refusals |
 | `src/frontmatter.ts` | minimal frontmatter reader: `name`, `description`, `metadata.opencode/autoinvoke`, `disable-model-invocation`; the additive command reader (`description`, `agent`, `model`, `subagent`/`subtask`, verbatim template) |

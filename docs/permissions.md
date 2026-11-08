@@ -192,6 +192,11 @@ Session-level rules, where a host or another plugin sets them, merge after the a
 therefore win over both (`packages/core/src/permission.ts:158-164`,
 `packages/core/src/session/context.ts:130-131`).
 
+A `skill` rule is also consulted once at placement: `subagent` with a `directory` asserts the
+destination's indexed `nested.*` IDs through this same action before the child moves, and a deny
+refuses the placement. What that gate does not cover is listed in
+[docs/limits.md](limits.md#placement).
+
 ## Commands
 
 A published nested command has no permission action of its own: the invocation host is two
