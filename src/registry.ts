@@ -283,6 +283,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let registering: Promise<void> | undefined
   let commandRegistration: Registration | undefined
   let registeringCommand: Promise<void> | undefined
+  let seeded = false
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
   let followUp = false
@@ -298,11 +299,13 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const nameLedger = createNameLedger()
   const shadowTracker = createShadowTracker()
 
-  /** One listing read before our transform exists, so an earlier registrant keeps its names (R4). */
+  /** The pre-registration listing read; it repeats only when the whole registration was retried (R4). */
   const seedPrePhaseNames = async (): Promise<void> => {
+    if (seeded) return
     try {
       const listed = await ctx.command.list()
       shadowTracker.seed(listed.data.map((entry) => String(entry.name)))
+      seeded = true
     } catch (error) {
       commandDiagnostics.push(`command-seed: ${reasonOf(error)}`)
     }

@@ -392,4 +392,43 @@ describe("the post-reload command audit", () => {
       await registry.dispose()
     }
   })
+
+  it("A13: a retried registration does not read the pre-phase listing again", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+    fake.failSync("command.transform", new Error("transform down"))
+
+    try {
+      const first = await registry.activate()
+      fake.clearFailures()
+      await registry.refresh()
+
+      expect(first.diagnostics).toContain("command-register: transform down")
+      expect(fake.commandListCalls).toBe(3)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A13b: a seed read that failed is retried with the registration", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [{ name: "A:deploy", description: "deploy command" }])
+    fake.fail("command.list", new Error("list down"))
+    fake.failSync("command.transform", new Error("transform down"))
+
+    try {
+      const first = await registry.activate()
+      fake.clearFailures()
+      const second = await registry.refresh()
+
+      expect(first.diagnostics).toContain("command-seed: list down")
+      expect(second.diagnostics).toContain("native-shadow: A:deploy")
+      expect(second.commands).toBe(0)
+      expect(fake.commandListCalls).toBe(5)
+    } finally {
+      await registry.dispose()
+    }
+  })
 })
