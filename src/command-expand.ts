@@ -2,7 +2,7 @@
  * Native-parity command template expansion (ADR R9/R10/R11, plan PD3–PD6).
  *
  * The five native steps are immovable: tokenise → `$N` (the highest index absorbs the
- * tail) → `$ARGUMENTS` (raw) → append when no placeholder → trim → shell. The text
+ * tail) → `$ARGUMENTS` (raw) → append → shell, with one trim before the shell. The text
  * half is pure; the shell pass reaches the process world only through the injected
  * `ProcessRunner`, never throws, and never adds a final trim.
  */
@@ -73,7 +73,7 @@ export async function expandCommand(input: ExpandInput): Promise<ExpandResult> {
     !input.template.includes("$ARGUMENTS") &&
     input.args.trim().length > 0
   const text = append
-    ? `${withArguments}\n\n${input.args}`.trim()
+    ? `${withArguments.trimEnd()}\n\n${input.args}`.trim()
     : withArguments.trim()
 
   return interpolate(text, input.shell)

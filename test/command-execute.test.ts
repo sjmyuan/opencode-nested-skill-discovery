@@ -71,6 +71,15 @@ describe("command executor: expansion and prompt forwarding", () => {
     expect(fake.childSessions).toEqual([])
   })
 
+  it("E3b: a body ending in a newline appends one blank line", async () => {
+    const fake = fixture()
+    const entry = commandEntry({ name: "A:deploy", template: "Deploy\n" })
+
+    await executorFor(fake)(commandTarget(entry), invocation({ text: "prod" }))
+
+    expect(fake.prompts.map((prompt) => prompt.text)).toEqual(["Deploy\n\nprod"])
+  })
+
   it("E4: two invocations expand independently and never mutate the entry", async () => {
     const fake = fixture()
     const entry = commandEntry({ name: "A:deploy", template: "Deploy $1" })
