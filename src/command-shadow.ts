@@ -119,6 +119,12 @@ export function auditCommandList({ listed, published }: AuditInput): AuditOutcom
 export interface ShadowTracker {
   readonly drop: <T extends Nameable>(planned: readonly T[], native: NativeCommandNameIndex) => DropOutcome<T>
   readonly audit: (input: AuditInput) => AuditOutcome
+  /**
+   * Names the host already held before our transform registered. They are treated as an
+   * owner for the tracker's lifetime, because after registration the listing cannot tell
+   * them from ours.
+   */
+  readonly seed: (names: readonly string[]) => void
 }
 
 /**
@@ -131,6 +137,10 @@ export interface ShadowTracker {
 export function createShadowTracker(): ShadowTracker {
   const denied = new Set<string>()
   const reported = new Set<string>()
+  const seeded = new Set<string>()
+
+  const owned = (native: NativeCommandNameIndex): NativeCommandNameIndex =>
+    seeded.size === 0 ? native : { ...native, names: [...native.names, ...seeded] }
 
   const fresh = (diagnostics: readonly string[]): readonly string[] =>
     diagnostics.filter((line) => {
@@ -142,17 +152,20 @@ export function createShadowTracker(): ShadowTracker {
 
   return {
     drop<T extends Nameable>(planned: readonly T[], native: NativeCommandNameIndex): DropOutcome<T> {
-      const outcome = dropNativeCollisions(planned, { native, denied: [...denied] })
+      const outcome = dropNativeCollisions(planned, { native: owned(native), denied: [...denied] })
       return { ...outcome, diagnostics: fresh(outcome.diagnostics) }
     },
     audit(input: AuditInput): AuditOutcome {
       const outcome = auditCommandList(input)
       for (const name of outcome.shadowed) denied.add(name)
-      const held = new Set([...input.listed.map((entry) => entry.name), ...input.native.names])
+      const held = new Set([...input.listed.map((entry) => entry.name), ...owned(input.native).names])
       for (const name of [...denied]) {
         if (!held.has(name)) denied.delete(name)
       }
       return { ...outcome, diagnostics: fresh(outcome.diagnostics) }
+    },
+    seed(names: readonly string[]): void {
+      for (const name of names) seeded.add(name)
     },
   }
 }

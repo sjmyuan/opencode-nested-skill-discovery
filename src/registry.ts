@@ -298,6 +298,16 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const nameLedger = createNameLedger()
   const shadowTracker = createShadowTracker()
 
+  /** One listing read before our transform exists, so an earlier registrant keeps its names (R4). */
+  const seedPrePhaseNames = async (): Promise<void> => {
+    try {
+      const listed = await ctx.command.list()
+      shadowTracker.seed(listed.data.map((entry) => String(entry.name)))
+    } catch (error) {
+      commandDiagnostics.push(`command-seed: ${reasonOf(error)}`)
+    }
+  }
+
   const now = options.now ?? (() => Date.now())
   const executeCommand = options.executeCommand
   const withWriteGate = createWriteGate()
@@ -375,8 +385,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     try {
       if (registeringCommand === undefined) {
-        registeringCommand = ctx.command
-          .transform((editor) => {
+        registeringCommand = (async () => {
+          await seedPrePhaseNames()
+          return ctx.command.transform((editor) => {
             try {
               commandDiagnostics.push(
                 ...applyCommands(editor, currentCommands, {
@@ -388,6 +399,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
               commandDiagnostics.push(`command-replay: ${reasonOf(error)}`)
             }
           })
+        })()
           .then((created) => {
             commandRegistration = created
           })

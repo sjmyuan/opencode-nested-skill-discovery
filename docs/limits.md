@@ -2,7 +2,7 @@
 
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The values
 are constants in `src/contracts.ts`: the refresh passes no `limits` override, so
-`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:526-528`), and this release reads no
+`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:538-540`), and this release reads no
 plugin configuration, so none of them can be changed from `opencode.json`.
 
 ## Summary
@@ -158,7 +158,7 @@ the walk (`src/scan.ts:425-465`, `540-561`). A single file over 128 KiB is skipp
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:530`).
+(`src/registry.ts:542`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:44`, `89-98`, ending
 in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:85-90`),
@@ -188,7 +188,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:665-671`, `src/registry.ts:239-255`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:38`, `src/registry.ts:787-843`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:677-683`, `src/registry.ts:239-255`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:38`, `src/registry.ts:799-855`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | no plugin options are read in this release; caps and budgets are constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -211,5 +211,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:769-785`, `src/registry.ts:743-747`, `src/registry.ts:721-748`). Details in
+(`src/registry.ts:781-797`, `src/registry.ts:755-759`, `src/registry.ts:733-760`). Details in
 [architecture.md](architecture.md#refresh-model).
