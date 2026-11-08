@@ -3,7 +3,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import type { CommandEntry, CommandSnapshot, ManifestRecord, Snapshot } from "../src/contracts.ts"
+import {
+  LEGACY_STORAGE_PREFIXES,
+  STORAGE_FORMAT,
+  STORAGE_FORMAT_KEY,
+  type CommandEntry,
+  type CommandSnapshot,
+  type ManifestRecord,
+  type Snapshot,
+} from "../src/contracts.ts"
 import { locationTokenFor, scopeTokenFor } from "../src/indexer.ts"
 import { persistCommands } from "../src/manifest.ts"
 import { createRegistry } from "../src/registry.ts"
@@ -173,6 +181,25 @@ describe("locations sharing one storage", () => {
 
       expect(context.shared.has(staleKey)).toBe(false)
       expect(context.shared.get(foreignKey)).toEqual(foreign)
+    } finally {
+      await context.cleanup()
+    }
+  })
+
+  it("leaves no unqualified record behind after a refresh", async () => {
+    const context = await twoLocations()
+
+    try {
+      context.shared.set("nested/manifest/version", 5)
+      context.shared.set(`nested/manifest/${context.scope}`, { directory: context.realA })
+      context.shared.set("nested/commands/version", 1000)
+
+      await context.outer.refresh()
+
+      for (const prefix of LEGACY_STORAGE_PREFIXES) {
+        expect([...context.shared.keys()].filter((key) => key.startsWith(prefix))).toEqual([])
+      }
+      expect(context.shared.get(STORAGE_FORMAT_KEY)).toBe(STORAGE_FORMAT)
     } finally {
       await context.cleanup()
     }

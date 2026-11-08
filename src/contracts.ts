@@ -206,3 +206,16 @@ export const STORAGE_KEYS = {
   commandManifest: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/commands/manifest/${scopeToken}`,
   commandSnapshot: (locationToken: string, scopeToken: string): string => `nested/${locationToken}/commands/${scopeToken}`,
 }
+
+/** Every unqualified prefix a pre-location build could have written (adr-exposure-02 S6). */
+export const LEGACY_STORAGE_PREFIXES = [
+  "nested/manifest/",
+  "nested/subproject/",
+  "nested/commands/version",
+  "nested/commands/manifest/",
+  "nested/commands/",
+] as const
+
+export const STORAGE_FORMAT_KEY = "nested/format"
+
+export const STORAGE_FORMAT = 2

@@ -1,6 +1,9 @@
 import { isAbsolute, relative, sep } from "node:path"
 import type { Schema } from "effect"
 import {
+  LEGACY_STORAGE_PREFIXES,
+  STORAGE_FORMAT,
+  STORAGE_FORMAT_KEY,
   STORAGE_KEYS,
   compareText,
   type CommandEntry,
@@ -196,6 +199,8 @@ export async function persistRegistry(
     return { ok: true, version, pruned: 0, diagnostics }
   }
 
+  diagnostics.push(...(await migrateLegacy(storage)))
+
   return { ok: true, version, pruned, diagnostics }
 }
 
@@ -292,6 +297,55 @@ const storedSignature = (value: Schema.Json | undefined): string | undefined => 
 interface StoredEntry {
   readonly key: string
   readonly value: Schema.Json
+}
+
+async function removePrefix(storage: StoragePort, prefix: string): Promise<void> {
+  let after: string | undefined
+
+  for (;;) {
+    const page = await storage.scan({
+      prefix,
+      limit: PRUNE_PAGE_SIZE,
+      ...(after === undefined ? {} : { after }),
+    })
+
+    for (const entry of page.entries) await storage.remove(entry.key)
+
+    if (page.next === undefined || page.next === after) return
+    after = page.next
+  }
+}
+
+/**
+ * Removes the unqualified records of every pre-location build, once (adr-exposure-02 S6).
+ *
+ * Unscoped by design: a legacy record has no owner to attribute it to. The marker is
+ * written only after a complete sweep, so an interrupted migration is retried.
+ */
+async function migrateLegacy(storage: StoragePort): Promise<readonly string[]> {
+  let marker: Schema.Json | undefined
+
+  try {
+    marker = await storage.get(STORAGE_FORMAT_KEY)
+  } catch (error) {
+    return [`migrate: ${reasonOf(error)}`]
+  }
+
+  if (marker === STORAGE_FORMAT) return []
+
+  try {
+    for (const prefix of LEGACY_STORAGE_PREFIXES) await removePrefix(storage, prefix)
+  } catch (error) {
+    return [`migrate: ${reasonOf(error)}`]
+  }
+
+  try {
+    await storage.set(STORAGE_FORMAT_KEY, STORAGE_FORMAT)
+  } catch (error) {
+    return [`migrate: ${reasonOf(error)}`]
+  }
+
+  return []
 }
 
 async function scanPrefix(storage: StoragePort, prefix: string): Promise<readonly StoredEntry[]> {
