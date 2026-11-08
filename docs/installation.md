@@ -8,14 +8,16 @@ directory.
 
 | Requirement | Detail |
 |---|---|
-| opencode `v2.0.26` | the runtime this release targets; `@opencode/plugin` is a `2.0.26` devDependency for compile-time types and the `Plugin.define` value (`index.ts:1`, `package.json:12-16`) |
+| opencode `v2.2.5` | the runtime this release targets; `@opencode/plugin` is a `2.2.5` devDependency for compile-time types and the `Plugin.define` value (`index.ts:1`, `package.json:16-21`) |
 | Bun | opencode hosts plugins on Bun; the module resolution quoted below is Bun's (`packages/util/src/runtime/import.bun.ts:7-10`) |
 | Node `v25.2.1` + npm | only for the development toolchain (`tsc`, `vitest`); not needed to run the plugin |
 
 Only the repository directory is required at runtime. Its `node_modules` is **not** loaded:
 opencode supplies `@opencode/plugin` and `effect` itself
 (`packages/plugin/src/runtime-modules.ts:7`), and a plugin that resolves its own copy is
-refused with an explicit error (`packages/plugin/src/runtime.ts:28-35`).
+refused with an explicit error (`packages/plugin/src/runtime.ts:28-35`). The package declares
+`effect` only so its type import resolves to the version the host supplies; it must never
+resolve its own copy at runtime.
 
 ## Where opencode looks
 

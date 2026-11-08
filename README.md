@@ -29,7 +29,7 @@ and scores its claims C1–C8, reporting an unmet timing claim as `unproven` rat
 
 ## Requirements
 
-- opencode `v2.0.26` (`@opencode/plugin` is pinned to `2.0.26`, `package.json:14`)
+- opencode `v2.2.5` (`@opencode/plugin` is pinned to `2.2.5`, `package.json:17`)
 - Bun, provided by opencode — the plugin runs inside the host
 - Node `v25.2.1` + npm for the development toolchain only
 
