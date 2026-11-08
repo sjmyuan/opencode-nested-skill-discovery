@@ -226,12 +226,20 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
     childSessionID: string,
     destination: string,
     beforeBusy: unknown,
+    beforeKnown: boolean,
     signal: AbortSignal | undefined,
   ): Promise<void> => {
     const first = await readSession(childSessionID)
     const observed = directoryOf(first) ?? "unknown"
     if (busyOf(first) !== beforeBusy) {
-      throw placeFailure(childSessionID, destination, observed, "The child had already started before it could be placed.")
+      throw placeFailure(
+        childSessionID,
+        destination,
+        observed,
+        beforeKnown
+          ? "The child had already started before it could be placed."
+          : "The child's state could not be read before the task started, so placement could not confirm it was still unprompted.",
+      )
     }
     if (observed === destination) return
 
@@ -316,13 +324,15 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
 
     const continuation =
       typeof source.sessionID === "string" && source.sessionID !== "" ? source.sessionID : undefined
-    const beforeBusy = continuation === undefined ? undefined : busyOf(await readSession(continuation))
+    const before = continuation === undefined ? undefined : await readSession(continuation)
+    const beforeKnown = continuation === undefined || before !== undefined
+    const beforeBusy = busyOf(before)
 
     let placed = false
     const progress: PlacementContext["progress"] = async (update) => {
       const child = placed ? undefined : childOf(update)
       if (child !== undefined) {
-        await placeChild(child, destination, beforeBusy, context.signal)
+        await placeChild(child, destination, beforeBusy, beforeKnown, context.signal)
         placed = true
       }
       await context.progress(update)

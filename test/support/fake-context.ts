@@ -159,6 +159,7 @@ export interface FakeContext {
   failKey(key: string, error?: unknown): void
   failCommandAdd(name: string, error?: unknown): void
   failSession(operation: SessionOperation, error?: unknown): void
+  failSessionOnce(operation: SessionOperation, error?: unknown): void
   setMoveMode(mode: MoveMode, error?: unknown): void
   releaseMove(): void
   setMoveLag(reads: number | undefined): void
@@ -218,6 +219,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const prompts: FakePromptCall[] = []
   const switches: FakeSwitchCall[] = []
   const sessionFailures = new Map<SessionOperation, unknown>()
+  const sessionOnceFailures = new Map<SessionOperation, unknown>()
   const moves: FakeMoveCall[] = []
   let moveMode: MoveMode = "apply"
   let moveError: unknown = new Error("move rejected")
@@ -243,6 +245,11 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const guardedSession = async <T>(operation: SessionOperation, run: () => T | Promise<T>): Promise<T> => {
     sessionCalls.push(operation)
     options.onSessionOperation?.(operation)
+    if (sessionOnceFailures.has(operation)) {
+      const failure = sessionOnceFailures.get(operation)
+      sessionOnceFailures.delete(operation)
+      throw failure
+    }
     if (sessionFailures.has(operation)) throw sessionFailures.get(operation)
     return run()
   }
@@ -648,6 +655,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     failSession(operation: SessionOperation, error: unknown = new Error(operation)) {
       sessionFailures.set(operation, error)
     },
+    failSessionOnce(operation: SessionOperation, error: unknown = new Error(`${operation} once`)) {
+      sessionOnceFailures.set(operation, error)
+    },
     setMoveMode(mode: MoveMode, error: unknown = new Error("move rejected")) {
       moveMode = mode
       moveError = error
@@ -669,6 +679,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       keyFailures.clear()
       commandAddFailures.clear()
       sessionFailures.clear()
+      sessionOnceFailures.clear()
     },
     // Surfaces rejections on purpose: a "never rejects" test must be able to fail loudly.
     async firePrompt() {

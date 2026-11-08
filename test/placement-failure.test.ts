@@ -20,7 +20,7 @@ interface ExecuteContext {
 
 type Execute = (input: unknown, context: ExecuteContext) => Promise<unknown>
 
-type NativeMode = "normal" | "prompt-first" | "silent"
+type NativeMode = "normal" | "prompt-first" | "silent" | "continuation"
 
 const executeOf = (fake: FakeContext): Execute => (fake.tool("subagent") as { execute: Execute }).execute
 
@@ -39,6 +39,7 @@ const harness = async (
     pollMs?: number
     clock?: { value: number }
     moveCostMs?: number
+    sessions?: readonly { id: string; from?: string; busy?: number }[]
   } = {},
 ) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "placement-failure-")))
@@ -46,12 +47,22 @@ const harness = async (
   mkdirSync(destination)
   const outside = realpathSync(mkdtempSync(join(tmpdir(), "placement-outside-")))
   const clock = options.clock
+  const sessions = (options.sessions ?? []).map((seed) => ({
+    id: seed.id,
+    location: { directory: seed.from === undefined ? root : join(root, seed.from) },
+    time: { created: 0, updated: 0, ...(seed.busy === undefined ? {} : { busy: seed.busy }) },
+  }))
   let fake: FakeContext
   let started = false
 
   const native = async (raw: unknown, context: ExecuteContext) => {
     started = true
     const input = raw as Record<string, unknown>
+    if (options.mode === "continuation") {
+      await context.progress({ sessionID: String(input.sessionID), status: "running" })
+      await fake.ctx.session.prompt({ sessionID: String(input.sessionID), text: String(input.prompt) })
+      return { output: "done" }
+    }
     const child = await fake.ctx.session.create({ parentID: context.sessionID, title: String(input.description) })
     const id = String(child.id)
     if (options.mode === "silent") {
@@ -73,6 +84,7 @@ const harness = async (
   fake = fakeContext([], {
     directory: root,
     tools: [tool],
+    sessions,
     onSessionOperation: (operation) => {
       if (operation === "move" && options.moveCostMs !== undefined && clock !== undefined) {
         clock.value += options.moveCostMs
@@ -105,7 +117,18 @@ const harness = async (
       { sessionID: "parent", signal, progress: async () => undefined },
     )
 
-  return { fake, root, destination, outside, placement, clock, execute, executeWith, started: () => started }
+  return {
+    fake,
+    root,
+    destination,
+    outside,
+    placement,
+    clock,
+    from: join(root, "from"),
+    execute,
+    executeWith,
+    started: () => started,
+  }
 }
 
 describe("placement failures", () => {
@@ -173,6 +196,26 @@ describe("placement failures", () => {
     expect(fieldOf(message, "observed location")).toBe(h.root)
     expect(h.fake.prompts).toHaveLength(0)
     expect(h.fake.moves).toHaveLength(1)
+  })
+
+  it("attributes a failed pre-read instead of claiming the child had started", async () => {
+    const h = await harness({ mode: "continuation", sessions: [{ id: "child-9", from: "from", busy: 1 }] })
+    h.fake.failSessionOnce("get", new Error("session read failed"))
+
+    const failure = await executeOf(h.fake)(
+      { agent: "general", description: "task", prompt: "carry on", sessionID: "child-9", directory: h.destination },
+      { sessionID: "parent", signal: new AbortController().signal, progress: async () => undefined },
+    ).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    const message = (failure as Error).message
+    expect(message).toContain("child-9")
+    expect(fieldOf(message, "requested directory")).toBe(h.destination)
+    expect(fieldOf(message, "observed location")).toBe(h.from)
+    expect(message).toMatch(/could not be read before the task started/)
+    expect(message).not.toContain("already started")
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
   })
 
   it("rejects a child that was already prompted, and a native that never reports it", async () => {
