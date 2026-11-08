@@ -57,11 +57,13 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:671-719`, `src/registry.ts:239-255` |
 
 That table is the skill pipeline. After the skill manifest stage, six **non-fatal** command
-stages run around the skill reload: compose the surviving commands' names, drop native
-collisions, build the frozen command snapshot, persist and swap it, call `command.reload()`
-exactly once, then audit the reloaded listing against that snapshot before reporting a shadow
+steps run in five stages around the skill reload — `command-index` composes the surviving
+commands' names and drops the native collisions, `command-snapshot` builds the frozen snapshot,
+`command-persist` persists and swaps it, `command-reload` calls `command.reload()` exactly once,
+and `command-audit` compares the reloaded listing with that snapshot before reporting a shadow
 (`src/registry.ts:594-658`). A failure in any of them is a `command-<stage>:` diagnostic; it
-never replaces the previous command snapshot and never blocks the skill reload.
+never replaces the previous command snapshot and never blocks the skill reload. The one seed
+read before registration is not a stage: a rejected read is a single `command-seed:` diagnostic.
 
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
 the swap must be visible before the host rebuilds its skill list.
@@ -70,10 +72,16 @@ Exactly one skill transform (`src/registry.ts:364-383`) and one command transfor
 (`src/registry.ts:386-420`) are registered per registry, guarded by a `registering` promise.
 Refreshes reuse them and never add a second one.
 
-Registration reads `ctx.command.list()` once before that transform exists, so the names the
-host already holds — the pre-phase builtins and MCP prompts — seed the native pre-drop and stay
-native-owned until the registry is recreated; a name that appears later is not seeded, so native
-registration still wins it at the reload and the audit corrects it.
+The first registration reads `ctx.command.list()` once before that transform exists, so every
+name the host already holds seeds the native pre-drop and stays native-owned until the registry
+is recreated. Of those pre-phase names only an MCP prompt can collide: a prompt is named
+`server:prompt`, a builtin (`init`, `review`) carries no `:`, and every published name carries
+its subproject qualifier. A name that appears later is never seeded, and the two later cases
+differ. A later MCP prompt is added in the pre phase, before our transform, so our `add` wins
+the map on every rebuild, the listing carries our description and the audit sees a match — a
+silent replacement until the next activation. A later command file is added in the post phase,
+after ours, so it wins the map, the audit reports `native-shadow-audit:` and the name leaves
+the next snapshot.
 
 A refresh reloads skills once, twice when it
 suppresses a duplicate in the same pass, and a deferred check that later suppresses one
@@ -306,7 +314,7 @@ advertised list is whatever the last completed step produced.
 | A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:594-658` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
 | A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |
-| A published command never appears | a native name shadows it, or its name was already a builtin or MCP prompt when the transform was registered, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the audit reports `native-shadow-audit:` and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:642-658`, `src/command-shadow.ts:86-117` |
+| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:642-658`, `src/command-shadow.ts:86-117` |
 
 When the pre-drop stage never ran, the audit is handed `EMPTY_NATIVE_COMMANDS`
 (`src/command-audit.ts:5-10`): its `complete: true` asserts only that **no walk happened**, so

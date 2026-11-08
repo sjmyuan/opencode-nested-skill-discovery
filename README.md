@@ -93,10 +93,13 @@ name a human types. `$1`–`$N` (the highest index absorbing the remaining argum
 `$N` → `$ARGUMENTS` → append → shell interpolation, with one trim before the shell), and an
 invocation routes the agent, the model, and a subagent child by the same rules native uses
 (`src/command-execute.ts:30-104`, `src/command-expand.ts:56-150`). A composed name that
-collides with a native command is dropped, never shadowed — including a builtin or MCP prompt
-name the host registered before this plugin's transform did
-(`src/command-shadow.ts:28-53`). There is no `command` permission action, so a published
-command needs no rule of its own.
+collides with a native command is dropped, never shadowed: a published name always carries its
+`subproject:` qualifier, so a builtin (`init`, `review`) cannot collide, while an MCP prompt
+named the same way is dropped before publication — including a prompt the host already held
+when this plugin's transform registered (`src/command-shadow.ts:28-53`). A prompt that appears
+after that activation is replaced silently until the next one; a command file that appears
+later is reported by the audit and leaves the next snapshot. There is no `command` permission
+action, so a published command needs no rule of its own.
 
 ## Limits
 
