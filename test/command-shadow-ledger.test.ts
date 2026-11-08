@@ -111,6 +111,55 @@ describe("shadow ledger", () => {
     expect(namesOf(tracker.drop(snapshot, noNative).kept)).toEqual(["A:deploy"])
   })
 
+  it("a seeded name is dropped before the first replay", () => {
+    const tracker = createShadowTracker()
+    tracker.seed(["gitlab:review-pr"])
+
+    const next = tracker.drop(planned("gitlab:review-pr", "A:other"), noNative)
+
+    expect(namesOf(next.kept)).toEqual(["A:other"])
+    expect(namesOf(next.dropped)).toEqual(["gitlab:review-pr"])
+    expect(next.diagnostics).toEqual(["native-shadow: gitlab:review-pr"])
+  })
+
+  it("a seeded drop is reported once and adds no rule", () => {
+    const tracker = createShadowTracker()
+    tracker.seed(["gitlab:review-pr"])
+    const snapshot = planned("gitlab:review-pr", "A:other")
+
+    const first = tracker.drop(snapshot, noNative)
+    const second = tracker.drop(snapshot, noNative)
+
+    expect(namesOf(second.dropped)).toEqual(["gitlab:review-pr"])
+    expect(first.diagnostics).toEqual(["native-shadow: gitlab:review-pr"])
+    expect(second.diagnostics).toEqual([])
+  })
+
+  it("seeding is additive and idempotent", () => {
+    const tracker = createShadowTracker()
+    tracker.seed(["a"])
+    tracker.seed(["b"])
+    tracker.seed(["a"])
+
+    const next = tracker.drop(planned("a", "b", "c"), noNative)
+
+    expect(namesOf(next.kept)).toEqual(["c"])
+    expect(namesOf(next.dropped)).toEqual(["a", "b"])
+  })
+
+  it("a seeded name is held by the audit", () => {
+    const tracker = createShadowTracker()
+    tracker.seed(["A:deploy"])
+    tracker.audit({
+      listed: [{ name: "A:deploy", description: "theirs" }],
+      published: [published("A:deploy", "ours")],
+      native: noNative,
+    })
+    tracker.audit({ listed: [], published: [], native: noNative })
+
+    expect(namesOf(tracker.drop(planned("A:deploy"), noNative).dropped)).toEqual(["A:deploy"])
+  })
+
   it("is deterministic across passes in kept, dropped and diagnostic order", () => {
     const run = () => {
       const tracker = createShadowTracker()

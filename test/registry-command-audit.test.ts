@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { commandDoc } from "./support/command-family-fixtures.ts"
 import { commandStorage, publishWorkspace, type PublishWorkspace } from "./support/command-publish-fixtures.ts"
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
-import type { FamilyWorkspace } from "./support/family-fixtures.ts"
+import { skillDoc, type FamilyWorkspace } from "./support/family-fixtures.ts"
 
 const scanControl = vi.hoisted(() => ({ scans: 0, diagnostics: 0 }))
 
@@ -176,7 +176,7 @@ describe("the post-reload command audit", () => {
     }
   })
 
-  it("A6: a rejected command.list costs one diagnostic and no reload", async () => {
+  it("A6: a rejected command.list costs one diagnostic per stage", async () => {
     const ws = await publish()
     await ws.command("command", "deploy.md")
     const { fake, registry } = open(ws.base)
@@ -186,6 +186,7 @@ describe("the post-reload command audit", () => {
       const outcome = await registry.activate()
 
       expect(outcome.ok).toBe(true)
+      expect(outcome.diagnostics).toContain("command-seed: list down")
       expect(outcome.diagnostics).toContain("command-audit: list down")
       expect(fake.commandReloadCalls).toBe(1)
       expect(fake.reloadCalls).toBe(1)
@@ -316,6 +317,118 @@ describe("the post-reload command audit", () => {
     } finally {
       await first.registry.dispose()
       await second.registry.dispose()
+    }
+  })
+
+  it("A10: a pre-phase builtin/MCP name drops the nested command before registration", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [], [{ name: "A:deploy", description: "builtin deploy" }])
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.diagnostics).toContain("native-shadow: A:deploy")
+      expect(outcome.commands).toBe(0)
+      expect(JSON.stringify(commandStorage(fake))).not.toContain("A:deploy")
+      expect((await fake.ctx.command.list()).data).toEqual([
+        { name: "A:deploy", description: "builtin deploy" },
+      ])
+      expect(outcome.diagnostics.filter((line) => line.startsWith("native-shadow-audit:"))).toEqual([])
+      expect(outcome.diagnostics.filter((line) => line.startsWith("command-absent:"))).toEqual([])
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A10b: the seeded drop costs no extra reload and no skill regression", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [], [{ name: "A:deploy", description: "builtin deploy" }])
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.skills).toBe(1)
+      expect(fake.reloadCalls).toBe(1)
+      expect(fake.commandReloadCalls).toBe(1)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A11: a post-phase native still audits while a pre-phase name is seeded", async () => {
+    const ws = await publish("app")
+    await ws.command("command", "deploy.md")
+    await ws.write("app/B/.opencode/skills/checkout/SKILL.md", skillDoc("checkout"))
+    await ws.write("app/B/.opencode/command/release.md", commandDoc("release"))
+    const { registry } = open(
+      ws.base,
+      [{ name: "B:release", description: "native release" }],
+      [{ name: "A:deploy", description: "builtin deploy" }],
+    )
+
+    try {
+      const outcome = await registry.activate()
+
+      expect(outcome.diagnostics).toContain("native-shadow: A:deploy")
+      expect(outcome.diagnostics).toContain("native-shadow-audit: B:release")
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A12: the pre-phase listing is read once per registry", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+
+    try {
+      await registry.activate()
+      await registry.refresh()
+
+      expect(fake.commandListCalls).toBe(3)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A13: a retried registration does not read the pre-phase listing again", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base)
+    fake.failSync("command.transform", new Error("transform down"))
+
+    try {
+      const first = await registry.activate()
+      fake.clearFailures()
+      await registry.refresh()
+
+      expect(first.diagnostics).toContain("command-register: transform down")
+      expect(fake.commandListCalls).toBe(3)
+    } finally {
+      await registry.dispose()
+    }
+  })
+
+  it("A13b: a seed read that failed is retried with the registration", async () => {
+    const ws = await publish()
+    await ws.command("command", "deploy.md")
+    const { fake, registry } = open(ws.base, [{ name: "A:deploy", description: "deploy command" }])
+    fake.fail("command.list", new Error("list down"))
+    fake.failSync("command.transform", new Error("transform down"))
+
+    try {
+      const first = await registry.activate()
+      fake.clearFailures()
+      const second = await registry.refresh()
+
+      expect(first.diagnostics).toContain("command-seed: list down")
+      expect(second.diagnostics).toContain("native-shadow: A:deploy")
+      expect(second.commands).toBe(0)
+      expect(fake.commandListCalls).toBe(5)
+    } finally {
+      await registry.dispose()
     }
   })
 })

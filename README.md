@@ -90,13 +90,16 @@ A command file in a nested subproject — `.opencode/command/` or `.opencode/com
 published under its qualified name, `/subproject:command`; the `:` keeps the prefix in the
 name a human types. `$1`–`$N` (the highest index absorbing the remaining arguments),
 `$ARGUMENTS`, and `` !`cmd` `` shell interpolation expand in native's five steps (tokenise →
-`$N` → `$ARGUMENTS` → append → trim → shell), and an invocation routes the agent, the model,
-and a subagent child by the same rules native uses (`src/command-execute.ts:30-104`,
-`src/command-expand.ts:56-150`). One divergence is recorded in
-[docs/limits.md](docs/limits.md): the stored template is never trimmed. A composed name that
-collides with a native command is dropped, never shadowed
-(`src/command-shadow.ts:28-53`). There is no `command` permission action, so a published
-command needs no rule of its own.
+`$N` → `$ARGUMENTS` → append → shell interpolation, with one trim before the shell), and an
+invocation routes the agent, the model, and a subagent child by the same rules native uses
+(`src/command-execute.ts:30-104`, `src/command-expand.ts:56-150`). A composed name that
+collides with a native command is dropped, never shadowed: a published name always carries its
+`subproject:` qualifier, so a builtin (`init`, `review`) cannot collide, while an MCP prompt
+named the same way is dropped before publication — including a prompt the host already held
+when this plugin's transform registered (`src/command-shadow.ts:28-53`). A prompt that appears
+after that activation is replaced silently until the next one; a command file that appears
+later is reported by the audit and leaves the next snapshot. There is no `command` permission
+action, so a published command needs no rule of its own.
 
 ## Limits
 
@@ -104,7 +107,7 @@ command needs no rule of its own.
 |---|---|
 | Subproject depth | 5 directories below the workspace; unbounded inside an opened skill root |
 | Scan budgets | 20,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total |
-| Display caps | name 80 code points · description 500 |
+| Skill display caps | name 80 code points · description 500; a command description is never capped |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
 | Duplicate | a nested entry duplicating a native skill's path is suppressed on the refresh that sees it; when the foreign tier still looks incomplete, at the latest about 4 s after that refresh — otherwise on the next refresh |

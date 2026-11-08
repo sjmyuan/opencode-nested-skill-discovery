@@ -80,9 +80,19 @@ describe("golden: native text pipeline (G1–G21)", () => {
     expect(result.text).toBe("Do the thing.\n\nmy file.md")
   })
 
-  it("G10 append keeps a template newline", async () => {
+  it("G10 append trims a trailing template newline", async () => {
     const result = await expandText("Do the thing.\n", "arg")
-    expect(result.text).toBe("Do the thing.\n\n\narg")
+    expect(result.text).toBe("Do the thing.\n\narg")
+  })
+
+  it("G29 append trims every trailing whitespace run", async () => {
+    const result = await expandText("Do the thing.\n\n\t  ", "arg")
+    expect(result.text).toBe("Do the thing.\n\narg")
+  })
+
+  it("G30 append trims trailing spaces with no newline", async () => {
+    const result = await expandText("Do the thing.  ", "arg")
+    expect(result.text).toBe("Do the thing.\n\narg")
   })
 
   it("G11 no append on blank input", async () => {

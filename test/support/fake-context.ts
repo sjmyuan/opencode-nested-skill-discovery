@@ -107,6 +107,7 @@ export interface FakeContext {
   readonly reloadCalls: number
   readonly commandReloadCalls: number
   readonly commandDisposeCalls: number
+  readonly commandListCalls: number
   readonly sessionCalls: readonly SessionOperation[]
   readonly agentCalls: readonly string[]
   readonly childSessions: readonly Record<string, unknown>[]
@@ -148,7 +149,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   let hiddenKeep: ReadonlySet<string> = new Set()
   const transforms: TransformCallback[] = []
   const commandTransforms: CommandTransformCallback[] = []
-  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0 }
+  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
   const syncFailures = new Map<SyncFailureTarget, unknown>()
@@ -315,14 +316,16 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
           hooks.onCommandReload?.()
           counters.commandReload += 1
         }),
-      list: async () =>
-        guarded("command.list", () => ({
+      list: async () => {
+        counters.commandList += 1
+        return guarded("command.list", () => ({
           location: { directory: location.directory },
           data: [...commandEntries.values()].map(({ name, description }) => ({
             name,
             ...(description === undefined ? {} : { description }),
           })),
-        })),
+        }))
+      },
     },
     agent: {
       get: async (input: { agentID: string }) => {
@@ -421,6 +424,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     get commandDisposeCalls() {
       return counters.commandDispose
+    },
+    get commandListCalls() {
+      return counters.commandList
     },
     get sessionCalls() {
       return sessionCalls

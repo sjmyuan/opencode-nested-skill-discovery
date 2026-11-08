@@ -283,6 +283,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let registering: Promise<void> | undefined
   let commandRegistration: Registration | undefined
   let registeringCommand: Promise<void> | undefined
+  let seeded = false
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
   let followUp = false
@@ -297,6 +298,18 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const watchDiagnostics: string[] = []
   const nameLedger = createNameLedger()
   const shadowTracker = createShadowTracker()
+
+  /** The pre-registration listing read; it repeats only when the whole registration was retried (R4). */
+  const seedPrePhaseNames = async (): Promise<void> => {
+    if (seeded) return
+    try {
+      const listed = await ctx.command.list()
+      shadowTracker.seed(listed.data.map((entry) => String(entry.name)))
+      seeded = true
+    } catch (error) {
+      commandDiagnostics.push(`command-seed: ${reasonOf(error)}`)
+    }
+  }
 
   const now = options.now ?? (() => Date.now())
   const executeCommand = options.executeCommand
@@ -375,8 +388,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     try {
       if (registeringCommand === undefined) {
-        registeringCommand = ctx.command
-          .transform((editor) => {
+        registeringCommand = (async () => {
+          await seedPrePhaseNames()
+          return ctx.command.transform((editor) => {
             try {
               commandDiagnostics.push(
                 ...applyCommands(editor, currentCommands, {
@@ -388,6 +402,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
               commandDiagnostics.push(`command-replay: ${reasonOf(error)}`)
             }
           })
+        })()
           .then((created) => {
             commandRegistration = created
           })
