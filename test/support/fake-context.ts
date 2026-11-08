@@ -7,7 +7,24 @@ import type { CommandEditor, SkillEditor } from "../../src/plugin.ts"
 
 type TransformCallback = (editor: SkillEditor) => void
 type CommandTransformCallback = (editor: CommandEditor) => void
+type ToolEditor = Parameters<Parameters<Plugin.Context["tool"]["transform"]>[0]>[0]
+type ToolTransformCallback = (editor: ToolEditor) => void
 type HookCallback = (input: unknown) => Promise<void> | void
+
+export interface FakeToolContext {
+  readonly sessionID: string
+  readonly signal: AbortSignal
+  readonly progress: (update: Record<string, unknown>) => Promise<void>
+}
+
+export type FakeToolExecute = (input: unknown, context: FakeToolContext) => Promise<unknown>
+
+export interface FakeToolSeed {
+  readonly id: string
+  readonly description?: string
+  readonly input?: unknown
+  readonly execute?: FakeToolExecute
+}
 
 export interface CommandSeed {
   readonly name: string
@@ -93,6 +110,7 @@ export interface FakeContextOptions {
   readonly onCommandReload?: () => void
   readonly agents?: readonly FakeAgentSeed[]
   readonly sessions?: readonly FakeSessionSeed[]
+  readonly tools?: readonly FakeToolSeed[]
 }
 
 export interface FakeContext {
@@ -104,6 +122,10 @@ export interface FakeContext {
   readonly editor: SkillEditor
   readonly commandTransforms: readonly CommandTransformCallback[]
   readonly commandDefinitions: readonly FakeCommandDefinition[]
+  readonly toolTransforms: readonly ToolTransformCallback[]
+  readonly toolDisposeCalls: number
+  readonly toolReloadCalls: number
+  tool(id: string): Record<string, unknown> | undefined
   readonly location: FakeLocation
   readonly storage: Map<string, Schema.Json>
   readonly reloadCalls: number
@@ -151,7 +173,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   let hiddenKeep: ReadonlySet<string> = new Set()
   const transforms: TransformCallback[] = []
   const commandTransforms: CommandTransformCallback[] = []
-  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0 }
+  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0, toolDispose: 0, toolReload: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
   const syncFailures = new Map<SyncFailureTarget, unknown>()
@@ -263,6 +285,36 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
   } as unknown as CommandEditor
 
+  const toolTransforms: ToolTransformCallback[] = []
+  const toolSeeds = (options.tools ?? []).map((seed) => ({ ...seed }))
+  let tools = new Map<string, Record<string, unknown>>()
+  const toolEditor = {
+    list: () => [...tools.values()],
+    get: (id: string) => tools.get(id),
+    namespace: () => undefined,
+    add: (tool: Record<string, unknown>) => {
+      tools.set(String(tool.id), { ...tool })
+    },
+    update: (id: string, update: (tool: Record<string, unknown>) => void) => {
+      const current = tools.get(id)
+      if (current === undefined) return
+      const tool = { ...current }
+      update(tool)
+      tool.name = current.name
+      tool.id = id
+      tools.set(id, tool)
+    },
+    remove: (id: string) => {
+      tools.delete(id)
+    },
+  } as unknown as ToolEditor
+
+  // Host semantics: the tool state is rebuilt from its registrations on every replay.
+  const replayTools = (): void => {
+    tools = new Map(toolSeeds.map((seed) => [seed.id, { name: seed.id, ...seed }]))
+    for (const transform of toolTransforms) transform(toolEditor)
+  }
+
   // Only the faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
     skill: {
@@ -345,6 +397,25 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       },
     },
     location,
+    tool: {
+      transform: (callback: ToolTransformCallback) => {
+        toolTransforms.push(callback)
+        replayTools()
+        return {
+          dispose: async () => {
+            counters.toolDispose += 1
+          },
+        }
+      },
+      reload: async () => {
+        counters.toolReload += 1
+        replayTools()
+      },
+      list: async () => [...tools.values()],
+      hook: async () => ({
+        dispose: async () => undefined,
+      }),
+    },
     session: {
       hook: async (name: string, callback: HookCallback) =>
         guarded("session.hook", () => {
@@ -447,6 +518,18 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     get commandDefinitions() {
       return [...commandEntries.values()]
+    },
+    get toolTransforms() {
+      return toolTransforms
+    },
+    get toolDisposeCalls() {
+      return counters.toolDispose
+    },
+    get toolReloadCalls() {
+      return counters.toolReload
+    },
+    tool(id: string) {
+      return tools.get(id)
     },
     get hookRegistrations() {
       return counters.hookRegistrations
