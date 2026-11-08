@@ -69,6 +69,8 @@ interface Harness {
   readonly fake: FakeContext
   readonly root: string
   readonly destination: string
+  readonly outside: string
+  readonly placement: ReturnType<typeof createPlacement>
   readonly events: string[]
   readonly forwarded: Record<string, unknown>[]
   readonly results: unknown[]
@@ -78,6 +80,7 @@ interface Harness {
 const harness = async (options: HarnessOptions = {}): Promise<Harness> => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "placement-gate-")))
   const destination = join(root, "A")
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "placement-gate-outside-")))
   mkdirSync(destination)
   const snapshot = options.snapshot ?? registryOf(root)
 
@@ -125,7 +128,7 @@ const harness = async (options: HarnessOptions = {}): Promise<Harness> => {
       },
     })
 
-  return { fake, root, destination, events, forwarded, results, execute }
+  return { fake, root, destination, outside, placement, events, forwarded, results, execute }
 }
 
 const order = (events: readonly string[], expected: readonly string[]): boolean => {
@@ -340,5 +343,83 @@ describe("placement gate: ask and the non-denial rejections", () => {
     expect(await failureOf(h)).toBe(boom)
     expect(h.fake.moves).toHaveLength(0)
     expect(h.fake.prompts).toHaveLength(0)
+  })
+})
+
+describe("placement gate: the cases it cannot decide", () => {
+  const emptySnapshot = (root: string): RegistrySnapshot => ({ location: root, snapshots: [] })
+
+  it("skips the gate on an empty snapshot, names the destination and places the child", async () => {
+    const h = await harness({ snapshot: emptySnapshot("") })
+
+    await h.execute({ ...ask, directory: h.destination })
+
+    expect(h.fake.permissionCalls).toHaveLength(0)
+    expect(h.fake.moves).toHaveLength(1)
+    const skipped = h.placement.diagnostics.filter((line) => line.includes("gate skipped: no indexed nested entries under"))
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0]).toContain(h.destination)
+  })
+
+  it("skips the gate when every indexed scope sits outside the destination", async () => {
+    const h = await harness({
+      snapshot: {
+        location: "",
+        snapshots: [
+          scope("/elsewhere/B", ["nested.b.other"]),
+          scope("/elsewhere", ["nested.root.parent"]),
+        ],
+      },
+    })
+
+    await h.execute({ ...ask, directory: h.destination })
+
+    expect(h.fake.permissionCalls).toHaveLength(0)
+    expect(h.fake.moves).toHaveLength(1)
+    expect(h.placement.diagnostics.join("\n")).toMatch(/gate skipped: no indexed nested entries under /)
+  })
+
+  it("skips the gate when the child agent is unknown and says so", async () => {
+    for (const agent of [undefined, "", 7]) {
+      const h = await harness()
+      const input = { description: "task", prompt: "do it", directory: h.destination }
+      await h.execute(agent === undefined ? input : { ...input, agent })
+
+      expect(h.fake.permissionCalls).toHaveLength(0)
+      expect(h.fake.moves).toHaveLength(1)
+      expect(h.placement.diagnostics.join("\n")).toMatch(/gate skipped: the child agent is not known/)
+    }
+  })
+
+  it("records an identical skip line once across repeated placements", async () => {
+    const h = await harness({ snapshot: emptySnapshot("") })
+
+    await h.execute({ ...ask, directory: h.destination })
+    await h.execute({ ...ask, directory: h.destination })
+
+    const skipped = h.placement.diagnostics.filter((line) => line.includes("gate skipped:"))
+    expect(skipped).toHaveLength(1)
+  })
+
+  it("leaves a call without a directory byte-identical: no assert and no new diagnostic", async () => {
+    const h = await harness()
+
+    for (const directory of [undefined, ""]) {
+      await h.execute({ agent: "general", description: "task", prompt: "native", directory })
+    }
+
+    expect(h.fake.permissionCalls).toHaveLength(0)
+    expect(h.placement.diagnostics).toEqual([])
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(2)
+  })
+
+  it("does not assert for a destination the boundary refuses", async () => {
+    const h = await harness()
+
+    await expect(h.execute({ ...ask, directory: h.outside })).rejects.toThrow(/placement refused/)
+
+    expect(h.fake.permissionCalls).toHaveLength(0)
+    expect(h.fake.childSessions).toHaveLength(0)
   })
 })
