@@ -71,8 +71,9 @@ Exactly one skill transform (`src/registry.ts:361-380`) and one command transfor
 Refreshes reuse them and never add a second one.
 
 Registration reads `ctx.command.list()` once before that transform exists, so the names the
-host already holds — the pre-phase builtins and MCP prompts — seed the native pre-drop; a name
-that appears later is not seeded and stays native-owned for this registry's lifetime.
+host already holds — the pre-phase builtins and MCP prompts — seed the native pre-drop and stay
+native-owned until the registry is recreated; a name that appears later is not seeded, so native
+registration still wins it at the reload and the audit corrects it.
 
 A refresh reloads skills once, twice when it
 suppresses a duplicate in the same pass, and a deferred check that later suppresses one
@@ -338,7 +339,7 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | `src/command-names.ts` | command-name composition: `composeCommandName` joins `subproject:command`, `composeCommandNames` resolves first-wins collisions, `createNameLedger` silences repeats, and `QualifiedCommand.publishedName` is the key |
 | `src/command-snapshot.ts` | reads each qualified command's content, drops a malformed, unreadable or oversized file, and freezes the per-subproject command snapshot |
 | `src/command-replay.ts` | add-only, synchronous, I/O-free command replay; `execute` resolves its entry from the live snapshot |
-| `src/command-expand.ts` | native-parity template expansion: tokenise → `$N` with the highest index absorbing the tail → `$ARGUMENTS` → append → trim → shell; the text half is pure and the shell pass is injected |
+| `src/command-expand.ts` | native-parity template expansion: tokenise → `$N` with the highest index absorbing the tail → `$ARGUMENTS` → append → shell, with one trim before the shell; the text half is pure and the shell pass is injected |
 | `src/command-shell.ts` | `{env, platform}` to a shell target, the family's argv shape, the production runner, and the injectable `ProcessRunner` |
 | `src/command-model.ts` | the one place the stored `model` string and the routing `Model.Ref` meet |
 | `src/command-family.ts` | command candidates through the delivered repo-family survivor filter |
