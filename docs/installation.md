@@ -78,8 +78,9 @@ with `configured plugin path must be a directory`
 2. **The `@` menu** in the composer shows `@<id>`, for example
    `@nested.vscode-1a2b3c4d.deploy-9f8e7d6c`
    (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`).
-3. **Storage** gains `nested/manifest/version`, `nested/manifest/<scopeToken>`, and
-   `nested/subproject/<scopeToken>` — see
+3. **Storage** gains `nested/<locationToken>/manifest/version`,
+   `nested/<locationToken>/manifest/<scopeToken>`, and
+   `nested/<locationToken>/subproject/<scopeToken>` — see
    [architecture.md](architecture.md#storage-model) for the raw-key namespace.
 4. **Commands** appear as `subproject:command`: the composer's `ctrl+p commands` list and
    `GET /api/command` both show one entry per published nested command, and a name that

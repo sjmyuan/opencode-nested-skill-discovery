@@ -21,7 +21,7 @@ opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` fo
 workspace, its ancestor config roots, and the global ones
 (`packages/core/src/config/plugin/skill.ts:77-88`). The plugin neither disables nor shadows
 those roots: it excludes them from its own scan by realpath (`src/native.ts:28-49`,
-`src/indexer.ts:206`) and contributes only what native discovery cannot reach — the
+`src/indexer.ts:216`) and contributes only what native discovery cannot reach — the
 subprojects *below* the location.
 
 ## Entry and lifecycle
@@ -49,10 +49,10 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:40-46`, `491-492` |
 | 2 | Resolve the native skill roots to exclude | `src/registry.ts:496`, `src/native.ts:37-49` |
 | 3 | Scan the location for skill candidates, then reconcile the watcher set from them | `src/registry.ts:541-549`, `src/scan.ts:74-136` |
-| 4 | Read, parse, and dedupe candidates, then drop every non-survivor checkout of a repo family | `src/registry.ts:553-569`, `src/indexer.ts:195-248`, `src/family.ts:276-304` |
+| 4 | Read, parse, and dedupe candidates, then drop every non-survivor checkout of a repo family | `src/registry.ts:553-569`, `src/indexer.ts:205-258`, `src/family.ts:276-304` |
 | 5 | Compose display names and assemble frozen entries | `src/registry.ts:571-573`, `src/registry.ts:111-130` |
 | 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:142-193` |
-| 7 | Persist manifest, cache, and version | `src/registry.ts:577-589`, `src/manifest.ts:114-191` |
+| 7 | Persist manifest, cache, and version | `src/registry.ts:577-589`, `src/manifest.ts:124-205` |
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:583-661` |
 | 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:671-719`, `src/registry.ts:239-255` |
 
@@ -92,7 +92,7 @@ skill reload.
 ## Discovery bounds
 
 The scan is a sorted pre-order depth-first walk from the location (`src/scan.ts:133-168`).
-It stats only; file content is read later, by the indexer (`src/indexer.ts:217-223`).
+It stats only; file content is read later, by the indexer (`src/indexer.ts:227-233`).
 Depth is counted to the **subproject directory**, not to the skill file: markers nest and
 never stop the walk, and the deepest marker owner wins (`src/scan.ts:147`, `165-166`).
 Inside an opened skill root the walk has no depth cap (`src/scan.ts:216-246`).
@@ -103,7 +103,7 @@ is in [limits.md](limits.md).
 
 ## Identity
 
-An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:185`):
+An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:195`):
 
 - scope token = `slug(basename(subprojectRealPath), 24)` + `-` + first 8 hex of the SHA-256
   of the subproject's canonical path (`src/indexer.ts:45-47`, `28-37`)
@@ -121,7 +121,7 @@ pinned to an exact ID stops matching after such a move ([permissions.md](permiss
 
 The composed maximum is 90 characters (7 + 24 + 1 + 8 + 1 + 40 + 1 + 8), so the declared
 `MAX_ID_LENGTH` of 96 (`src/contracts.ts:132`) is a contract bound rather than a truncation
-step (`src/indexer.ts:185` builds the ID without cutting it).
+step (`src/indexer.ts:195` builds the ID without cutting it).
 
 ## Repo families
 
@@ -146,7 +146,7 @@ Derivation is `node:fs` only — one memoised `lstat` per ancestor down to the l
 never a `git` subprocess (`src/family.ts:58-131`, `155-231`). The filter then drops every
 entry whose checkout is not its family survivor, in scope, whether or not the survivor holds
 the same **checkout-relative** path (`src/family.ts:240-284`); it runs after realpath and
-native-ID dedupe and before ID assignment (`src/indexer.ts:241-243`), so a suppressed entry is
+native-ID dedupe and before ID assignment (`src/indexer.ts:251-253`), so a suppressed entry is
 never minted, never enters the snapshot, cache, or manifest, and no corrective reload is
 needed. The rule applies only when the checkout and the survivor are both strict descendants
 of the location: a session inside the worktree has the main checkout outside its subtree, so
@@ -170,10 +170,10 @@ path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeTex
 500 in `assembleEntries` (`src/registry.ts:111-130`, `src/contracts.ts:135-136`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:119-128`, `src/registry.ts:246-252`, `src/indexer.ts:185`).
+canonical path, never on the name (`src/registry.ts:119-128`, `src/registry.ts:246-252`, `src/indexer.ts:195`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
-non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:96-103`, `181-183`).
+non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:106-113`, `191-193`).
 The plugin therefore always supplies a description, which matters because opencode drops
 description-less entries from the model's guidance block
 (`packages/core/src/skill/instructions.ts:74-81`).
@@ -204,41 +204,49 @@ timeout that reports failure: the deferred check simply re-lists and re-filters.
 ## Storage model
 
 Three skill keys (`src/contracts.ts:201-204`) and three command keys
-(`src/contracts.ts:205-207`):
+(`src/contracts.ts:205-207`), all location-qualified:
 
 | Key | Contents |
 |---|---|
-| `nested/manifest/version` | monotonic counter: `max(current + 1, Date.now())` (`src/manifest.ts:118-130`) |
-| `nested/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }` (`src/contracts.ts:24-29`, `src/manifest.ts:142-155`) |
-| `nested/subproject/<scopeToken>` | the same grouping with each entry's `content` (`src/manifest.ts:62-69`, `148-166`) |
-| `nested/commands/version` | the command store's own counter; it moves only when the command set changes (`src/manifest.ts:345-405`) |
-| `nested/commands/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }`, no `template` (`src/manifest.ts:408-413`) |
-| `nested/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:71-93`, `src/manifest.ts:414-419`) |
+| `nested/<locationToken>/manifest/version` | this location's counter: `max(current + 1, Date.now())` (`src/manifest.ts:129-141`) |
+| `nested/<locationToken>/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }` (`src/contracts.ts:24-29`, `src/manifest.ts:153-166`) |
+| `nested/<locationToken>/subproject/<scopeToken>` | the same grouping with each entry's `content` (`src/manifest.ts:66-73`, `159-177`) |
+| `nested/<locationToken>/commands/version` | the command store's own counter; it moves only when the command set changes (`src/manifest.ts:412-472`) |
+| `nested/<locationToken>/commands/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }`, no `template` (`src/manifest.ts:475-480`) |
+| `nested/<locationToken>/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:71-93`, `src/manifest.ts:481-486`) |
+
+The token is the slug of the canonical location's basename cut to 24 characters, plus the
+first 8 hex digits of its sha256: one key segment, no `/`. The plugin derives it verbatim
+from the canonical location, so one directory reached through two paths keeps one token set.
+`nested/format = 2` records that the unqualified records of every pre-location build were
+removed. That sweep runs once, after the new layout is written and pruned, and covers
+`nested/manifest/…`, `nested/subproject/…`, `nested/commands/version`,
+`nested/commands/manifest/…` and `nested/commands/…`.
 
 A manifest entry is `{ id, canonicalPath, name, description?, autoinvoke? }` and carries no
-`content` (`src/manifest.ts:54-60`). The cache entry adds `content`, the
-markdown body with the frontmatter block removed (`src/manifest.ts:62-69`,
-`src/indexer.ts:191`).
+`content` (`src/manifest.ts:58-64`). The cache entry adds `content`, the
+markdown body with the frontmatter block removed (`src/manifest.ts:66-73`,
+`src/indexer.ts:201`).
 
-Every successful refresh writes the three skill keys and then prunes them. Pruning scans both
-prefixes page by page, keeps the tokens written in this run plus the version key, and removes
-a stale record only when its recorded `directory` is inside the location being scanned
-(`src/manifest.ts:82-112`, `182-188`). The command store instead compares a canonical
-signature and writes nothing at all when the records already match, counter included
-(`src/manifest.ts:350-387`). It prunes both command prefixes in-location, and its cache-prefix
-prune skips `nested/commands/manifest/` because that prefix is nested inside the cache prefix
-(`src/manifest.ts:323-324`, `452-458`). A non-nested location therefore never deletes another
-workspace's records, and a record whose token is still active is never touched. Nested
-locations share one plugin-id storage, so an outer location's refresh sees an inner location's
-records inside its own root and prunes them; a directory bound by two locations has one scope
-token, so its record is last-writer-wins on the same key — the record carries no location
-field (`src/contracts.ts:24-29`).
+Every successful refresh writes this location's three skill keys and then prunes them.
+Pruning scans the location's two prefixes page by page, keeps the tokens written in this run
+plus its own version key, and removes a stale record only when its recorded `directory` is
+inside the location being scanned (`src/manifest.ts:86-116`, `193-200`). The command store
+instead compares a canonical signature and writes nothing at all when the records already
+match, counter included (`src/manifest.ts:417-454`). It prunes this location's two command
+prefixes in-location, and its cache-prefix prune skips `…/commands/manifest/` because that
+prefix is nested inside the cache prefix (`src/manifest.ts:386-390`, `519-531`). Both stores
+are qualified, so two locations that bind the same directory write it under two tokens: each
+keeps its own record and its own counter, and neither prune can reach the other. A record
+whose token is still active is never touched, and nested locations still share one
+plugin-id storage. The record itself carries no location field
+(`src/contracts.ts:24-29`); the key does.
 
 The skill cache is written but not read back: no code path calls `storage.get` on
-`nested/subproject/<token>`, so nothing is served from storage. ADR R15 and solution §4.7
+`nested/<locationToken>/subproject/<token>`, so nothing is served from storage. ADR R15 and solution §4.7
 describe that cache as reloaded on bind; those documents are stale on that point — the only
-storage reads in the plugin are the two version counters and the command cache the
-change comparison inspects (`src/manifest.ts:337-366`). The manifest is likewise an
+storage reads in the plugin are the two version counters, the format marker, and the command
+cache the change comparison inspects (`src/manifest.ts:404-433`). The manifest is likewise an
 audit and diagnostics artifact — it is never a filter for what gets advertised
 (`src/registry.ts:482-734` reads only live scan output).
 

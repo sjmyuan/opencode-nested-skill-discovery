@@ -154,11 +154,13 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
   subproject with no `.git` ancestor inside the workspace is a foreign checkout and stays
   visible, silently. Open the session inside the worktree to see its own view — see
   [docs/limits.md](docs/limits.md#worktree-families).
-- **You need to see what was discovered.** Read storage: `nested/manifest/version`,
-  `nested/manifest/<scopeToken>` (ids and names), `nested/subproject/<scopeToken>` (with
-  content). Commands have their own store: `nested/commands/version`,
-  `nested/commands/manifest/<scopeToken>` (names, routing keys) and
-  `nested/commands/<scopeToken>` (with the template). Raw KV keys carry the host's
+- **You need to see what was discovered.** Read storage: `nested/<locationToken>/manifest/version`,
+  `nested/<locationToken>/manifest/<scopeToken>` (ids and names),
+  `nested/<locationToken>/subproject/<scopeToken>` (with content). Commands have their own
+  store: `nested/<locationToken>/commands/version`,
+  `nested/<locationToken>/commands/manifest/<scopeToken>` (names, routing keys) and
+  `nested/<locationToken>/commands/<scopeToken>` (with the template). Each location keys its
+  own records, so one workspace never reads or prunes another's. Raw KV keys carry the host's
   `plugin:<id>:` prefix, so filter `LIKE 'plugin:%:nested/%'`. A record only disappears when
   the same location refreshes again after the skill or command is gone.
 - **A refresh looks delayed.** Events are coalesced for 250 ms, and a prompt-triggered
