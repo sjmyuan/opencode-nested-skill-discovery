@@ -274,6 +274,59 @@ describe("one-time legacy migration", () => {
     expect([...fake.storage.keys()].filter((key) => key.startsWith("nested/format"))).toEqual([STORAGE_FORMAT_KEY])
   })
 
+  it("M13: reports an unreadable marker and sweeps nothing", async () => {
+    const fake = fakeWith([STORAGE_FORMAT_KEY, 1], ...legacySkillKeys())
+    const target = fake.ctx.storage
+    const port: StoragePort = {
+      get: async (key) => {
+        if (key === STORAGE_FORMAT_KEY) throw new Error("marker down")
+        return target.get(key)
+      },
+      set: (key, value) => target.set(key, value),
+      remove: (key) => target.remove(key),
+      scan: (options) => target.scan(options),
+    }
+
+    const result = await persistRegistry(port, {
+      location: LOCATION,
+      snapshots: [snapshotOf("token-a", `${LOCATION}/A`)],
+      now: 1000,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.diagnostics).toEqual(["migrate: marker down"])
+    for (const [key] of legacySkillKeys()) expect(fake.storage.has(key)).toBe(true)
+    expect(fake.storage.get(STORAGE_FORMAT_KEY)).toBe(1)
+  })
+
+  it("M14: reports a sweep scan failure without writing the marker", async () => {
+    const fake = fakeWith(...legacySkillKeys())
+    const target = fake.ctx.storage
+    const port: StoragePort = {
+      get: (key) => target.get(key),
+      set: (key, value) => target.set(key, value),
+      remove: (key) => target.remove(key),
+      scan: async (options) => {
+        if (LEGACY_STORAGE_PREFIXES.some((prefix) => options.prefix.startsWith(prefix))) {
+          throw new Error("sweep scan down")
+        }
+        return target.scan(options)
+      },
+    }
+
+    const result = await persistRegistry(port, {
+      location: LOCATION,
+      snapshots: [snapshotOf("token-a", `${LOCATION}/A`)],
+      now: 1000,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.diagnostics).toEqual(["migrate: sweep scan down"])
+    for (const [key] of legacySkillKeys()) expect(fake.storage.has(key)).toBe(true)
+    expect(fake.storage.has(STORAGE_FORMAT_KEY)).toBe(false)
+    expect(fake.storage.has(qualifiedManifest("token-a"))).toBe(true)
+  })
+
   it("M12: writes the new layout before it removes anything legacy", async () => {
     const fake = fakeWith(...legacySkillKeys(), ...legacyCommandKeys())
     const target = fake.ctx.storage

@@ -124,7 +124,8 @@ async function prunePrefix(
 }
 
 /**
- * Writes this location's manifest and cache, then prunes its own stale tokens.
+ * Writes this location's manifest and cache, prunes its own stale tokens, then removes the
+ * unqualified records of every pre-location build once.
  *
  * `location` must already be canonical: the key segment is derived from it verbatim,
  * so one directory reached through two paths would own two key sets.

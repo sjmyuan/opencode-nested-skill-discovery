@@ -21,7 +21,7 @@ opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` fo
 workspace, its ancestor config roots, and the global ones
 (`packages/core/src/config/plugin/skill.ts:77-88`). The plugin neither disables nor shadows
 those roots: it excludes them from its own scan by realpath (`src/native.ts:28-49`,
-`src/indexer.ts:216`) and contributes only what native discovery cannot reach — the
+`src/indexer.ts:220`) and contributes only what native discovery cannot reach — the
 subprojects *below* the location.
 
 ## Entry and lifecycle
@@ -92,7 +92,7 @@ skill reload.
 ## Discovery bounds
 
 The scan is a sorted pre-order depth-first walk from the location (`src/scan.ts:133-168`).
-It stats only; file content is read later, by the indexer (`src/indexer.ts:227-233`).
+It stats only; file content is read later, by the indexer (`src/indexer.ts:229-233`).
 Depth is counted to the **subproject directory**, not to the skill file: markers nest and
 never stop the walk, and the deepest marker owner wins (`src/scan.ts:147`, `165-166`).
 Inside an opened skill root the walk has no depth cap (`src/scan.ts:216-246`).
@@ -103,7 +103,7 @@ is in [limits.md](limits.md).
 
 ## Identity
 
-An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:195`):
+An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:199`):
 
 - scope token = `slug(basename(subprojectRealPath), 24)` + `-` + first 8 hex of the SHA-256
   of the subproject's canonical path (`src/indexer.ts:45-47`, `28-37`)
@@ -121,7 +121,7 @@ pinned to an exact ID stops matching after such a move ([permissions.md](permiss
 
 The composed maximum is 90 characters (7 + 24 + 1 + 8 + 1 + 40 + 1 + 8), so the declared
 `MAX_ID_LENGTH` of 96 (`src/contracts.ts:132`) is a contract bound rather than a truncation
-step (`src/indexer.ts:195` builds the ID without cutting it).
+step (`src/indexer.ts:199` builds the ID without cutting it).
 
 ## Repo families
 
@@ -170,10 +170,10 @@ path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeTex
 500 in `assembleEntries` (`src/registry.ts:111-130`, `src/contracts.ts:135-136`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:119-128`, `src/registry.ts:246-252`, `src/indexer.ts:195`).
+canonical path, never on the name (`src/registry.ts:119-128`, `src/registry.ts:246-252`, `src/indexer.ts:199`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
-non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:106-113`, `191-193`).
+non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:109-118`, `196`).
 The plugin therefore always supplies a description, which matters because opencode drops
 description-less entries from the model's guidance block
 (`packages/core/src/skill/instructions.ts:74-81`).
@@ -217,16 +217,18 @@ Three skill keys (`src/contracts.ts:201-204`) and three command keys
 
 The token is the slug of the canonical location's basename cut to 24 characters, plus the
 first 8 hex digits of its sha256: one key segment, no `/`. The plugin derives it verbatim
-from the canonical location, so one directory reached through two paths keeps one token set.
+from the canonical location, so two symlinked spellings of one directory keep one token set
+(a case-variant spelling on a case-insensitive filesystem still gets its own token).
 `nested/format = 2` records that the unqualified records of every pre-location build were
-removed. That sweep runs once, after the new layout is written and pruned, and covers
+removed. That sweep runs once, after this location's skill layout is written and pruned
+(the command store republishes later in the same refresh), and covers
 `nested/manifest/…`, `nested/subproject/…`, `nested/commands/version`,
 `nested/commands/manifest/…` and `nested/commands/…`.
 
 A manifest entry is `{ id, canonicalPath, name, description?, autoinvoke? }` and carries no
 `content` (`src/manifest.ts:58-64`). The cache entry adds `content`, the
 markdown body with the frontmatter block removed (`src/manifest.ts:66-73`,
-`src/indexer.ts:201`).
+`src/indexer.ts:205`).
 
 Every successful refresh writes this location's three skill keys and then prunes them.
 Pruning scans the location's two prefixes page by page, keeps the tokens written in this run

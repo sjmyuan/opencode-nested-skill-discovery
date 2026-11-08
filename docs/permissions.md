@@ -141,7 +141,7 @@ upgrade a configured `ask`.
 |---|---|
 | the model's guidance block | `<id>`, `<name>`, `<description>` per entry (`packages/core/src/skill/instructions.ts:16-22`) |
 | the composer's `@` menu | `@<id>` (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
-| storage | `nested/<locationToken>/manifest/<scopeToken>` holds `entries[].id` for that subproject (`src/manifest.ts:157-162`) |
+| storage | `nested/<locationToken>/manifest/<scopeToken>` holds `entries[].id` for that subproject (`src/manifest.ts:157-166`) |
 
 The records live in opencode's SQLite database, in the global data directory:
 `~/.local/share/opencode/opencode.db`, or `$XDG_DATA_HOME/opencode/opencode.db`. The file is
