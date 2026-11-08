@@ -96,6 +96,11 @@ describe("withinBoundary", () => {
     expect(boundary("/work/wt-1", "/work/proj", ["/work/wt-1"])).toBe(true)
   })
 
+  it("allows a destination whose name starts with two dots", () => {
+    expect(withinBoundary({ destination: "/root/..cache", location: "/root", project: "/root", worktrees: [] })).toBe(true)
+    expect(boundary("/work/proj/A/..cache")).toBe(true)
+  })
+
   it("refuses a sibling that only shares a prefix", () => {
     expect(boundary("/work/proj-x/A")).toBe(false)
     expect(boundary("/work/proj-x", "/work/proj", ["/work/wt-1"])).toBe(false)

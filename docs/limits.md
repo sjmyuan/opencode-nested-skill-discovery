@@ -152,8 +152,8 @@ Symlinks are inspected, never followed blindly (`src/scan.ts:196-214`, `269-300`
 ## Placement
 
 `subagent({..., directory})` moves the child session to the destination before this call's
-task is admitted (`src/placement.ts`). The destination is absolute, relative to the calling
-session, or a `~/` path; the resolved value is `realpath`-normalised and must be a directory.
+task is admitted (`src/placement.ts`). The destination is absolute, relative to the location
+serving the call, or a `~/` path; the resolved value is `realpath`-normalised and must be a directory.
 
 - the boundary is the caller's location, the project directory (never `/` itself), or one of
   the project's worktrees — the same internal set `FileAccess.resolve` uses
@@ -210,8 +210,8 @@ a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
 | skill description | 500 code points | cut (`src/registry.ts:115-119`); a command description is stored verbatim |
-| scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:45-47`) |
-| skill slug | 40 | cut, same (`src/indexer.ts:49-51`) |
+| scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:48-50`) |
+| skill slug | 40 | cut, same (`src/indexer.ts:62-64`) |
 
 All text is sanitised before it reaches the registry: `<`, `>`, `"`, `&`, and control
 characters are removed, whitespace is collapsed, and trailing space is trimmed
@@ -230,7 +230,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
 from `disable-model-invocation: true` (`src/frontmatter.ts:153-155`,
-`src/indexer.ts:193`). Such an entry stays registered, stays user-invocable, and loads
+`src/indexer.ts:194-198`). Such an entry stays registered, stays user-invocable, and loads
 normally when you mention it — the guidance block simply does not offer it to the model
 (`packages/core/src/skill/instructions.ts:74-81`).
 

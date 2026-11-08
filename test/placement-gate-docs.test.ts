@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { ACCEPTED_RISK, GUIDANCE } from "../src/placement.ts"
+import { ACCEPTED_RISK, GUIDANCE, extendInput } from "../src/placement.ts"
 
 const REPO = fileURLToPath(new URL("..", import.meta.url))
 
@@ -20,6 +20,72 @@ const section = (text: string, heading: string): string => {
   const end = rest.indexOf("\n## ")
   return end < 0 ? rest : rest.slice(0, end)
 }
+
+const DOCS = [
+  "README.md",
+  "docs/architecture.md",
+  "docs/design.md",
+  "docs/installation.md",
+  "docs/limits.md",
+  "docs/permissions.md",
+]
+
+const RESOLUTION_BASE = "the location serving the call"
+
+const directoryDescription = (): string => {
+  const schema = extendInput({ type: "object", properties: {} }) as {
+    properties: Record<string, { description?: string }>
+  }
+  return schema.properties.directory?.description ?? ""
+}
+
+const GUIDANCE_ROWS = [
+  { line: "directory optionally places", phrase: "task is admitted", docs: ["README.md", "docs/limits.md"] },
+  { line: "Absolute paths are used", phrase: RESOLUTION_BASE, docs: ["README.md", "docs/limits.md"] },
+  {
+    line: "The destination must be inside",
+    phrase: "inside this project or one of its worktrees",
+    docs: ["README.md"],
+  },
+  { line: "A placed child narrows", phrase: "loses sibling subprojects", docs: ["docs/limits.md"] },
+  { line: "With sessionID a different", phrase: "not rewritten", docs: ["docs/limits.md"] },
+  { line: "A refused destination creates no child", phrase: "creates no child", docs: ["README.md"] },
+  { line: "A skill deny rule that targets", phrase: "not a boundary", docs: ["README.md", "docs/limits.md"] },
+  { line: "ACCEPTED_RISK", phrase: ACCEPTED_RISK, docs: ["README.md", "docs/limits.md"] },
+]
+
+describe("placement guidance: the resolution base", () => {
+  it("names the location serving the call once in the guidance, the schema and both placement docs", () => {
+    expect(occurrences(GUIDANCE, RESOLUTION_BASE)).toBe(1)
+    expect(occurrences(directoryDescription(), RESOLUTION_BASE)).toBe(1)
+    expect(occurrences(read("README.md"), RESOLUTION_BASE)).toBe(1)
+    expect(occurrences(read("docs/limits.md"), RESOLUTION_BASE)).toBe(1)
+  })
+
+  it("never calls the resolution base the calling session", () => {
+    expect(occurrences(GUIDANCE, "calling session")).toBe(0)
+    expect(occurrences(directoryDescription(), "calling session")).toBe(0)
+
+    for (const doc of DOCS) expect(occurrences(read(doc), "calling session"), doc).toBe(0)
+  })
+})
+
+describe("placement guidance: every bullet is carried by the docs", () => {
+  it.each(GUIDANCE_ROWS)("ships $line", ({ phrase, docs }) => {
+    expect(occurrences(GUIDANCE, phrase)).toBeGreaterThan(0)
+
+    for (const doc of docs) expect(normalise(read(doc)), doc).toContain(normalise(phrase))
+  })
+
+  it("has a row for every guidance line", () => {
+    const lines = GUIDANCE.split("\n")
+
+    for (const line of lines) {
+      expect(GUIDANCE_ROWS.some((row) => normalise(line).includes(normalise(row.phrase))), line).toBe(true)
+    }
+    expect(GUIDANCE_ROWS).toHaveLength(lines.length)
+  })
+})
 
 describe("placement gate: the accepted-risk wording", () => {
   it("appears once and identically on the tool description, the README and the limits", () => {
@@ -47,7 +113,11 @@ describe("placement gate: the accepted-risk wording", () => {
   })
 
   it("points at the gate from the permission and architecture docs", () => {
-    expect(read("docs/permissions.md")).toContain("placement")
-    expect(read("docs/architecture.md")).toContain("pre-placement")
+    const permissions = normalise(read("docs/permissions.md"))
+
+    expect(permissions).toContain("asserts the destination's indexed `nested.*` IDs")
+    expect(permissions).toContain("refuses the placement")
+    expect(permissions).toContain("[docs/limits.md](limits.md#placement)")
+    expect(normalise(read("docs/architecture.md"))).toContain("the pre-placement `skill` gate")
   })
 })

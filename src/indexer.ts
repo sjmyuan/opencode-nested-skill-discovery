@@ -10,6 +10,7 @@ import {
 } from "./contracts.ts"
 import { type Frontmatter, parseSkillFrontmatter } from "./frontmatter.ts"
 import { type FamilyPass, createFamilyPass, selectSurvivorEntries } from "./family.ts"
+import { isPathInside } from "./path.ts"
 
 export interface IndexedSkill {
   readonly id: string
@@ -20,7 +21,6 @@ export interface IndexedSkill {
   readonly autoinvoke?: boolean
   readonly content: string
 }
-
 export interface IndexOptions {
   readonly location: string
   readonly nativeRoots?: readonly string[]
@@ -102,8 +102,8 @@ const compareCandidates = (left: ScanCandidate, right: ScanCandidate): number =>
   compareRank(rankOf(left), rankOf(right)) || comparePath(left.path, right.path) || comparePath(left.realPath, right.realPath)
 
 const isInside = (target: string, root: string): boolean => {
-  const relative = path.relative(root, target)
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  // Offset is pinned: doc citations start below this block.
+  return isPathInside(root, target)
 }
 
 const synthesizeDescription = (body: string): string | undefined => {

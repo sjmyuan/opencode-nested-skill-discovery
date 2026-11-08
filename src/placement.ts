@@ -6,6 +6,7 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { compareText } from "./contracts.ts"
 import type { RegistrySnapshot } from "./contracts.ts"
+import { isPathInside } from "./path.ts"
 
 /**
  * Placement narrows the child to its destination, so the host stays cut down to the domains
@@ -50,7 +51,7 @@ export const ACCEPTED_RISK =
 
 export const GUIDANCE = [
   "directory optionally places the child before this task is admitted, so the first request is assembled from that location.",
-  "Absolute paths are used directly; relative paths resolve from the calling session's current directory and a leading ~ expands to the home directory.",
+  "Absolute paths are used directly; relative paths resolve against the location serving the call, and a leading ~ expands to the home directory.",
   "The destination must be inside this project or one of its worktrees.",
   "A placed child narrows to the destination's instructions, skills, same-id agents, config and permissions, and loses sibling subprojects.",
   "With sessionID a different directory moves the child again at the next boundary; history is preserved, but relative paths in it are not rewritten.",
@@ -63,7 +64,7 @@ const DIRECTORY_PROPERTY: JsonSchema.JsonSchema = {
   type: "string",
   minLength: 1,
   description:
-    'Optional working directory for the child. Absolute, or relative to the calling session; a leading "~" expands to the home directory. The child moves before this task is admitted, so its first request runs there.',
+    'Optional working directory for the child. Absolute, or relative to the location serving the call; a leading "~" expands to the home directory. The child moves before this task is admitted, so its first request runs there.',
 }
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -133,17 +134,12 @@ export interface BoundaryInput {
   readonly worktrees: readonly string[]
 }
 
-const isInside = (parent: string, child: string): boolean => {
-  const relative = path.relative(parent, child)
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
-}
-
 /** The set `FileAccess.resolve` treats as internal: the location, the project, its worktrees. */
 export function withinBoundary(input: BoundaryInput): boolean {
-  if (isInside(input.location, input.destination)) return true
+  if (isPathInside(input.location, input.destination)) return true
   const root = path.parse(input.project).root
-  if (input.project !== root && isInside(input.project, input.destination)) return true
-  return input.worktrees.some((worktree) => isInside(worktree, input.destination))
+  if (input.project !== root && isPathInside(input.project, input.destination)) return true
+  return input.worktrees.some((worktree) => isPathInside(worktree, input.destination))
 }
 
 /**
@@ -153,7 +149,7 @@ export function withinBoundary(input: BoundaryInput): boolean {
 export function nestedIDsUnder(snapshot: RegistrySnapshot, destination: string): readonly string[] {
   const ids = new Set<string>()
   for (const scope of snapshot.snapshots) {
-    if (!isInside(destination, scope.directory)) continue
+    if (!isPathInside(destination, scope.directory)) continue
     for (const skill of scope.skills) ids.add(skill.id)
   }
   return [...ids].sort(compareText)
@@ -218,7 +214,7 @@ const placeFailure = (child: string, requested: string, observed: string, detail
 
 const placeDenied = (child: string, requested: string, observed: string, count: number, cause: unknown): Error =>
   new Error(
-    `Subagent placement denied (child session: ${child}, requested directory: ${requested}, observed location: ${observed}). The destination's ${count} indexed nested skill${count === 1 ? "" : "s"} were asserted as a batch and at least one is denied by this session's rules. The child stays created and unprompted; nothing was rolled back.`,
+    `Subagent placement denied (child session: ${child}, requested directory: ${requested}, observed location: ${observed}). The destination's ${count} indexed nested skill${count === 1 ? "" : "s"} ${count === 1 ? "was" : "were"} asserted as a batch and at least one is denied by this session's rules. The child stays created and unprompted; nothing was rolled back.`,
     { cause },
   )
 

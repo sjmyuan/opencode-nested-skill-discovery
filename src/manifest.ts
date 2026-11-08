@@ -1,4 +1,3 @@
-import { isAbsolute, relative, sep } from "node:path"
 import type { Schema } from "effect"
 import {
   LEGACY_STORAGE_PREFIXES,
@@ -15,6 +14,7 @@ import {
   type Snapshot,
 } from "./contracts.ts"
 import { locationTokenFor } from "./indexer.ts"
+import { isPathInside } from "./path.ts"
 
 export interface StorageScanOptions {
   readonly prefix: string
@@ -73,8 +73,8 @@ const toCachedEntry = (entry: RegistryEntry): RegistryEntry => ({
 })
 
 const isInside = (target: string, root: string): boolean => {
-  const relativePath = relative(root, target)
-  return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  // Offset is pinned: doc citations start below this block.
+  return isPathInside(root, target)
 }
 
 const directoryOf = (value: Schema.Json): string | undefined => {

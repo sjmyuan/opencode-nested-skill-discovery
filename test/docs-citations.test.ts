@@ -151,6 +151,13 @@ const ANCHORS: ReadonlyArray<{
   { doc: "docs/architecture.md", target: "src/contracts.ts", ranges: "205-207", marker: "commandVersion: (locationToken: string): string =>" },
   { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "export async function expandCommand" },
   { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "return { text: expanded, diagnostics, shellFailed: diagnostics.length > 0 }" },
+  { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "48-50", marker: "export function scopeTokenFor" },
+  { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "62-64", marker: "export function skillTokenFor" },
+  { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "42-46", marker: "export function nativeIdFor" },
+  { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "194-198", marker: "const toIndexedSkill" },
+  { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "254-256", marker: "const deduped = dedupeByNativeId" },
+  { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "48-50", marker: "export function scopeTokenFor" },
+  { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "62-64", marker: "export function skillTokenFor" },
 ]
 
 describe("docs citations: curated anchors", () => {

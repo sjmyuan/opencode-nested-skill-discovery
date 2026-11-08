@@ -106,9 +106,9 @@ action, so a published command needs no rule of its own.
 `subagent` takes an optional `directory`. With it, the child session moves there before this
 call's task is admitted, so its **first** request is assembled from the destination's
 instructions, skills, same-id agents, config and permissions (`src/placement.ts`). The
-destination may be absolute, relative to the calling session, or a `~/` path, and must sit
-inside this project or one of its worktrees. Omitting `directory`, or passing `""`, is native
-behaviour — same child, same prompt, same result. With `sessionID` a different `directory`
+destination may be absolute, relative to the location serving the call, or a `~/` path, and
+must sit inside this project or one of its worktrees. Omitting `directory`, or passing `""`, is
+native behaviour — same child, same prompt, same result. With `sessionID` a different `directory`
 moves the child again at the next boundary. A refused destination (missing, not a directory, or
 outside this project and its worktrees) creates no child. A placement that fails after the child
 exists leaves it created and unprompted; nothing is rolled back. Limits and consequences:
