@@ -7,7 +7,11 @@ export const FOO_A = "---\nname: foo\ndescription: Foocraft\n---\n# Foo\n\nFoocr
 export const DEPLOY_B = "---\nname: deploy\ndescription: Deploys pkg-b\n---\n# Deploy\n\nDeploys pkg-b.\n"
 export const TIDY_C =
   "---\nname: tidy\ndescription: 'Deploy \"safe\" & <fast>'\ndisable-model-invocation: true\n---\n# Tidy\n\nTidy up.\n"
-export const LINT_D = "---\nname: lint\n---\n# Lint\n\nLints deeply.\n"
+export const LINT_D =
+  "---\nname: lint\ndescription: PLACEMENT_SKILL_MARKER\n---\n# Lint\n\nLints deeply.\n"
+export const PLACEMENT_INSTRUCTIONS = "PLACEMENT_INSTRUCTIONS_MARKER\n"
+export const PLACEMENT_AGENT = `${JSON.stringify({ agents: { general: { system: "PLACEMENT_AGENT_MARKER" } } }, null, 2)}\n`
+export const PLACEMENT_CWD = "PLACEMENT_CWD_MARKER\n"
 export const NATIVE_ROOT = "---\nname: native-root\n---\n# Native root\n"
 export const GLOBAL_DEMO = "---\nname: global-demo\n---\n# Global demo\n"
 
@@ -36,6 +40,9 @@ export const MATRIX = [
   { path: "pkg-c/.agents/skills/tidy/SKILL.md", content: TIDY_C },
   { path: "pkg-d/AGENTS.md", content: "# pkg-d\n" },
   { path: "pkg-d/deep/nest/.opencode/skill/lint/SKILL.md", content: LINT_D },
+  { path: "pkg-d/deep/nest/AGENTS.md", content: PLACEMENT_INSTRUCTIONS },
+  { path: "pkg-d/deep/nest/opencode.json", content: PLACEMENT_AGENT },
+  { path: "pkg-d/deep/nest/cwd-marker.txt", content: PLACEMENT_CWD },
   { path: ".opencode/command/pkg-a:native.md", content: COMMAND_NATIVE },
   { path: "pkg-a/.opencode/command/native.md", content: COMMAND_SHADOWED },
   { path: "pkg-b/.opencode/command/deploy.md", content: COMMAND_DEPLOY_B },
