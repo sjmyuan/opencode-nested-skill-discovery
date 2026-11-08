@@ -24,6 +24,14 @@ type NativeMode = "normal" | "prompt-first" | "silent"
 
 const executeOf = (fake: FakeContext): Execute => (fake.tool("subagent") as { execute: Execute }).execute
 
+const fieldOf = (message: string, label: string): string => {
+  const start = message.indexOf(`${label}: `)
+  if (start < 0) return "<missing>"
+  const rest = message.slice(start + label.length + 2)
+  const end = rest.search(/[,)]/)
+  return end < 0 ? rest : rest.slice(0, end)
+}
+
 const harness = async (options: { mode?: NativeMode; timeoutMs?: number; pollMs?: number } = {}) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "placement-failure-")))
   const destination = join(root, "dest")
@@ -93,9 +101,10 @@ describe("placement failures", () => {
 
     expect(failure).toBeInstanceOf(Error)
     const message = (failure as Error).message
-    expect(message).toContain("child-1")
-    expect(message).toContain(h.destination)
-    expect(message).toContain(h.root)
+    expect(fieldOf(message, "child session")).toBe("child-1")
+    expect(fieldOf(message, "requested directory")).toBe(h.destination)
+    expect(fieldOf(message, "observed location")).toBe(h.root)
+    expect(message).not.toContain(`observed location: ${h.destination}`)
     expect(h.fake.prompts).toHaveLength(0)
   })
 
@@ -109,9 +118,10 @@ describe("placement failures", () => {
     const message = (failure as Error).message
     expect(message).toContain("not confirmed within 20ms")
     expect(message).toContain("may still be queued")
-    expect(message).toContain("child-1")
-    expect(message).toContain(h.destination)
-    expect(message).toContain(h.root)
+    expect(fieldOf(message, "child session")).toBe("child-1")
+    expect(fieldOf(message, "requested directory")).toBe(h.destination)
+    expect(fieldOf(message, "observed location")).toBe(h.root)
+    expect(message).not.toContain(`observed location: ${h.destination}`)
     expect(h.fake.prompts).toHaveLength(0)
   })
 
