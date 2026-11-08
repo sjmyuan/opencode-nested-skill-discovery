@@ -32,11 +32,20 @@ const fieldOf = (message: string, label: string): string => {
   return end < 0 ? rest : rest.slice(0, end)
 }
 
-const harness = async (options: { mode?: NativeMode; timeoutMs?: number; pollMs?: number } = {}) => {
+const harness = async (
+  options: {
+    mode?: NativeMode
+    timeoutMs?: number
+    pollMs?: number
+    clock?: { value: number }
+    moveCostMs?: number
+  } = {},
+) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "placement-failure-")))
   const destination = join(root, "dest")
   mkdirSync(destination)
   const outside = realpathSync(mkdtempSync(join(tmpdir(), "placement-outside-")))
+  const clock = options.clock
   let fake: FakeContext
   let started = false
 
@@ -61,10 +70,26 @@ const harness = async (options: { mode?: NativeMode; timeoutMs?: number; pollMs?
   }
 
   const tool: FakeToolSeed = { id: "subagent", description: "native", input: INPUT, execute: native }
-  fake = fakeContext([], { directory: root, tools: [tool] })
+  fake = fakeContext([], {
+    directory: root,
+    tools: [tool],
+    onSessionOperation: (operation) => {
+      if (operation === "move" && options.moveCostMs !== undefined && clock !== undefined) {
+        clock.value += options.moveCostMs
+      }
+    },
+  })
   const placement = createPlacement(fake.ctx, {
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+    ...(clock === undefined
+      ? {}
+      : {
+          now: () => clock.value,
+          sleep: async (ms: number) => {
+            clock.value += ms
+          },
+        }),
   })
   await placement.activate()
 
@@ -80,7 +105,7 @@ const harness = async (options: { mode?: NativeMode; timeoutMs?: number; pollMs?
       { sessionID: "parent", signal, progress: async () => undefined },
     )
 
-  return { fake, root, destination, outside, placement, execute, executeWith, started: () => started }
+  return { fake, root, destination, outside, placement, clock, execute, executeWith, started: () => started }
 }
 
 describe("placement failures", () => {
@@ -126,14 +151,28 @@ describe("placement failures", () => {
   })
 
   it("confirms a slow move when the budget is large enough to cover it", async () => {
-    const h = await harness({ timeoutMs: 500, pollMs: 10 })
-    h.fake.setMoveMode("hold")
-    setTimeout(() => h.fake.releaseMove(), 30)
+    const h = await harness({ clock: { value: 1000 }, timeoutMs: 1000, pollMs: 10, moveCostMs: 30 })
+    h.fake.setMoveLag(3)
 
     await h.execute(h.destination)
 
     expect(h.fake.moves).toHaveLength(1)
     expect(h.fake.prompts).toHaveLength(1)
+  })
+
+  it("shares one budget between the move call and its confirmation", async () => {
+    const h = await harness({ clock: { value: 1000 }, timeoutMs: 100, pollMs: 10, moveCostMs: 90 })
+    h.fake.setMoveLag(5)
+
+    const failure = await h.execute(h.destination).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    const message = (failure as Error).message
+    expect(message).toContain("not confirmed within 100ms")
+    expect(fieldOf(message, "requested directory")).toBe(h.destination)
+    expect(fieldOf(message, "observed location")).toBe(h.root)
+    expect(h.fake.prompts).toHaveLength(0)
+    expect(h.fake.moves).toHaveLength(1)
   })
 
   it("rejects a child that was already prompted, and a native that never reports it", async () => {

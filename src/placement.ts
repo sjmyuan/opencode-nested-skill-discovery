@@ -27,6 +27,7 @@ export interface PlacementOptions {
   readonly timeoutMs?: number
   readonly pollMs?: number
   readonly sleep?: (ms: number) => Promise<void>
+  readonly now?: () => number
   readonly home?: string
 }
 
@@ -194,6 +195,7 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
   const timeoutMs = options.timeoutMs ?? PLACEMENT_TIMEOUT_MS
   const pollMs = options.pollMs ?? MOVE_POLL_MS
   const sleep = options.sleep ?? defaultSleep
+  const now = options.now ?? Date.now
   const home = options.home ?? process.env.HOME ?? homedir()
   let registration: { dispose: () => Promise<void> | void } | undefined
   let disposed = false
@@ -234,10 +236,10 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
     if (observed === destination) return
 
     // The deadline starts before `move`: probing and booting the destination graph happens inside it.
-    const deadline = Date.now() + timeoutMs
+    const deadline = now() + timeoutMs
     const moved = await waitWithBudget(
       host.session.move({ sessionID: childSessionID as SessionID, directory: destination as SessionDirectory }),
-      deadline - Date.now(),
+      deadline - now(),
       signal,
     )
     if (moved.kind === "aborted") {
@@ -257,7 +259,7 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
 
     let current = directoryOf(await readSession(childSessionID)) ?? "unknown"
     while (current !== destination) {
-      if (Date.now() >= deadline) {
+      if (now() >= deadline) {
         throw placeFailure(
           childSessionID,
           destination,

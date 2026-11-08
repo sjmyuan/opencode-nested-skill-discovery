@@ -161,6 +161,7 @@ export interface FakeContext {
   failSession(operation: SessionOperation, error?: unknown): void
   setMoveMode(mode: MoveMode, error?: unknown): void
   releaseMove(): void
+  setMoveLag(reads: number | undefined): void
   markBusy(sessionID: string): void
   clearFailures(): void
   firePrompt(): Promise<void>
@@ -221,6 +222,8 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   let moveMode: MoveMode = "apply"
   let moveError: unknown = new Error("move rejected")
   const heldMoves: Array<() => void> = []
+  let lagReads: number | undefined
+  let pendingApply: { sessionID: string; directory: string; reads: number } | undefined
   let generatedChildren = 0
   const values = options.storageMap ?? new Map<string, Schema.Json>(options.storage ?? [])
   const hooks: { onReload: (() => void) | undefined; onCommandReload: (() => void) | undefined } = {
@@ -242,6 +245,21 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     options.onSessionOperation?.(operation)
     if (sessionFailures.has(operation)) throw sessionFailures.get(operation)
     return run()
+  }
+
+  const applyLocation = (sessionID: string, directory: string): void => {
+    const session = sessions.get(sessionID)
+    if (session === undefined) return
+    session.location = { ...(session.location as Record<string, unknown>), directory }
+  }
+
+  // The host applies a move asynchronously: a lagging confirmation needs this many reads first.
+  const settleApply = (): void => {
+    if (pendingApply === undefined) return
+    pendingApply.reads -= 1
+    if (pendingApply.reads > 0) return
+    applyLocation(pendingApply.sessionID, pendingApply.directory)
+    pendingApply = undefined
   }
 
   const agentInfo = (seed: FakeAgentSeed) => ({
@@ -460,6 +478,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         }),
       get: async (input: { sessionID: string }) =>
         guardedSession("get", () => {
+          settleApply()
           const existing = sessions.get(input.sessionID)
           if (existing !== undefined) return sessionInfo(existing)
           const created = sessionInfo({ id: input.sessionID })
@@ -479,10 +498,11 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
           moves.push({ sessionID: input.sessionID, directory: input.directory })
           if (moveMode === "reject") throw moveError
           if (moveMode === "hold") await new Promise<void>((resolve) => heldMoves.push(resolve))
-          const session = sessions.get(input.sessionID)
-          if (session !== undefined) {
-            session.location = { ...(session.location as Record<string, unknown>), directory: input.directory }
+          if (lagReads !== undefined && lagReads > 0) {
+            pendingApply = { sessionID: input.sessionID, directory: input.directory, reads: lagReads }
+            return
           }
+          applyLocation(input.sessionID, input.directory)
         }),
       switchAgent: async (input: { sessionID: string; agent: string }) =>
         guardedSession("switchAgent", () => {
@@ -634,6 +654,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     releaseMove() {
       for (const resolve of heldMoves.splice(0)) resolve()
+    },
+    setMoveLag(reads: number | undefined) {
+      lagReads = reads
     },
     markBusy(sessionID: string) {
       const session = sessions.get(sessionID)
