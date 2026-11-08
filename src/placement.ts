@@ -4,6 +4,8 @@ import type { JsonSchema } from "effect"
 import { realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
+import { compareText } from "./contracts.ts"
+import type { RegistrySnapshot } from "./contracts.ts"
 
 /**
  * Placement narrows the child to its destination, so the host stays cut down to the
@@ -131,6 +133,19 @@ export function withinBoundary(input: BoundaryInput): boolean {
   const root = path.parse(input.project).root
   if (input.project !== root && isInside(input.project, input.destination)) return true
   return input.worktrees.some((worktree) => isInside(worktree, input.destination))
+}
+
+/**
+ * The indexed nested entries the destination owns: scopes at the destination or below it.
+ * A containing scope is excluded, because its entries are advertised natively there.
+ */
+export function nestedIDsUnder(snapshot: RegistrySnapshot, destination: string): readonly string[] {
+  const ids = new Set<string>()
+  for (const scope of snapshot.snapshots) {
+    if (!isInside(destination, scope.directory)) continue
+    for (const skill of scope.skills) ids.add(skill.id)
+  }
+  return [...ids].sort(compareText)
 }
 
 const PLACEMENT_TIMEOUT_MS = 120_000
