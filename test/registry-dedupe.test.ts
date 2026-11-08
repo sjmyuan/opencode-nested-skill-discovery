@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs"
 import { symlink, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
+import { STORAGE_KEYS } from "../src/contracts.ts"
 import { locationTokenFor, nativeIdFor, scopeTokenFor, skillTokenFor } from "../src/indexer.ts"
 import { setup } from "../src/plugin.ts"
 import { createRegistry, selectSuppressed } from "../src/registry.ts"
@@ -85,6 +86,42 @@ describe("native dedupe after reload", () => {
       expect(outcome.reloads).toBe(1)
       expect(outcome.diagnostics.some((entry) => entry.startsWith("dedupe:"))).toBe(false)
       expect(fake.editor.list()).toEqual([foreign])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("keeps only the survivor in the manifest and the cache of one subproject", async () => {
+    const fixture = await createRegistryFixture()
+
+    try {
+      await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
+      await fixture.write("A/.opencode/skills/tidy/SKILL.md", DOC)
+      const deployPath = await fixture.realpathOf("A/.opencode/skills/deploy/SKILL.md")
+      const tidyPath = await fixture.realpathOf("A/.opencode/skills/tidy/SKILL.md")
+      const scope = scopeTokenFor(await fixture.realpathOf("A"))
+      const token = locationTokenFor(fixture.realRoot)
+      const deployId = `nested.${scope}.${skillTokenFor("deploy", deployPath)}`
+      const tidyId = `nested.${scope}.${skillTokenFor("tidy", tidyPath)}`
+      const native = nativeSkill("native-deploy", deployPath)
+      const fake = fakeContext([native], { directory: fixture.root })
+
+      const outcome = await createRegistry(fake.ctx).activate()
+
+      expect(outcome.reloads).toBe(2)
+      expect(outcome.skills).toBe(1)
+      expect(outcome.diagnostics).toContain(`dedupe: ${deployId}`)
+      expect(fake.editor.list().map((entry) => String(entry.id))).toEqual([native.id, tidyId])
+      expect(
+        (fake.storage.get(STORAGE_KEYS.manifest(token, scope)) as unknown as { entries: { id: string }[] }).entries.map(
+          (entry) => entry.id,
+        ),
+      ).toEqual([tidyId])
+      expect(
+        (fake.storage.get(STORAGE_KEYS.subproject(token, scope)) as unknown as { skills: { id: string }[] }).skills.map(
+          (entry) => entry.id,
+        ),
+      ).toEqual([tidyId])
     } finally {
       await fixture.cleanup()
     }
