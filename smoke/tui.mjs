@@ -44,6 +44,7 @@ export function expectScript({ configDir, home, directory, transcript, server })
     '  -re "$da1" { send -- $da1Reply; exp_continue }',
     '  -re "$da2" { send -- $da2Reply; exp_continue }',
     '  "pkg-b:deploy" { send -- ":deploy"; after 800; send -- "\\r"; after 3000; exit 0 }',
+    '  "What\'s new in" { after 600; send -- "\\r"; after 1200; exp_continue }',
     '  "Ask anything" { if {$sent == 0} { after 2500; send -- "/pkg-b"; set sent 1 }; exp_continue }',
     '  timeout { exit [expr {$sent ? 2 : 3}] }',
     '  eof { exit [expr {$sent ? 2 : 3}] }',

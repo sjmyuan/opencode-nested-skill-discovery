@@ -1,7 +1,7 @@
 # Live conformance smoke
 
 Reproducible, evidence-producing harness for the `nested-skill-discovery` plugin on
-`opencode v2.0.26`. It boots private `opencode serve` processes on `127.0.0.1`, so it
+`opencode v2.2.5`. It boots private `opencode serve` processes on `127.0.0.1`, so it
 never targets the user's background service.
 
 ## Usage
