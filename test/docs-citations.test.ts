@@ -156,6 +156,8 @@ const ANCHORS: ReadonlyArray<{
   { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "42-46", marker: "export function nativeIdFor" },
   { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "194-198", marker: "const toIndexedSkill" },
   { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "254-256", marker: "const deduped = dedupeByNativeId" },
+  { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "48-50", marker: "export function scopeTokenFor" },
+  { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "62-64", marker: "export function skillTokenFor" },
 ]
 
 describe("docs citations: curated anchors", () => {
