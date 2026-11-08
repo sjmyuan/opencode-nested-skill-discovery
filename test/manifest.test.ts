@@ -150,6 +150,40 @@ describe("registry persistence", () => {
     expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-other"))).toBe(true)
   })
 
+  it("prunes a stale record whose name starts with two dots", async () => {
+    const fake = seeded()
+    const nested = `${LOCATION}/..cache/sc`
+    fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-dots"), { directory: nested, manifestVersion: 1, scopeToken: "token-dots" })
+    fake.storage.set(STORAGE_KEYS.subproject(TOKEN, "token-dots"), { directory: nested })
+
+    const result = await persistRegistry(fake.ctx.storage, {
+      location: LOCATION,
+      snapshots: [],
+      now: 1000,
+    })
+
+    expect(result.pruned).toBe(2)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-dots"))).toBe(false)
+    expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-dots"))).toBe(false)
+  })
+
+  it("keeps a record that sits outside the location", async () => {
+    const fake = seeded()
+    const outside = `${LOCATION}/../outside/sc`
+    fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-outside"), { directory: outside, manifestVersion: 1, scopeToken: "token-outside" })
+    fake.storage.set(STORAGE_KEYS.subproject(TOKEN, "token-outside"), { directory: outside })
+
+    const result = await persistRegistry(fake.ctx.storage, {
+      location: LOCATION,
+      snapshots: [],
+      now: 1000,
+    })
+
+    expect(result.pruned).toBe(0)
+    expect(fake.storage.has(STORAGE_KEYS.manifest(TOKEN, "token-outside"))).toBe(true)
+    expect(fake.storage.has(STORAGE_KEYS.subproject(TOKEN, "token-outside"))).toBe(true)
+  })
+
   it("keeps the version counter and unparsable values", async () => {
     const fake = seeded(42)
     fake.storage.set(STORAGE_KEYS.manifest(TOKEN, "token-broken"), "not a record")

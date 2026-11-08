@@ -57,6 +57,18 @@ describe("placement gate: the destination's indexed nested IDs", () => {
     expect(nestedIDsUnder(snapshotOf(), "/root/A")).toEqual([])
   })
 
+  it("includes a scope whose name starts with two dots", () => {
+    const snapshot = snapshotOf(scope("/root/A/..x", ["nested.x.only"]))
+
+    expect(nestedIDsUnder(snapshot, "/root/A")).toEqual(["nested.x.only"])
+  })
+
+  it("excludes a scope that climbs out of the destination", () => {
+    const snapshot = snapshotOf(scope("/root/A/../B", ["nested.b.other"]))
+
+    expect(nestedIDsUnder(snapshot, "/root/A")).toEqual([])
+  })
+
   it("dedupes an ID that two scopes both carry", () => {
     const snapshot = snapshotOf(
       scope("/root/A", ["nested.a.dup", "nested.a.only"]),
