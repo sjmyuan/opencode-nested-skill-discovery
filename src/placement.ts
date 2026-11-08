@@ -214,7 +214,7 @@ const placeFailure = (child: string, requested: string, observed: string, detail
 
 const placeDenied = (child: string, requested: string, observed: string, count: number, cause: unknown): Error =>
   new Error(
-    `Subagent placement denied (child session: ${child}, requested directory: ${requested}, observed location: ${observed}). The destination's ${count} indexed nested skill${count === 1 ? "" : "s"} were asserted as a batch and at least one is denied by this session's rules. The child stays created and unprompted; nothing was rolled back.`,
+    `Subagent placement denied (child session: ${child}, requested directory: ${requested}, observed location: ${observed}). The destination's ${count} indexed nested skill${count === 1 ? "" : "s"} ${count === 1 ? "was" : "were"} asserted as a batch and at least one is denied by this session's rules. The child stays created and unprompted; nothing was rolled back.`,
     { cause },
   )
 

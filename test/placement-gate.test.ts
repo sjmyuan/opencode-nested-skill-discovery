@@ -62,6 +62,7 @@ const EXPECTED_IDS = ["nested.a.audit", "nested.a.deploy", "nested.deep.one"]
 interface HarnessOptions {
   readonly permission?: FakePermissionOutcome
   readonly snapshot?: RegistrySnapshot
+  readonly snapshotFor?: (root: string) => RegistrySnapshot
   readonly sessions?: readonly FakeSessionSeed[]
   readonly promptFirst?: boolean
 }
@@ -83,7 +84,7 @@ const harness = async (options: HarnessOptions = {}): Promise<Harness> => {
   const destination = join(root, "A")
   const outside = realpathSync(mkdtempSync(join(tmpdir(), "placement-gate-outside-")))
   mkdirSync(destination)
-  const snapshot = options.snapshot ?? registryOf(root)
+  const snapshot = options.snapshot ?? options.snapshotFor?.(root) ?? registryOf(root)
 
   const events: string[] = []
   const forwarded: Record<string, unknown>[] = []
@@ -248,6 +249,18 @@ describe("placement gate: a deny refuses the placement", () => {
     expect(message).toContain("3 indexed nested skills")
     expect(message).toContain("at least one is denied")
     expect(message.endsWith("The child stays created and unprompted; nothing was rolled back.")).toBe(true)
+  })
+
+  it("reads the batch sentence in the singular when one skill is asserted", async () => {
+    const h = await harness({
+      permission: { kind: "deny" },
+      snapshotFor: (root) => ({ location: root, snapshots: [scope(join(root, "A"), ["nested.a.only"])] }),
+    })
+
+    const message = (await rejectionOf(h)).message
+
+    expect(message).toContain("1 indexed nested skill was asserted")
+    expect(message).not.toMatch(/skill were asserted/)
   })
 
   it("keeps the host error as the cause, by identity", async () => {
