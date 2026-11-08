@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { createCommandExecutor } from "./command-execute.ts"
 import type { RegistrySnapshot, Snapshot } from "./contracts.ts"
+import { createPlacement } from "./placement.ts"
 import { createRegistry } from "./registry.ts"
 import { applyRegistry } from "./replay.ts"
 import { nodeWatchFactory } from "./watch.ts"
@@ -28,14 +29,17 @@ export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
     watchDirectory: nodeWatchFactory,
     executeCommand: createCommandExecutor(ctx),
   })
+  const placement = createPlacement(ctx)
 
   try {
     await registry.activate()
   } catch {
     // Activation is total by contract; a throw here must not reject setup.
   }
+  await placement.activate()
 
   return async () => {
+    await placement.dispose()
     await registry.dispose()
   }
 }

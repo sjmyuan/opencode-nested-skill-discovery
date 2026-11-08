@@ -75,10 +75,18 @@ alias, so `process.cwd()` cannot canonicalise it away.
 | C6 | `/api/command` lists exactly `pkg-b:deploy`, `pkg-c:release`, `pkg-d:deep:nest:tidy`; the plugin's shadowed definition is absent — its native file is host-rejected, so the name 404s regardless |
 | C7 | `session.command` expands `pkg-b:deploy` to `Deploy prod to --fast now`, switches the session to `deepseek/deepseek-flash` for `pkg-c:release`, and answers 404 for `pkg-a:native` |
 | C8 | the real TUI's composer autocomplete shows `/pkg-b:deploy` for a typed `/pkg-b`, attached to the suite server |
+| C9 | a `subagent({directory})` child's **first** model request carries the destination `AGENTS.md`, skill and same-id agent override, with sibling skills absent; the control without `directory` stays at the fixture root |
 
 Watcher timing is recorded, never asserted. C1 and C3 are scored on the stable capture
 (`skill-settled.json`); `settle.json` records `{ok, attempts, elapsedMs, stableFor}` and
 a settle timeout is reported as `unproven`, not as a contract failure.
+
+C9 spends no model call: it boots a third server with its own config directory against a
+scripted OpenAI-compatible endpoint (`smoke/local-model.mjs`), so the parent's `subagent`
+call, the child's `read` and both replies are local. The endpoint records every request body,
+and the claim is scored on the **first** child request plus a negative control; a host that
+does not honour the destination's nested `opencode.json` agent override is reported as
+`unproven`, never as a weakened pass.
 
 ## The TUI capture (C8)
 

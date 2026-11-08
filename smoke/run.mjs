@@ -15,8 +15,9 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
-import { buildFixture, buildIsolation, installPlugin, listTree, MATRIX, COMMAND_NAMES, removeTree } from "./fixture.mjs"
+import { buildFixture, buildIsolation, installPlugin, listTree, MATRIX, COMMAND_NAMES, DEPLOY_B, removeTree } from "./fixture.mjs"
 import { api, authHeader, poll, pollStable, redact, reload, startServe } from "./lib.mjs"
+import { createLocalModel } from "./local-model.mjs"
 import { runTui } from "./tui.mjs"
 
 const WALL_CLOCK_MS = 10 * 60 * 1000
@@ -896,6 +897,205 @@ async function claimC8(fixture, server) {
   )
 }
 
+async function claimC9(fixture, isolation) {
+  const evidenceName = "placement-c9.json"
+  const canonical = {
+    root: realpathSync(fixture.real),
+    destination: realpathSync(join(fixture.real, "pkg-d/deep/nest")),
+  }
+  const local = await createLocalModel()
+  const config = join(fixture.root, "config-c9")
+  mkdirSync(config, { recursive: true })
+  writeFileSync(
+    join(config, "opencode.json"),
+    `${JSON.stringify(
+      {
+        model: "c9/parent",
+        snapshots: false,
+        permissions: [{ action: "*", resource: "*", effect: "allow" }],
+        agents: { general: { model: "c9/child" }, title: { model: "c9/title" } },
+        providers: {
+          c9: {
+            package: "@opencode/ai/providers/openai-compatible",
+            env: ["OPENCODE_C9_API_KEY"],
+            settings: { baseURL: local.url },
+            models: Object.fromEntries(
+              ["parent", "child", "title"].map((id) => [
+                id,
+                {
+                  name: id,
+                  capabilities: { tools: true, input: ["text"], output: ["text"] },
+                  limit: { context: 100_000, output: 4_000 },
+                },
+              ]),
+            ),
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  const env = { ...isolation.env, OPENCODE_CONFIG_DIR: config, OPENCODE_C9_API_KEY: "c9" }
+
+  let server
+  try {
+    // C4 leaves pkg-b/deploy edited; the control needs a stable sibling marker in its guidance block.
+    writeFileSync(join(fixture.real, "pkg-b/.claude/skills/deploy/SKILL.md"), DEPLOY_B)
+
+    server = await serve(fixture, env, "serve-fixture-c9")
+
+    // The union must be settled before the control run, or its first child request could race the plugin.
+    const settled = await poll(
+      () => api(server.base, server.password, "/api/skill", { location: fixture.alias }),
+      {
+        until: (value) =>
+          value.data.filter((entry) => String(entry.id).startsWith("nested.")).length >= SETTLED_NESTED.length &&
+          value.data.some((entry) => String(entry.name) === "pkg-b/deploy" && entry.description === "Deploys pkg-b"),
+        timeoutMs: 30_000,
+        intervalMs: 250,
+      },
+    )
+
+    const run = async (invocation) => {
+      const mark = local.arm(invocation)
+      const parent = await createSession(server, fixture)
+      const prompted = await request(server.base, server.password, `/api/session/${parent}/prompt`, {
+        method: "POST",
+        location: fixture.alias,
+        body: { text: "Run the subagent placement check" },
+      })
+      if (prompted.status !== 200) throw new Error(`prompt -> HTTP ${prompted.status}: ${JSON.stringify(prompted.body)}`)
+      const idle = await poll(
+        () => request(server.base, server.password, `/api/session/${parent}`),
+        {
+          until: (value) => value.status === 200 && value.body?.data?.time?.idle !== undefined,
+          timeoutMs: 90_000,
+          intervalMs: 250,
+        },
+      )
+      const listed = await poll(
+        () => request(server.base, server.password, "/api/session?limit=50&order=desc"),
+        {
+          until: (value) =>
+            value.status === 200 && (value.body?.data ?? []).some((session) => String(session.parentID) === parent),
+          timeoutMs: 15_000,
+          intervalMs: 200,
+        },
+      )
+      const child = (listed.value?.body?.data ?? []).find((session) => String(session.parentID) === parent)
+      const requests = local.of(mark)
+      return {
+        parent,
+        child: child === undefined ? undefined : String(child.id),
+        location: child?.location?.directory,
+        requests,
+        childRequests: requests.filter((entry) => entry.child),
+      }
+    }
+
+    const positive = await run({
+      agent: "general",
+      description: "placement probe",
+      prompt: "Reply CHILD_OK",
+      directory: "pkg-d/deep/nest",
+    })
+    const negative = await run({ agent: "general", description: "native probe", prompt: "Reply CHILD_OK" })
+
+    const first = positive.childRequests[0]
+    const last = positive.childRequests.at(-1)
+    const control = negative.childRequests[0]
+    const body = (entry) => (entry === undefined ? "" : JSON.stringify(entry.body))
+
+    const markers = {
+      instructions: body(first).includes("PLACEMENT_INSTRUCTIONS_MARKER"),
+      skill: body(first).includes("PLACEMENT_SKILL_MARKER"),
+      agent: body(first).includes("PLACEMENT_AGENT_MARKER"),
+      destination: body(first).includes(canonical.destination),
+      narrowed: first !== undefined && !body(first).includes("Deploys pkg-b"),
+      read: body(last).includes("PLACEMENT_CWD_MARKER"),
+    }
+    const controlMarkers = {
+      instructionsAbsent: control !== undefined && !body(control).includes("PLACEMENT_INSTRUCTIONS_MARKER"),
+      siblingPresent: body(control).includes("Deploys pkg-b"),
+      location: negative.location !== undefined && realpathSync(negative.location) === canonical.root,
+    }
+    const version = versionOf("opencode")
+    const pinned = version.includes("2.2.5")
+
+    writeEvidence(evidenceName, {
+      version,
+      destination: canonical.destination,
+      fixtureRoot: canonical.root,
+      unionSettled: settled.ok,
+      unionSettleAttempts: settled.attempts,
+      positive: {
+        parent: positive.parent,
+        child: positive.child,
+        location: positive.location,
+        requests: positive.requests.length,
+        childRequests: positive.childRequests.length,
+        markers,
+      },
+      negative: {
+        parent: negative.parent,
+        child: negative.child,
+        location: negative.location,
+        requests: negative.requests.length,
+        childRequests: negative.childRequests.length,
+        markers: controlMarkers,
+      },
+      firstChildRequest: body(first).slice(0, 4_000),
+      firstControlChildRequest: body(control).slice(0, 4_000),
+      controlDiagnostics: {
+        model: control?.body?.model,
+        systemLength: (control?.body?.messages ?? [])
+          .filter((message) => message.role === "system")
+          .map((message) => String(message.content).length)
+          .reduce((total, length) => total + length, 0),
+        skillsBlock: body(control).includes("<skill>"),
+        agentMarker: body(control).includes("PLACEMENT_AGENT_MARKER"),
+      },
+    })
+
+    if (positive.childRequests.length === 0) {
+      return record("C9", "unproven", "the parent never produced a child model request", evidenceName)
+    }
+    const missing = Object.entries(markers)
+      .filter(([, value]) => !value)
+      .map(([name]) => name)
+    const controlMissing = Object.entries(controlMarkers)
+      .filter(([, value]) => !value)
+      .map(([name]) => name)
+
+    if (!pinned) {
+      return record("C9", "unproven", `host is ${version}, not opencode v2.2.5`, evidenceName)
+    }
+    if (markers.agent !== true && missing.length === 1) {
+      return record("C9", "unproven", "nested opencode.json agent override not honoured at v2.2.5", evidenceName)
+    }
+    const problems = [...missing.map((name) => `first child request missing ${name}`), ...controlMissing.map((name) => `control ${name}`)]
+    if (positive.location === undefined || realpathSync(positive.location) !== canonical.destination) {
+      problems.push(`child location ${positive.location ?? "unknown"}`)
+    }
+
+    return record(
+      "C9",
+      problems.length === 0 ? "pass" : "fail",
+      problems.length === 0
+        ? "first child request carries the destination instructions, skill, agent override and path; sibling skills absent; the control stays at the fixture root"
+        : problems.slice(0, 4).join("; "),
+      evidenceName,
+    )
+  } catch (error) {
+    writeEvidence(evidenceName, { error: String(error?.stack ?? error) })
+    return record("C9", "unproven", `harness: ${String(error?.message ?? error).slice(0, 160)}`, evidenceName)
+  } finally {
+    local.close()
+    if (server !== undefined) await server.stop()
+  }
+}
+
 async function suiteSmoke(evidence, keep) {
   const fixture = buildAt()
   const isolation = buildIsolation(fixture)
@@ -917,6 +1117,7 @@ async function suiteSmoke(evidence, keep) {
       record("C6", "unproven", "skipped after a failed settle", "settle.json")
       record("C7", "unproven", "skipped after a failed settle", "settle.json")
       record("C8", "unproven", "skipped after a failed settle", "settle.json")
+      record("C9", "unproven", "skipped after a failed settle", "settle.json")
       return false
     }
 
@@ -931,6 +1132,7 @@ async function suiteSmoke(evidence, keep) {
     const c6 = await claimC6(fixture, union.server)
     const c7 = await claimC7(fixture, union.server)
     const c8 = await claimC8(fixture, union.server)
+    const c9 = await claimC9(fixture, isolation)
 
     return (
       c1 === "pass" &&
@@ -940,7 +1142,8 @@ async function suiteSmoke(evidence, keep) {
       c5 !== "fail" &&
       c6 === "pass" &&
       c7 === "pass" &&
-      c8 !== "fail"
+      c8 !== "fail" &&
+      c9 !== "fail"
     )
   } finally {
     await union.server.stop()

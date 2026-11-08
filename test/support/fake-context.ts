@@ -7,7 +7,24 @@ import type { CommandEditor, SkillEditor } from "../../src/plugin.ts"
 
 type TransformCallback = (editor: SkillEditor) => void
 type CommandTransformCallback = (editor: CommandEditor) => void
+type ToolEditor = Parameters<Parameters<Plugin.Context["tool"]["transform"]>[0]>[0]
+type ToolTransformCallback = (editor: ToolEditor) => void
 type HookCallback = (input: unknown) => Promise<void> | void
+
+export interface FakeToolContext {
+  readonly sessionID: string
+  readonly signal: AbortSignal
+  readonly progress: (update: Record<string, unknown>) => Promise<void>
+}
+
+export type FakeToolExecute = (input: unknown, context: FakeToolContext) => Promise<unknown>
+
+export interface FakeToolSeed {
+  readonly id: string
+  readonly description?: string
+  readonly input?: unknown
+  readonly execute?: FakeToolExecute
+}
 
 export interface CommandSeed {
   readonly name: string
@@ -66,9 +83,17 @@ export interface FakeSessionSeed {
   readonly id: string
   readonly agent?: string
   readonly model?: FakeModelRef
+  readonly location?: { readonly directory: string }
+  readonly time?: { readonly created: number; readonly updated: number; readonly busy?: number }
 }
 
-export type SessionOperation = "get" | "create" | "switchAgent" | "switchModel" | "prompt"
+export type SessionOperation = "get" | "create" | "switchAgent" | "switchModel" | "prompt" | "move"
+export type MoveMode = "apply" | "hold" | "reject"
+
+export interface FakeMoveCall {
+  readonly sessionID: string
+  readonly directory: string
+}
 
 export interface FakePromptCall {
   readonly sessionID: string
@@ -93,6 +118,8 @@ export interface FakeContextOptions {
   readonly onCommandReload?: () => void
   readonly agents?: readonly FakeAgentSeed[]
   readonly sessions?: readonly FakeSessionSeed[]
+  readonly tools?: readonly FakeToolSeed[]
+  readonly onSessionOperation?: (operation: SessionOperation) => void
 }
 
 export interface FakeContext {
@@ -104,6 +131,10 @@ export interface FakeContext {
   readonly editor: SkillEditor
   readonly commandTransforms: readonly CommandTransformCallback[]
   readonly commandDefinitions: readonly FakeCommandDefinition[]
+  readonly toolTransforms: readonly ToolTransformCallback[]
+  readonly toolDisposeCalls: number
+  readonly toolReloadCalls: number
+  tool(id: string): Record<string, unknown> | undefined
   readonly location: FakeLocation
   readonly storage: Map<string, Schema.Json>
   readonly reloadCalls: number
@@ -115,6 +146,7 @@ export interface FakeContext {
   readonly childSessions: readonly Record<string, unknown>[]
   readonly prompts: readonly FakePromptCall[]
   readonly switches: readonly FakeSwitchCall[]
+  readonly moves: readonly FakeMoveCall[]
   onReload: (() => void) | undefined
   onCommandReload: (() => void) | undefined
   setLocation(directory: string): void
@@ -127,6 +159,11 @@ export interface FakeContext {
   failKey(key: string, error?: unknown): void
   failCommandAdd(name: string, error?: unknown): void
   failSession(operation: SessionOperation, error?: unknown): void
+  failSessionOnce(operation: SessionOperation, error?: unknown): void
+  setMoveMode(mode: MoveMode, error?: unknown): void
+  releaseMove(): void
+  setMoveLag(reads: number | undefined): void
+  markBusy(sessionID: string): void
   clearFailures(): void
   firePrompt(): Promise<void>
   invokeCommand(name: string, input?: unknown): Promise<void>
@@ -151,31 +188,49 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   let hiddenKeep: ReadonlySet<string> = new Set()
   const transforms: TransformCallback[] = []
   const commandTransforms: CommandTransformCallback[] = []
-  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0 }
+  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0, toolDispose: 0, toolReload: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
   const syncFailures = new Map<SyncFailureTarget, unknown>()
   const keyFailures = new Map<string, unknown>()
   const commandAddFailures = new Map<string, unknown>()
+  const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), "nested-fake-")))
+  const location: FakeLocation = {
+    directory,
+    project: { id: "project-fake", directory, canonical: directory },
+  }
+  const sessionInfo = (input: Record<string, unknown>): Record<string, unknown> => {
+    const id = String(input.id)
+    const time = (input.time as Record<string, unknown> | undefined) ?? {}
+    const seeded = (input.location as { directory?: string } | undefined) ?? {}
+    return {
+      ...input,
+      id,
+      location: { ...seeded, directory: seeded.directory ?? directory },
+      time: { created: 0, updated: 0, ...time },
+    }
+  }
   const agents = new Map<string, FakeAgentSeed>((options.agents ?? []).map((agent) => [agent.id, { ...agent }]))
   const sessions = new Map<string, Record<string, unknown>>()
-  for (const session of options.sessions ?? []) sessions.set(session.id, { ...session })
+  for (const session of options.sessions ?? []) sessions.set(session.id, sessionInfo({ ...session }))
   const sessionCalls: SessionOperation[] = []
   const agentCalls: string[] = []
   const childSessions: Record<string, unknown>[] = []
   const prompts: FakePromptCall[] = []
   const switches: FakeSwitchCall[] = []
   const sessionFailures = new Map<SessionOperation, unknown>()
+  const sessionOnceFailures = new Map<SessionOperation, unknown>()
+  const moves: FakeMoveCall[] = []
+  let moveMode: MoveMode = "apply"
+  let moveError: unknown = new Error("move rejected")
+  const heldMoves: Array<() => void> = []
+  let lagReads: number | undefined
+  let pendingApply: { sessionID: string; directory: string; reads: number } | undefined
   let generatedChildren = 0
   const values = options.storageMap ?? new Map<string, Schema.Json>(options.storage ?? [])
   const hooks: { onReload: (() => void) | undefined; onCommandReload: (() => void) | undefined } = {
     onReload: options.onReload,
     onCommandReload: options.onCommandReload,
-  }
-  const directory = options.directory ?? realpathSync(mkdtempSync(join(tmpdir(), "nested-fake-")))
-  const location: FakeLocation = {
-    directory,
-    project: { id: "project-fake", directory, canonical: directory },
   }
 
   const guarded = async <T>(target: FailureTarget, run: () => T | Promise<T>): Promise<T> => {
@@ -189,8 +244,29 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
 
   const guardedSession = async <T>(operation: SessionOperation, run: () => T | Promise<T>): Promise<T> => {
     sessionCalls.push(operation)
+    options.onSessionOperation?.(operation)
+    if (sessionOnceFailures.has(operation)) {
+      const failure = sessionOnceFailures.get(operation)
+      sessionOnceFailures.delete(operation)
+      throw failure
+    }
     if (sessionFailures.has(operation)) throw sessionFailures.get(operation)
     return run()
+  }
+
+  const applyLocation = (sessionID: string, directory: string): void => {
+    const session = sessions.get(sessionID)
+    if (session === undefined) return
+    session.location = { ...(session.location as Record<string, unknown>), directory }
+  }
+
+  // The host applies a move asynchronously: a lagging confirmation needs this many reads first.
+  const settleApply = (): void => {
+    if (pendingApply === undefined) return
+    pendingApply.reads -= 1
+    if (pendingApply.reads > 0) return
+    applyLocation(pendingApply.sessionID, pendingApply.directory)
+    pendingApply = undefined
   }
 
   const agentInfo = (seed: FakeAgentSeed) => ({
@@ -262,6 +338,36 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       commandEntries.set(definition.name, { ...definition })
     },
   } as unknown as CommandEditor
+
+  const toolTransforms: ToolTransformCallback[] = []
+  const toolSeeds = (options.tools ?? []).map((seed) => ({ ...seed }))
+  let tools = new Map<string, Record<string, unknown>>()
+  const toolEditor = {
+    list: () => [...tools.values()],
+    get: (id: string) => tools.get(id),
+    namespace: () => undefined,
+    add: (tool: Record<string, unknown>) => {
+      tools.set(String(tool.id), { ...tool })
+    },
+    update: (id: string, update: (tool: Record<string, unknown>) => void) => {
+      const current = tools.get(id)
+      if (current === undefined) return
+      const tool = { ...current }
+      update(tool)
+      tool.name = current.name
+      tool.id = id
+      tools.set(id, tool)
+    },
+    remove: (id: string) => {
+      tools.delete(id)
+    },
+  } as unknown as ToolEditor
+
+  // Host semantics: the tool state is rebuilt from its registrations on every replay.
+  const replayTools = (): void => {
+    tools = new Map(toolSeeds.map((seed) => [seed.id, { name: seed.id, ...seed }]))
+    for (const transform of toolTransforms) transform(toolEditor)
+  }
 
   // Only the faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
@@ -345,6 +451,25 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       },
     },
     location,
+    tool: {
+      transform: (callback: ToolTransformCallback) => {
+        toolTransforms.push(callback)
+        replayTools()
+        return {
+          dispose: async () => {
+            counters.toolDispose += 1
+          },
+        }
+      },
+      reload: async () => {
+        counters.toolReload += 1
+        replayTools()
+      },
+      list: async () => [...tools.values()],
+      hook: async () => ({
+        dispose: async () => undefined,
+      }),
+    },
     session: {
       hook: async (name: string, callback: HookCallback) =>
         guarded("session.hook", () => {
@@ -360,19 +485,31 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
         }),
       get: async (input: { sessionID: string }) =>
         guardedSession("get", () => {
+          settleApply()
           const existing = sessions.get(input.sessionID)
-          if (existing !== undefined) return existing
-          const created = { id: input.sessionID }
+          if (existing !== undefined) return sessionInfo(existing)
+          const created = sessionInfo({ id: input.sessionID })
           sessions.set(input.sessionID, created)
           return created
         }),
       create: async (input: Record<string, unknown>) =>
         guardedSession("create", () => {
           generatedChildren += 1
-          const created = { ...input, id: `child-${generatedChildren}` }
+          const created = sessionInfo({ ...input, id: `child-${generatedChildren}` })
           childSessions.push({ ...input })
           sessions.set(String(created.id), created)
           return created
+        }),
+      move: async (input: { sessionID: string; directory: string }) =>
+        guardedSession("move", async () => {
+          moves.push({ sessionID: input.sessionID, directory: input.directory })
+          if (moveMode === "reject") throw moveError
+          if (moveMode === "hold") await new Promise<void>((resolve) => heldMoves.push(resolve))
+          if (lagReads !== undefined && lagReads > 0) {
+            pendingApply = { sessionID: input.sessionID, directory: input.directory, reads: lagReads }
+            return
+          }
+          applyLocation(input.sessionID, input.directory)
         }),
       switchAgent: async (input: { sessionID: string; agent: string }) =>
         guardedSession("switchAgent", () => {
@@ -445,8 +582,23 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     get switches() {
       return switches
     },
+    get moves() {
+      return moves
+    },
     get commandDefinitions() {
       return [...commandEntries.values()]
+    },
+    get toolTransforms() {
+      return toolTransforms
+    },
+    get toolDisposeCalls() {
+      return counters.toolDispose
+    },
+    get toolReloadCalls() {
+      return counters.toolReload
+    },
+    tool(id: string) {
+      return tools.get(id)
     },
     get hookRegistrations() {
       return counters.hookRegistrations
@@ -503,12 +655,31 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     failSession(operation: SessionOperation, error: unknown = new Error(operation)) {
       sessionFailures.set(operation, error)
     },
+    failSessionOnce(operation: SessionOperation, error: unknown = new Error(`${operation} once`)) {
+      sessionOnceFailures.set(operation, error)
+    },
+    setMoveMode(mode: MoveMode, error: unknown = new Error("move rejected")) {
+      moveMode = mode
+      moveError = error
+    },
+    releaseMove() {
+      for (const resolve of heldMoves.splice(0)) resolve()
+    },
+    setMoveLag(reads: number | undefined) {
+      lagReads = reads
+    },
+    markBusy(sessionID: string) {
+      const session = sessions.get(sessionID)
+      if (session === undefined) return
+      session.time = { ...(session.time as Record<string, unknown>), busy: Date.now() }
+    },
     clearFailures() {
       failures.clear()
       syncFailures.clear()
       keyFailures.clear()
       commandAddFailures.clear()
       sessionFailures.clear()
+      sessionOnceFailures.clear()
     },
     // Surfaces rejections on purpose: a "never rejects" test must be able to fail loudly.
     async firePrompt() {

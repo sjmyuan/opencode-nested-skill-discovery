@@ -101,6 +101,19 @@ after that activation is replaced silently until the next one; a command file th
 later is reported by the audit and leaves the next snapshot. There is no `command` permission
 action, so a published command needs no rule of its own.
 
+## Subagent placement
+
+`subagent` takes an optional `directory`. With it, the child session moves there before this
+call's task is admitted, so its **first** request is assembled from the destination's
+instructions, skills, same-id agents, config and permissions (`src/placement.ts`). The
+destination may be absolute, relative to the calling session, or a `~/` path, and must sit
+inside this project or one of its worktrees. Omitting `directory`, or passing `""`, is native
+behaviour — same child, same prompt, same result. With `sessionID` a different `directory`
+moves the child again at the next boundary. A refused destination (missing, not a directory, or
+outside this project and its worktrees) creates no child. A placement that fails after the child
+exists leaves it created and unprompted; nothing is rolled back. Limits and consequences:
+[docs/limits.md](docs/limits.md).
+
 ## Limits
 
 | Limit | Value |

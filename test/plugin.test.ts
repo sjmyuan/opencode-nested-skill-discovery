@@ -30,6 +30,16 @@ const core = await import("../src/plugin.ts")
 const DOC = "---\nname: deploy\n---\n# Deploy\n"
 const EXTRA_DOC = "---\nname: extra\n---\n# Extra\n"
 
+const subagentTool = {
+  id: "subagent",
+  description: "Spawns an agent in a child session.",
+  input: {
+    type: "object",
+    properties: { agent: { type: "string" }, description: { type: "string" }, prompt: { type: "string" } },
+    required: ["agent", "description", "prompt"],
+  },
+}
+
 beforeEach(() => {
   watchControl.factory = undefined
 })
@@ -44,17 +54,19 @@ describe("plugin definition", () => {
     const fixture = await createRegistryFixture()
 
     try {
-      const fake = fakeContext([], { directory: fixture.root })
+      const fake = fakeContext([], { directory: fixture.root, tools: [subagentTool] })
       const cleanup = await entry.default.setup(fake.ctx)
 
       expect(fake.transforms).toHaveLength(1)
       expect(fake.hookRegistrations).toBe(1)
+      expect(fake.toolTransforms).toHaveLength(1)
       expect(cleanup).toBeTypeOf("function")
       if (typeof cleanup !== "function") return
 
       await cleanup()
       expect(fake.disposeCalls).toBe(1)
       expect(fake.hookDisposeCalls).toBe(1)
+      expect(fake.toolDisposeCalls).toBe(1)
     } finally {
       await fixture.cleanup()
     }
@@ -65,7 +77,7 @@ describe("plugin definition", () => {
 
     try {
       await fixture.write("A/.opencode/skills/deploy/SKILL.md", DOC)
-      const fake = fakeContext([], { directory: fixture.root })
+      const fake = fakeContext([], { directory: fixture.root, tools: [subagentTool] })
       const watch = fakeWatch()
       watchControl.factory = watch.factory
       const cleanup = await entry.default.setup(fake.ctx)
@@ -84,6 +96,7 @@ describe("plugin definition", () => {
 
         expect(fake.transforms).toHaveLength(1)
         expect(fake.hookRegistrations).toBe(1)
+        expect(fake.toolTransforms).toHaveLength(1)
         expect(fake.reloadCalls).toBeGreaterThan(1)
       } finally {
         await cleanup()

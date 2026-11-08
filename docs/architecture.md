@@ -29,9 +29,9 @@ subprojects *below* the location.
 | Fact | Where |
 |---|---|
 | `index.ts` default-exports `Plugin.define(definition)` | `index.ts:1-4` |
-| Plugin ID is `nested-skill-discovery` | `src/plugin.ts:8` |
-| `setup` creates the registry, activates it, and returns a cleanup that disposes it | `src/plugin.ts:23-37` |
-| An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:28-32` |
+| Plugin ID is `nested-skill-discovery` | `src/plugin.ts:9` |
+| `setup` creates the registry and the subagent placement, activates both, and returns a cleanup that disposes both | `src/plugin.ts:25-45` |
+| An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:34-38` |
 
 One registry exists per location instance, and a plugin list is a birth argument that stays
 immutable for that instance's lifetime (`packages/core/src/plugin/instance.ts:9-17`). A
@@ -263,7 +263,7 @@ starting a second one, so concurrent triggers cost one scan (`src/registry.ts:73
 
 | Trigger | Mechanism | Bound |
 |---|---|---|
-| activation | `setup` → `activate()` (`src/plugin.ts:23-37`) | once per location instance |
+| activation | `setup` → `activate()` (`src/plugin.ts:25-45`) | once per location instance |
 | filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory, per command root, per command directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:137`) |
 | prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts:23-54`) | `PROMPT_THROTTLE_MS = 2_000` (`src/contracts.ts:140`), skipped when any refresh just finished |
 
@@ -319,7 +319,7 @@ advertised list is whatever the last completed step produced.
 | A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:545`, `src/scan.ts:425-465` |
 | The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:660-661` |
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:672`, `src/registry.ts:690-708` |
-| Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:423-439`, `src/registry.ts:443-470`, `src/registry.ts:488-493`, `src/plugin.ts:28-32` |
+| Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:423-439`, `src/registry.ts:443-470`, `src/registry.ts:488-493`, `src/plugin.ts:34-38` |
 | A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:855` |
 | A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:594-658` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
@@ -343,7 +343,8 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 | File | Responsibility |
 |---|---|
 | `index.ts` | default export for the host loader |
-| `src/plugin.ts` | plugin ID, `setup`, cleanup, empty snapshot |
+| `src/plugin.ts` | plugin ID, `setup`, placement activation, cleanup, empty snapshot |
+| `src/placement.ts` | native `subagent` extension: `directory` schema and guidance, destination resolution and project/worktree boundary, move-and-confirm inside the native awaited progress |
 | `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers, command root kinds, candidate and command-snapshot shapes |
 | `src/scan.ts` | bounded DFS, markers, skill roots, command roots and candidates, budgets, refusals |
 | `src/frontmatter.ts` | minimal frontmatter reader: `name`, `description`, `metadata.opencode/autoinvoke`, `disable-model-invocation`; the additive command reader (`description`, `agent`, `model`, `subagent`/`subtask`, verbatim template) |
