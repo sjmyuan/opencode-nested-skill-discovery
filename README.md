@@ -109,8 +109,10 @@ instructions, skills, same-id agents, config and permissions (`src/placement.ts`
 destination may be absolute, relative to the calling session, or a `~/` path, and must sit
 inside this project or one of its worktrees. Omitting `directory`, or passing `""`, is native
 behaviour — same child, same prompt, same result. With `sessionID` a different `directory`
-moves the child again at the next boundary. A failed placement leaves the child created and
-unprompted; nothing is rolled back. Limits and consequences: [docs/limits.md](docs/limits.md).
+moves the child again at the next boundary. A refused destination (missing, not a directory, or
+outside this project and its worktrees) creates no child. A placement that fails after the child
+exists leaves it created and unprompted; nothing is rolled back. Limits and consequences:
+[docs/limits.md](docs/limits.md).
 
 ## Limits
 

@@ -43,7 +43,7 @@ export const GUIDANCE = [
   "The destination must be inside this project or one of its worktrees.",
   "A placed child narrows to the destination's instructions, skills, same-id agents, config and permissions, and loses sibling subprojects.",
   "With sessionID a different directory moves the child again at the next boundary; history is preserved, but relative paths in it are not rewritten.",
-  "A failed placement leaves the child created but unprompted and is not rolled back.",
+  "A refused destination creates no child. A failure after the child exists leaves it created and unprompted, and is not rolled back.",
 ].join("\n")
 
 const DIRECTORY_PROPERTY: JsonSchema.JsonSchema = {

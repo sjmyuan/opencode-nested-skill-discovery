@@ -162,9 +162,13 @@ session, or a `~/` path; the resolved value is `realpath`-normalised and must be
   native entries, not as `nested.…` unions
 - re-placement with `sessionID` keeps the conversation history, but relative paths in that
   history are not rewritten
-- a failure — refused path, move rejection, unconfirmed move, or a child that had already
-  started — leaves the child created and unprompted; nothing is rolled back, and the error
-  names the child session, the requested directory and the observed location
+- a refused destination — missing, a file, or outside the boundary — fails **before** the native
+  tool runs: no child is created and the error names only the requested directory
+  (`src/placement.ts`)
+- a failure after the child exists — move rejected, move unconfirmed, aborted, already started,
+  or an unreadable pre-state — leaves the child created and unprompted; nothing is rolled back,
+  and the error names the child session, the requested directory and the observed location
+  (`src/placement.ts`)
 - one 120 s budget covers the `session.move` call **and** its confirmation, because the host
   probes and boots the destination graph inside the call
 - this is a context boundary, not a security boundary: the model can still read outside it,
