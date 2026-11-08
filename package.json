@@ -10,8 +10,11 @@
     "test:watch": "vitest",
     "smoke:check": "node smoke/run.mjs --suite all"
   },
+  "dependencies": {
+    "effect": "4.0.6"
+  },
   "devDependencies": {
-    "@opencode/plugin": "2.0.26",
+    "@opencode/plugin": "2.2.5",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
