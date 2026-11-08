@@ -211,6 +211,21 @@ const placeFailure = (child: string, requested: string, observed: string, detail
     cause === undefined ? undefined : { cause },
   )
 
+const placeDenied = (child: string, requested: string, observed: string, count: number, cause: unknown): Error =>
+  new Error(
+    `Subagent placement denied (child session: ${child}, requested directory: ${requested}, observed location: ${observed}). The destination's ${count} indexed nested skill${count === 1 ? "" : "s"} were asserted as a batch and at least one is denied by this session's rules. The child stays created and unprompted; nothing was rolled back.`,
+    { cause },
+  )
+
+/**
+ * A deny rule arrives as `Tool.Error` wrapping `Permission.BlockedError`; a decline is a defect,
+ * a correction is feedback, and anything else belongs to another failure.
+ */
+export function isPermissionDenial(error: unknown): boolean {
+  if (!isObject(error) || error._tag !== "Tool.Error") return false
+  return isObject(error.error) && error.error._tag === "Permission.BlockedError"
+}
+
 export function createPlacement(host: PlacementHost, options: PlacementOptions = {}): Placement {
   const diagnostics: string[] = []
   const timeoutMs = options.timeoutMs ?? PLACEMENT_TIMEOUT_MS
@@ -245,7 +260,9 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
   }
 
   const assertPlacementSkill = async (
+    child: string,
     destination: string,
+    observed: string,
     childAgent: AgentID | undefined,
     context: PlacementContext,
   ): Promise<void> => {
@@ -258,13 +275,18 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
       skip(`gate skipped: no indexed nested entries under ${destination}`)
       return
     }
-    await host.permission.assert({
-      sessionID: context.sessionID,
-      agent: childAgent,
-      action: "skill",
-      resources: [...ids],
-      source: { type: "tool", messageID: context.messageID, id: context.id },
-    })
+    try {
+      await host.permission.assert({
+        sessionID: context.sessionID,
+        agent: childAgent,
+        action: "skill",
+        resources: [...ids],
+        source: { type: "tool", messageID: context.messageID, id: context.id },
+      })
+    } catch (error) {
+      if (!isPermissionDenial(error)) throw error
+      throw placeDenied(child, destination, observed, ids.length, error)
+    }
   }
 
   const placeChild = async (
@@ -287,7 +309,7 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
           : "The child's state could not be read before the task started, so placement could not confirm it was still unprompted.",
       )
     }
-    await assertPlacementSkill(destination, childAgent, context)
+    await assertPlacementSkill(childSessionID, destination, observed, childAgent, context)
     if (observed === destination) return
 
     // The deadline starts before `move`: probing and booting the destination graph happens inside it.

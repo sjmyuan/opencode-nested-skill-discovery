@@ -3,14 +3,19 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { RegistrySnapshot, Snapshot } from "../src/contracts.ts"
-import { createPlacement } from "../src/placement.ts"
+import { createPlacement, isPermissionDenial } from "../src/placement.ts"
 import type {
   FakeContext,
   FakePermissionOutcome,
   FakeSessionSeed,
   FakeToolSeed,
 } from "./support/fake-context.ts"
-import { fakeContext } from "./support/fake-context.ts"
+import {
+  fakeContext,
+  permissionCorrection,
+  permissionDecline,
+  permissionDenial,
+} from "./support/fake-context.ts"
 
 const INPUT = {
   type: "object",
@@ -132,6 +137,22 @@ const order = (events: readonly string[], expected: readonly string[]): boolean 
   return false
 }
 
+const fieldOf = (message: string, label: string): string => {
+  const start = message.indexOf(`${label}: `)
+  if (start < 0) return "<missing>"
+  const rest = message.slice(start + label.length + 2)
+  const end = rest.search(/[,)]/)
+  return end < 0 ? rest : rest.slice(0, end)
+}
+
+const ask = { agent: "general", description: "task", prompt: "do it" }
+
+const rejectionOf = async (h: Harness): Promise<Error> => {
+  const failure = await h.execute({ ...ask, directory: h.destination }).catch((error: unknown) => error)
+  expect(failure).toBeInstanceOf(Error)
+  return failure as Error
+}
+
 describe("placement gate: one batched skill assert before the move", () => {
   it("asserts the destination's indexed nested IDs with the call session, the child agent and a tool source", async () => {
     const h = await harness()
@@ -188,5 +209,58 @@ describe("placement gate: one batched skill assert before the move", () => {
     expect(h.forwarded).toEqual([{ sessionID: "child-1", status: "running" }])
     expect(h.fake.prompts.map((prompt) => prompt.text)).toEqual(["do it"])
     expect(result).toBe(h.results[0])
+  })
+})
+
+describe("placement gate: a deny refuses the placement", () => {
+  it("refuses without moving or prompting, and leaves the child created", async () => {
+    const h = await harness({ permission: { kind: "deny" } })
+
+    const failure = await rejectionOf(h)
+
+    expect(failure.message).toMatch(/^Subagent placement denied/)
+    expect(h.fake.moves).toHaveLength(0)
+    expect(h.fake.prompts).toHaveLength(0)
+    expect(h.fake.childSessions).toHaveLength(1)
+  })
+
+  it("names the child, the destination, the observed location and the asserted count", async () => {
+    const h = await harness({ permission: { kind: "deny" } })
+
+    const message = (await rejectionOf(h)).message
+
+    expect(fieldOf(message, "child session")).toBe("child-1")
+    expect(fieldOf(message, "requested directory")).toBe(h.destination)
+    expect(fieldOf(message, "observed location")).toBe(h.root)
+    expect(message).toContain("3 indexed nested skills")
+    expect(message).toContain("at least one is denied")
+    expect(message.endsWith("The child stays created and unprompted; nothing was rolled back.")).toBe(true)
+  })
+
+  it("keeps the host error as the cause, by identity", async () => {
+    const denial = permissionDenial("skill is denied")
+    const h = await harness({ permission: { kind: "reject", error: denial } })
+
+    const failure = await rejectionOf(h)
+
+    expect(failure.cause).toBe(denial)
+    expect(failure.message).toMatch(/^Subagent placement denied/)
+  })
+
+  it("keeps a custom deny reason reachable through the cause", async () => {
+    const h = await harness({ permission: { kind: "deny", reason: "nested.a.deploy is denied" } })
+
+    const failure = await rejectionOf(h)
+
+    expect(failure.cause).toMatchObject({ error: { reason: "nested.a.deploy is denied" } })
+  })
+
+  it("recognises only a Tool.Error that carries a BlockedError", () => {
+    expect(isPermissionDenial(permissionDenial("denied"))).toBe(true)
+    expect(isPermissionDenial(permissionCorrection("change the agent"))).toBe(false)
+    expect(isPermissionDenial(permissionDecline())).toBe(false)
+    expect(isPermissionDenial(new Error("boom"))).toBe(false)
+    expect(isPermissionDenial(undefined)).toBe(false)
+    expect(isPermissionDenial({})).toBe(false)
   })
 })
