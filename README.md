@@ -114,6 +114,17 @@ outside this project and its worktrees) creates no child. A placement that fails
 exists leaves it created and unprompted; nothing is rolled back. Limits and consequences:
 [docs/limits.md](docs/limits.md).
 
+A `skill` deny rule that targets a `nested.*` ID refuses the placement before the move; the gate
+is policy on this argument only, not a boundary. A deny rule that targets a nested ID
+(`nested.*`, `nested.<scope>.*`, or an exact ID) is enforced at placement only over the entries
+the parent's registry had indexed at the time of the call. It does not cover: skills under the
+destination that the parent never indexed (created after the last refresh, beyond the depth cap,
+under a pruned directory, or in a directory without a subproject marker); the destination's
+native IDs, which are the IDs those same skills carry after the move; any later change to the
+destination's own permission configuration; and any other path into the destination — including
+the native `opencode_session_move` tool, which moves a session with no skill-permission check at
+all. The `nested.` prefix is a naming convention, not a policy boundary.
+
 ## Limits
 
 | Limit | Value |

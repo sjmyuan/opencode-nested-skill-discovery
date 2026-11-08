@@ -29,7 +29,7 @@ export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
     watchDirectory: nodeWatchFactory,
     executeCommand: createCommandExecutor(ctx),
   })
-  const placement = createPlacement(ctx)
+  const placement = createPlacement(ctx, { readSnapshot: () => registry.snapshot })
 
   try {
     await registry.activate()
