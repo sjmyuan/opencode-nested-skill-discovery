@@ -336,9 +336,9 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
   }
 
   const wrapExecute =
-    (native: PlacementTool): PlacementExecute =>
+    (execute: PlacementExecute): PlacementExecute =>
     (raw, context) =>
-      route(native.execute, raw, context)
+      route(execute, raw, context)
 
   return {
     get diagnostics() {
@@ -357,10 +357,11 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
             }
             const input = extendInput(native.input)
             const description = extendDescription(native.description)
+            const execute = native.execute
             editor.update("subagent", (tool) => {
               tool.input = input
               tool.description = description
-              tool.execute = wrapExecute(native)
+              tool.execute = wrapExecute(execute)
             })
           } catch (error) {
             skip(reasonOf(error))
