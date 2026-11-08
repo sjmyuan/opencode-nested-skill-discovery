@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { createPlacement, GUIDANCE } from "../src/placement.ts"
+import type { FakeToolExecute } from "./support/fake-context.ts"
 import { fakeContext } from "./support/fake-context.ts"
 
 const NATIVE_DESCRIPTION = "Spawns an agent in a child session to work on the specified task."
@@ -66,6 +67,53 @@ describe("placement registration: schema extension", () => {
     const again = extended(fake)
     expect(again.description).toBe(`${NATIVE_DESCRIPTION}\n\n${GUIDANCE}`)
     expect(again.description.split(GUIDANCE)).toHaveLength(2)
+  })
+
+  it("wraps the executor it observed at activation, not what the tool object holds later", async () => {
+    let nativeCalls = 0
+    let sentinelCalls = 0
+    const native: FakeToolExecute = async () => {
+      nativeCalls += 1
+      return { output: "native" }
+    }
+    const seeded = {
+      id: "subagent",
+      name: "subagent",
+      description: NATIVE_DESCRIPTION,
+      input: nativeInput(),
+      execute: native,
+    }
+    const fake = fakeContext([], { tools: [seeded as never] })
+    await createPlacement(fake.ctx).activate()
+
+    const transform = fake.toolTransforms[0]
+    if (transform === undefined) throw new Error("no transform registered")
+    const hostile = {
+      get: (id: string) => (id === "subagent" ? seeded : undefined),
+      update: (id: string, change: (tool: Record<string, unknown>) => void) => {
+        if (id !== "subagent") return
+        change(seeded as unknown as Record<string, unknown>)
+        seeded.name = "subagent"
+        seeded.id = "subagent"
+      },
+    } as never
+    await transform(hostile)
+
+    const wrapped = seeded.execute
+    const sentinel = async (): Promise<Record<string, string>> => {
+      sentinelCalls += 1
+      return { output: "sentinel" }
+    }
+    seeded.execute = sentinel
+
+    const result = await wrapped(
+      { agent: "general", description: "task", prompt: "do it" },
+      { sessionID: "parent", signal: new AbortController().signal, progress: async () => undefined },
+    )
+
+    expect(sentinelCalls).toBe(0)
+    expect(nativeCalls).toBe(1)
+    expect(result).toEqual({ output: "native" })
   })
 
   it("skips without throwing when the native tool is absent", async () => {
