@@ -106,12 +106,12 @@ is in [limits.md](limits.md).
 An entry's ID is `nested.<scopeToken>.<skillToken>` (`src/indexer.ts:199`):
 
 - scope token = `slug(basename(subprojectRealPath), 24)` + `-` + first 8 hex of the SHA-256
-  of the subproject's canonical path (`src/indexer.ts:45-47`, `28-37`)
+  of the subproject's canonical path (`src/indexer.ts:48-50`, `28-37`)
 - skill token = `slug(nativeId, 40)` + `-` + first 8 hex of the SHA-256 of the skill file's
-  canonical path (`src/indexer.ts:49-51`)
+  canonical path (`src/indexer.ts:62-64`)
 
 `nativeId` is the file name without `.md`, or the containing directory's name for a
-`SKILL.md` (`src/indexer.ts:39-43`). Both slugs are lower-cased `[a-z0-9-]` runs; a name
+`SKILL.md` (`src/indexer.ts:42-46`). Both slugs are lower-cased `[a-z0-9-]` runs; a name
 with no usable characters becomes `x` (`src/indexer.ts:30-37`).
 
 Two consequences matter in practice: an ID never contains anything but `nested.`, two
@@ -146,7 +146,7 @@ Derivation is `node:fs` only — one memoised `lstat` per ancestor down to the l
 never a `git` subprocess (`src/family.ts:58-131`, `155-231`). The filter then drops every
 entry whose checkout is not its family survivor, in scope, whether or not the survivor holds
 the same **checkout-relative** path (`src/family.ts:240-284`); it runs after realpath and
-native-ID dedupe and before ID assignment (`src/indexer.ts:251-253`), so a suppressed entry is
+native-ID dedupe and before ID assignment (`src/indexer.ts:254-256`), so a suppressed entry is
 never minted, never enters the snapshot, cache, or manifest, and no corrective reload is
 needed. The rule applies only when the checkout and the survivor are both strict descendants
 of the location: a session inside the worktree has the main checkout outside its subtree, so
