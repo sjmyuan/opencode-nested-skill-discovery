@@ -152,8 +152,8 @@ Symlinks are inspected, never followed blindly (`src/scan.ts:196-214`, `269-300`
 ## Placement
 
 `subagent({..., directory})` moves the child session to the destination before this call's
-task is admitted (`src/placement.ts`). The destination is absolute, relative to the calling
-session, or a `~/` path; the resolved value is `realpath`-normalised and must be a directory.
+task is admitted (`src/placement.ts`). The destination is absolute, relative to the location
+serving the call, or a `~/` path; the resolved value is `realpath`-normalised and must be a directory.
 
 - the boundary is the caller's location, the project directory (never `/` itself), or one of
   the project's worktrees — the same internal set `FileAccess.resolve` uses
