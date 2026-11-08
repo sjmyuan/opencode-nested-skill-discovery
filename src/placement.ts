@@ -8,11 +8,13 @@ import { compareText } from "./contracts.ts"
 import type { RegistrySnapshot } from "./contracts.ts"
 
 /**
- * Placement narrows the child to its destination, so the host stays cut down to the
- * domains placement needs: no permission surface is reachable from here (ADR-exposure-02 D1).
+ * Placement narrows the child to its destination, so the host stays cut down to the domains
+ * placement needs. The pre-placement `skill` assert is one of them (ADR-exposure-02 D3); the
+ * gate it runs is policy on the `directory` argument, not a boundary.
  */
 export interface PlacementHost {
   readonly location: Pick<Plugin.Context["location"], "directory" | "project">
+  readonly permission: Pick<Plugin.Context["permission"], "assert">
   readonly tool: Pick<Plugin.Context["tool"], "transform">
   readonly session: Pick<Plugin.Context["session"], "get" | "move">
   readonly worktree: Pick<Plugin.Context["worktree"], "list">
@@ -24,6 +26,9 @@ type PlacementExecute = PlacementTool["execute"]
 type PlacementContext = Parameters<PlacementExecute>[1]
 type SessionID = Parameters<PlacementHost["session"]["get"]>[0]["sessionID"]
 type SessionDirectory = Parameters<PlacementHost["session"]["move"]>[0]["directory"]
+type AgentID = NonNullable<Parameters<Plugin.Context["permission"]["assert"]>[0]["agent"]>
+
+const EMPTY_SNAPSHOT: RegistrySnapshot = { location: "", snapshots: [] }
 
 export interface PlacementOptions {
   readonly timeoutMs?: number
@@ -31,6 +36,7 @@ export interface PlacementOptions {
   readonly sleep?: (ms: number) => Promise<void>
   readonly now?: () => number
   readonly home?: string
+  readonly readSnapshot?: () => RegistrySnapshot
 }
 
 export interface Placement {
@@ -212,6 +218,7 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
   const sleep = options.sleep ?? defaultSleep
   const now = options.now ?? Date.now
   const home = options.home ?? process.env.HOME ?? homedir()
+  const readSnapshot = options.readSnapshot ?? (() => EMPTY_SNAPSHOT)
   let registration: { dispose: () => Promise<void> | void } | undefined
   let disposed = false
 
@@ -237,12 +244,36 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
     }
   }
 
+  const assertPlacementSkill = async (
+    destination: string,
+    childAgent: AgentID | undefined,
+    context: PlacementContext,
+  ): Promise<void> => {
+    if (childAgent === undefined) {
+      skip("gate skipped: the child agent is not known")
+      return
+    }
+    const ids = nestedIDsUnder(readSnapshot(), destination)
+    if (ids.length === 0) {
+      skip(`gate skipped: no indexed nested entries under ${destination}`)
+      return
+    }
+    await host.permission.assert({
+      sessionID: context.sessionID,
+      agent: childAgent,
+      action: "skill",
+      resources: [...ids],
+      source: { type: "tool", messageID: context.messageID, id: context.id },
+    })
+  }
+
   const placeChild = async (
     childSessionID: string,
     destination: string,
+    childAgent: AgentID | undefined,
     beforeBusy: unknown,
     beforeKnown: boolean,
-    signal: AbortSignal | undefined,
+    context: PlacementContext,
   ): Promise<void> => {
     const first = await readSession(childSessionID)
     const observed = directoryOf(first) ?? "unknown"
@@ -256,10 +287,12 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
           : "The child's state could not be read before the task started, so placement could not confirm it was still unprompted.",
       )
     }
+    await assertPlacementSkill(destination, childAgent, context)
     if (observed === destination) return
 
     // The deadline starts before `move`: probing and booting the destination graph happens inside it.
     const deadline = now() + timeoutMs
+    const signal = context.signal
     const moved = await waitWithBudget(
       host.session.move({ sessionID: childSessionID as SessionID, directory: destination as SessionDirectory }),
       deadline - now(),
@@ -339,6 +372,8 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
 
     const continuation =
       typeof source.sessionID === "string" && source.sessionID !== "" ? source.sessionID : undefined
+    const childAgent =
+      typeof source.agent === "string" && source.agent !== "" ? (source.agent as AgentID) : undefined
     const before = continuation === undefined ? undefined : await readSession(continuation)
     const beforeKnown = continuation === undefined || before !== undefined
     const beforeBusy = busyOf(before)
@@ -347,7 +382,7 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
     const progress: PlacementContext["progress"] = async (update) => {
       const child = placed ? undefined : childOf(update)
       if (child !== undefined) {
-        await placeChild(child, destination, beforeBusy, beforeKnown, context.signal)
+        await placeChild(child, destination, childAgent, beforeBusy, beforeKnown, context)
         placed = true
       }
       await context.progress(update)

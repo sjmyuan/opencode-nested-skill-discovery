@@ -101,6 +101,44 @@ export interface FakePromptCall {
   readonly input: Record<string, unknown>
 }
 
+export interface FakePermissionCall {
+  readonly sessionID: string
+  readonly agent?: string
+  readonly action: string
+  readonly resources: readonly string[]
+  readonly save?: readonly string[]
+  readonly source?: { readonly type: "tool"; readonly messageID: string; readonly id: string }
+}
+
+export type FakePermissionOutcome =
+  | { kind: "allow" }
+  | { kind: "ask" }
+  | { kind: "deny"; reason?: string }
+  | { kind: "decline" }
+  | { kind: "reject"; error: unknown }
+
+/** The shape the promise adapter produces for a deny rule; the core error nests under `.error`. */
+export const permissionDenial = (reason?: string, resources: readonly string[] = []): unknown => ({
+  _tag: "Tool.Error",
+  message: reason ?? "Permission denied: skill",
+  error: {
+    _tag: "Permission.BlockedError",
+    permission: "skill",
+    resources: [...resources],
+    rules: [],
+    ...(reason === undefined ? {} : { reason }),
+  },
+})
+
+/** A decline without feedback is a defect, not a typed failure. */
+export const permissionDecline = (): unknown => ({ _tag: "Permission.DeclinedError" })
+
+export const permissionCorrection = (feedback: string): unknown => ({
+  _tag: "Tool.Error",
+  message: feedback,
+  error: { _tag: "Permission.CorrectedError", feedback },
+})
+
 export interface FakeSwitchCall {
   readonly kind: "agent" | "model"
   readonly sessionID: string
@@ -120,6 +158,7 @@ export interface FakeContextOptions {
   readonly sessions?: readonly FakeSessionSeed[]
   readonly tools?: readonly FakeToolSeed[]
   readonly onSessionOperation?: (operation: SessionOperation) => void
+  readonly onPermissionAssert?: () => void
 }
 
 export interface FakeContext {
@@ -147,6 +186,7 @@ export interface FakeContext {
   readonly prompts: readonly FakePromptCall[]
   readonly switches: readonly FakeSwitchCall[]
   readonly moves: readonly FakeMoveCall[]
+  readonly permissionCalls: readonly FakePermissionCall[]
   onReload: (() => void) | undefined
   onCommandReload: (() => void) | undefined
   setLocation(directory: string): void
@@ -161,6 +201,7 @@ export interface FakeContext {
   failSession(operation: SessionOperation, error?: unknown): void
   failSessionOnce(operation: SessionOperation, error?: unknown): void
   setMoveMode(mode: MoveMode, error?: unknown): void
+  setPermission(outcome: FakePermissionOutcome): void
   releaseMove(): void
   setMoveLag(reads: number | undefined): void
   markBusy(sessionID: string): void
@@ -221,6 +262,8 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   const sessionFailures = new Map<SessionOperation, unknown>()
   const sessionOnceFailures = new Map<SessionOperation, unknown>()
   const moves: FakeMoveCall[] = []
+  const permissionCalls: FakePermissionCall[] = []
+  let permissionOutcome: FakePermissionOutcome = { kind: "allow" }
   let moveMode: MoveMode = "apply"
   let moveError: unknown = new Error("move rejected")
   const heldMoves: Array<() => void> = []
@@ -451,6 +494,17 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
       },
     },
     location,
+    permission: {
+      assert: async (input: FakePermissionCall) => {
+        permissionCalls.push(input)
+        options.onPermissionAssert?.()
+        if (permissionOutcome.kind === "deny") {
+          throw permissionDenial(permissionOutcome.reason, input.resources)
+        }
+        if (permissionOutcome.kind === "decline") throw permissionDecline()
+        if (permissionOutcome.kind === "reject") throw permissionOutcome.error
+      },
+    },
     tool: {
       transform: (callback: ToolTransformCallback) => {
         toolTransforms.push(callback)
@@ -585,6 +639,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     get moves() {
       return moves
     },
+    get permissionCalls() {
+      return permissionCalls
+    },
     get commandDefinitions() {
       return [...commandEntries.values()]
     },
@@ -661,6 +718,9 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     setMoveMode(mode: MoveMode, error: unknown = new Error("move rejected")) {
       moveMode = mode
       moveError = error
+    },
+    setPermission(outcome: FakePermissionOutcome) {
+      permissionOutcome = outcome
     },
     releaseMove() {
       for (const resolve of heldMoves.splice(0)) resolve()
