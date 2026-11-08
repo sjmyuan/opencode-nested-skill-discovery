@@ -56,7 +56,7 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:580-658` |
 | 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:668-716`, `src/registry.ts:239-255` |
 
-That table is the skill pipeline. After the skill manifest stage, five **non-fatal** command
+That table is the skill pipeline. After the skill manifest stage, six **non-fatal** command
 stages run around the skill reload: compose the surviving commands' names, drop native
 collisions, build the frozen command snapshot, persist and swap it, call `command.reload()`
 exactly once, then audit the reloaded listing against that snapshot before reporting a shadow
@@ -68,7 +68,13 @@ the swap must be visible before the host rebuilds its skill list.
 
 Exactly one skill transform (`src/registry.ts:361-380`) and one command transform
 (`src/registry.ts:383-417`) are registered per registry, guarded by a `registering` promise.
-Refreshes reuse them and never add a second one. A refresh reloads skills once, twice when it
+Refreshes reuse them and never add a second one.
+
+Registration reads `ctx.command.list()` once before that transform exists, so the names the
+host already holds — the pre-phase builtins and MCP prompts — seed the native pre-drop; a name
+that appears later is not seeded and stays native-owned for this registry's lifetime.
+
+A refresh reloads skills once, twice when it
 suppresses a duplicate in the same pass, and a deferred check that later suppresses one
 reloads on its own after the refresh has returned (`src/registry.ts:853`). Commands reload
 exactly once per refresh that reaches the command stages, alongside — never instead of — the
@@ -299,7 +305,7 @@ advertised list is whatever the last completed step produced.
 | A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:591-655` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
 | A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |
-| A published command never appears | a native name shadows it or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the audit reports `native-shadow-audit:` and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:639-655`, `src/command-shadow.ts:86-117` |
+| A published command never appears | a native name shadows it, or its name was already a builtin or MCP prompt when the transform was registered, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the audit reports `native-shadow-audit:` and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:639-655`, `src/command-shadow.ts:86-117` |
 
 When the pre-drop stage never ran, the audit is handed `EMPTY_NATIVE_COMMANDS`
 (`src/command-audit.ts:5-10`): its `complete: true` asserts only that **no walk happened**, so

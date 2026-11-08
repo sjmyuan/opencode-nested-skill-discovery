@@ -18,7 +18,7 @@ plugin configuration, so none of them can be changed from `opencode.json`.
 | Native command-name walk | shares the directory and file budgets above; reads no content | a truncated walk stops early and reports `budget-*`; its `complete` flag is computed and never surfaced (`src/command-native.ts:129-133`) |
 | Display name | 80 code points | leading path segments dropped behind `…/` |
 | Command name | 160 code points (`MAX_COMMAND_NAME_LENGTH`, `src/command-names.ts`) | never truncated: a longer name is kept whole and logged as `name-too-long:`, while skill display names still cut at 80 |
-| Description | 500 code points | truncated |
+| Skill description | 500 code points | truncated; a command description is stored verbatim and never capped (native parity) |
 | Scope slug / skill slug | 24 / 40 characters | slug truncated, hash keeps the ID unique |
 | Entry ID | 96 characters declared | structural maximum is 90, so no ID is ever cut |
 | Command template | the file body, so the same 128 KiB per-file limit | the whole command file is skipped with `command-oversize:`; the command snapshot adds no new budget |
@@ -34,9 +34,10 @@ A `model:` selection is canonicalised before storage: both frontmatter forms —
 short string (`src/command-model.ts:58-64`), so the cache, the listing, and the routing
 reference can never disagree about which model a command selects.
 
-One divergence is recorded, not fixed: the template is stored verbatim, while native trims it at
-decode (`packages/core/src/config/plugin/command.ts:177`), so a body ending in a newline plus
-trailing arguments expands with one extra blank line (`src/command-expand.ts:71-77`).
+The template is stored verbatim, but the append step trims the template's trailing whitespace
+before inserting the blank line, so a body ending in a newline plus trailing arguments expands
+with the same one blank line native produces by trimming at decode
+(`packages/core/src/config/plugin/command.ts:177`, `src/command-expand.ts:71-77`).
 
 ## Depth
 
@@ -172,7 +173,7 @@ a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders
 | Field | Cap | Behaviour |
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
-| description | 500 code points | cut (`src/registry.ts:115-119`) |
+| skill description | 500 code points | cut (`src/registry.ts:115-119`); a command description is stored verbatim |
 | scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:45-47`) |
 | skill slug | 40 | cut, same (`src/indexer.ts:49-51`) |
 
