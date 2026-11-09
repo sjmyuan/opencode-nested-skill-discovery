@@ -64,7 +64,7 @@ const DIRECTORY_PROPERTY: JsonSchema.JsonSchema = {
   type: "string",
   minLength: 1,
   description:
-    'Optional working directory for the child. Absolute, or relative to the location serving the call; a leading "~" expands to the home directory. The child moves before this task is admitted, so its first request runs there.',
+    "Supply `directory` when the task belongs to a nested subproject or checkout and the child must be assembled from that destination's instructions, skills, agents, config and permissions; the child narrows to the destination and loses sibling subprojects. Omit it when the task belongs to the caller's own context and should keep the caller's current location and its union. The value is an absolute path or a path relative to the location serving the call, and a leading ~ expands to the home directory. The child moves before this task is admitted, so its first request runs at the destination. The destination must be inside this project or one of its worktrees. With sessionID a different directory moves the child again at the next boundary; history is preserved, but relative paths in it are not rewritten. A refused destination creates no child; a failure after the child exists leaves it created and unprompted and is not rolled back.",
 }
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
