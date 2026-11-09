@@ -1,8 +1,10 @@
+import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { setup } from "../src/plugin.ts"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext, type FakeContextOptions } from "./support/fake-context.ts"
 import { createRegistryFixture, type RegistryFixture } from "./support/registry-fixtures.ts"
+import { createFixture } from "./support/scan-fixtures.ts"
 
 const DOC = (name: string): string => `---\nname: ${name}\ndescription: ${name}.\n---\n# ${name}\n`
 
@@ -110,5 +112,80 @@ describe("scan limits from options", () => {
 
     expect(pathsOf(configured)).toEqual([])
     expect(pathsOf(plain)).toHaveLength(5)
+  })
+})
+
+describe("invalid scan options", () => {
+  it("reports one line for a rejected key and still activates", async () => {
+    const limited = await harness({ options: { maxFiles: "7" } })
+
+    const outcome = await limited.registry.activate()
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.diagnostics.filter((line) => line.startsWith("option-invalid:"))).toEqual([
+      'option-invalid: maxFiles="7"',
+    ])
+    // The default budget still applies, so all five skills are advertised.
+    expect(outcome.skills).toBe(5)
+  })
+
+  it("reports several rejected keys in declaration order and nothing else", async () => {
+    const fixture = await createRegistryFixture()
+    cleanups.push(() => fixture.cleanup())
+    const fake = fakeContext([], { directory: fixture.root, options: { maxDepth: -1, maxTotalBytes: Infinity } })
+    const registry = createRegistry(fake.ctx)
+    cleanups.push(() => registry.dispose())
+
+    const outcome = await registry.activate()
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.diagnostics).toEqual([
+      "option-invalid: maxDepth=-1",
+      "option-invalid: maxTotalBytes=Infinity",
+    ])
+  })
+
+  it("stays silent for an unknown key and scans at the defaults", async () => {
+    const typo = await harness({ options: { maxDirectorie: 500 } })
+
+    const outcome = await typo.registry.activate()
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.diagnostics.some((line) => line.startsWith("option-invalid:"))).toBe(false)
+    expect(outcome.skills).toBe(5)
+  })
+
+  it("keeps the option line first under the 200-line cap", async () => {
+    const fixture = await createFixture()
+    cleanups.push(() => fixture.cleanup())
+    for (let index = 0; index < 205; index += 1) {
+      await fixture.symlink(
+        `A/.opencode/skills/broken-${String(index).padStart(3, "0")}.md`,
+        join(fixture.root, "missing", `${index}.md`),
+      )
+    }
+    const fake = fakeContext([], { directory: fixture.root, options: { maxFiles: "7" } })
+    const registry = createRegistry(fake.ctx)
+    cleanups.push(() => registry.dispose())
+
+    const outcome = await registry.activate()
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.diagnostics).toHaveLength(200)
+    expect(outcome.diagnostics[0]).toBe('option-invalid: maxFiles="7"')
+    expect(outcome.diagnostics[199]).toMatch(/^truncated: \d+ more diagnostics$/)
+  })
+
+  it("repeats the line on every refresh", async () => {
+    const limited = await harness({ options: { maxFiles: "7" } })
+
+    const first = await limited.registry.activate()
+    const second = await limited.registry.refresh()
+
+    for (const outcome of [first, second]) {
+      expect(outcome.diagnostics.filter((line) => line.startsWith("option-invalid:"))).toEqual([
+        'option-invalid: maxFiles="7"',
+      ])
+    }
   })
 })

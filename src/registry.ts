@@ -489,6 +489,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     clearDeferredTimers()
 
     const diagnostics: string[] = [
+      ...scanLimits.diagnostics,
       ...replayDiagnostics.splice(0),
       ...commandDiagnostics.splice(0),
       ...deferredDiagnostics.splice(0),
