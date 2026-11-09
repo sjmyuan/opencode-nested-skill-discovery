@@ -129,7 +129,7 @@ all. The `nested.` prefix is a naming convention, not a policy boundary.
 
 | Limit | Value |
 |---|---|
-| Subproject depth | 5 directories below the workspace; unbounded inside an opened skill root |
+| Subproject depth | 5 directories below the workspace at the default; unbounded inside an opened skill root |
 | Scan budgets | 100,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total (defaults) |
 | Skill display caps | name 80 code points · description 500; a command description is never capped |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
@@ -168,7 +168,8 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
 - **An expected skill is missing.** Check the subproject has one of the ten markers
   (`.opencode/skills`, `.opencode/skill`, `.claude/skills`, `.agents/skills`,
   `.opencode/command`, `.opencode/commands`, `AGENTS.md`, `CLAUDE.md`, `.git`, `.hg`),
-  that it sits at most 5 directories below the workspace, and
+  that it sits at most 5 directories below the workspace (the default `maxDepth`; raise it as a
+  plugin option — [docs/limits.md](docs/limits.md#configuring-the-limits)), and
   that no directory in the path is pruned (`node_modules`, `dist`, `vendor`, …). Only
   `*.md` directly under a skill root and `SKILL.md` below it count.
 - **A skill never appears even though it exists on disk.** A `skill` rule that denies its

@@ -3,7 +3,7 @@
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The five
 scan budgets are **defaults** declared in `src/contracts.ts:142-148` and each one is
 overridable from the plugin entry's `options` object: the registry resolves them once at
-construction (`src/options.ts:34-52`, `src/registry.ts:319`) and hands the same object to the
+construction (`src/options.ts:34-51`, `src/registry.ts:319`) and hands the same object to the
 skill scan (`src/registry.ts:546`) and to the native command-name walk
 (`src/registry.ts:605`). An auto-discovered directory plugin receives `{}`, so zero-config
 behaviour is the defaults — apart from the raised directory budget below.
@@ -12,7 +12,7 @@ behaviour is the defaults — apart from the raised directory budget below.
 
 | Limit | Value | Consequence |
 |---|---|---|
-| Subproject depth | 5 directories below the location | a depth-6 subproject is invisible |
+| Subproject depth | 5 directories below the location (default) | a depth-6 subproject is invisible at the default |
 | Directories scanned | 100,000 (default) | scan stops, partial index advertised |
 | Skill and command files | 5,000 | scan stops, partial index advertised |
 | One skill or command file | 128 KiB | that file is skipped, scan continues |
@@ -70,7 +70,7 @@ form carries them — a bare string names the source but passes no options:
 | `maxFileBytes` | 131,072 (128 KiB) | one skill or command file |
 | `maxTotalBytes` | 16,777,216 (16 MiB) | all admitted bytes together |
 
-Resolution is fail-safe per key (`src/options.ts:34-52`): a value that is not a finite number
+Resolution is fail-safe per key (`src/options.ts:34-51`): a value that is not a finite number
 `>= 0` — a string such as `"100000"`, `null`, `true`, `NaN`, `Infinity`, a negative — falls
 back to that key's default, activation still succeeds, and the refresh outcome carries one
 location-independent line:
@@ -103,11 +103,12 @@ diagnostic cap. Everything else is quiet, and the sharp edges are these:
 
 Depth counts directories between the location and the **subproject** — a directory that
 carries a marker — not directories between the location and the skill file
-(`src/scan.ts:147`, `163-166`; `src/contracts.ts:110-116`).
+(`src/scan.ts:147`, `163-166`; `src/contracts.ts:110-116`). The cap is the `maxDepth`
+option, defaulting to 5:
 
-- a subproject at depth 5 is discovered, and its `SKILL.md` may sit many levels deeper
-  (`test/scan.test.ts:213-224`)
-- a subproject at depth 6 is invisible, silently and without a diagnostic
+- a subproject at depth 5 is discovered at the default, and its `SKILL.md` may sit many
+  levels deeper (`test/scan.test.ts:213-224`)
+- a subproject at depth 6 is invisible at the default, silently and without a diagnostic
   (`test/scan.test.ts:226-236`)
 - inside an opened skill root the walk is unbounded, so
   `A/.opencode/skills/a/b/c/d/e/f/SKILL.md` is still found (`test/scan.test.ts:248-260`)

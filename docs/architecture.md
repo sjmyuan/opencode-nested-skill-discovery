@@ -46,7 +46,7 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 
 | # | Stage | Where |
 |---|---|---|
-| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:41-47`, `491-492` |
+| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:41-47`, `498-499` |
 | 2 | Resolve the native skill roots to exclude | `src/registry.ts:500`, `src/native.ts:37-49` |
 | 3 | Scan the location for skill candidates, then reconcile the watcher set from them | `src/registry.ts:545-553`, `src/scan.ts:74-136` |
 | 4 | Read, parse, and dedupe candidates, then drop every non-survivor checkout of a repo family | `src/registry.ts:557-573`, `src/indexer.ts:205-258`, `src/family.ts:276-304` |
@@ -315,7 +315,7 @@ advertised list is whatever the last completed step produced.
 | Scan, index, snapshot, or manifest throws | one `<stage>: <reason>` diagnostic, **previous** snapshot kept, `ok: false` | `src/registry.ts:95-106`, `src/registry.ts:545-593` |
 | The location is missing or not a directory | empty snapshot persisted and swapped, `scan: … is not a directory`, `ok: false` | `src/registry.ts:502-543` |
 | Diagnostics exceed 200 | truncated with `truncated: N more diagnostics` | `src/registry.ts:86-91` |
-| A plugin option is invalid | that key's default applies, activation succeeds, and one `option-invalid: <key>=<value>` line is prepended to the outcome's diagnostics, ahead of every scan line | `src/options.ts:34-52`, `src/registry.ts:492` |
+| A plugin option is invalid | that key's default applies, activation succeeds, and one `option-invalid: <key>=<value>` line is prepended to the outcome's diagnostics, ahead of every scan line | `src/options.ts:34-51`, `src/registry.ts:492` |
 | Scan diagnostics exceed 200 | truncated with `diagnostics-truncated` | `src/scan.ts:44`, `src/scan.ts:89-98` |
 | A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:549`, `src/scan.ts:425-465` |
 | The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:664-665` |
