@@ -28,6 +28,7 @@ import { createFamilyPass } from "./family.ts"
 import { persistCommands, persistRegistry } from "./manifest.ts"
 import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
+import { resolveScanLimits } from "./options.ts"
 import { applyRegistry } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
 import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory } from "./watch.ts"
@@ -314,6 +315,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const now = options.now ?? (() => Date.now())
   const executeCommand = options.executeCommand
   const withWriteGate = createWriteGate()
+  // Resolved once per instance: the host options are fixed for the registry's life (ADR R8).
+  const scanLimits = resolveScanLimits(ctx.options)
 
   const debouncer =
     options.watchDirectory === undefined
@@ -486,6 +489,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     clearDeferredTimers()
 
     const diagnostics: string[] = [
+      ...scanLimits.diagnostics,
       ...replayDiagnostics.splice(0),
       ...commandDiagnostics.splice(0),
       ...deferredDiagnostics.splice(0),
@@ -539,7 +543,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     }
 
     const scanned = await runStage(diagnostics, "scan", () =>
-      scanSkills({ location: base, excludeRoots: nativeRoots }),
+      scanSkills({ location: base, excludeRoots: nativeRoots, limits: scanLimits.limits }),
     )
     if (!scanned.ok) return record(fail(diagnostics))
     if (scanned.value.truncated) diagnostics.push("scan-truncated")
@@ -598,7 +602,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       }
 
       const composed = nameLedger.compose(planned, base)
-      const native = await resolveNativeCommandNames(nativeInput())
+      const native = await resolveNativeCommandNames(nativeInput(), scanLimits.limits)
       nativeIndex = native
       const dropped = shadowTracker.drop(
         composed.commands.map((command) => ({ ...command, name: command.publishedName })),

@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Plugin, Skill } from "@opencode/plugin"
+import type { Plugin, PluginOptions, Skill } from "@opencode/plugin"
 import type { Schema } from "effect"
 import type { CommandEditor, SkillEditor } from "../../src/plugin.ts"
 
@@ -147,6 +147,7 @@ export interface FakeSwitchCall {
 
 export interface FakeContextOptions {
   readonly directory?: string
+  readonly options?: PluginOptions
   readonly storage?: Iterable<readonly [string, Schema.Json]>
   /** Share one store across instances, as the plugin-id-namespaced host storage does. */
   readonly storageMap?: Map<string, Schema.Json>
@@ -414,6 +415,8 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
 
   // Only the faked domains exist: any other host capability in setup is a loud failure.
   const ctx = {
+    // The plugin-entry options object; an options-free fake carries `{}`, as the host does.
+    options: options.options ?? {},
     skill: {
       transform: (callback: TransformCallback) => {
         const sync = syncFailures.get("skill.transform")

@@ -129,8 +129,8 @@ all. The `nested.` prefix is a naming convention, not a policy boundary.
 
 | Limit | Value |
 |---|---|
-| Subproject depth | 5 directories below the workspace; unbounded inside an opened skill root |
-| Scan budgets | 20,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total |
+| Subproject depth | 5 directories below the workspace at the default; unbounded inside an opened skill root |
+| Scan budgets | 100,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total (defaults) |
 | Skill display caps | name 80 code points · description 500; a command description is never capped |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
@@ -138,7 +138,9 @@ all. The `nested.` prefix is a naming convention, not a policy boundary.
 | Worktree family | a linked worktree of the main checkout is hidden from an ancestor workspace, at the checkout root and in every nested subproject beneath it; only the main checkout's skills are advertised |
 | Scale | around 50 nested entries is the point to revisit on-demand listing |
 
-A truncated scan still advertises what it found. No limit is configurable in this release.
+A truncated scan still advertises what it found. The five scan budgets are optional plugin
+options on the `opencode.json` entry — defaults, the object form, and the fail-safe for an
+invalid value are in [docs/limits.md](docs/limits.md#configuring-the-limits).
 
 ## Permissions
 
@@ -166,7 +168,8 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
 - **An expected skill is missing.** Check the subproject has one of the ten markers
   (`.opencode/skills`, `.opencode/skill`, `.claude/skills`, `.agents/skills`,
   `.opencode/command`, `.opencode/commands`, `AGENTS.md`, `CLAUDE.md`, `.git`, `.hg`),
-  that it sits at most 5 directories below the workspace, and
+  that it sits at most 5 directories below the workspace (the default `maxDepth`; raise it as a
+  plugin option — [docs/limits.md](docs/limits.md#configuring-the-limits)), and
   that no directory in the path is pruned (`node_modules`, `dist`, `vendor`, …). Only
   `*.md` directly under a skill root and `SKILL.md` below it count.
 - **A skill never appears even though it exists on disk.** A `skill` rule that denies its
