@@ -66,7 +66,7 @@ describe("scan budgets", () => {
   it("matches the ADR defaults", () => {
     expect(DEFAULT_SCAN_LIMITS).toEqual({
       maxDepth: 5,
-      maxDirectories: 20_000,
+      maxDirectories: 100_000,
       maxFiles: 5_000,
       maxFileBytes: 131_072,
       maxTotalBytes: 16_777_216,
