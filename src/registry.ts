@@ -602,7 +602,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       }
 
       const composed = nameLedger.compose(planned, base)
-      const native = await resolveNativeCommandNames(nativeInput())
+      const native = await resolveNativeCommandNames(nativeInput(), scanLimits.limits)
       nativeIndex = native
       const dropped = shadowTracker.drop(
         composed.commands.map((command) => ({ ...command, name: command.publishedName })),

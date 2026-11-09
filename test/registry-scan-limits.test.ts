@@ -257,3 +257,40 @@ describe("per-location scan limits", () => {
     expect(innerSecond.diagnostics).toContain("scan-truncated")
   })
 })
+
+describe("native command walk", () => {
+  /**
+   * The location scans one nested command root (PD2 keeps the location's own command root
+   * native-owned, and an empty planned list skips the command stage entirely), while the two
+   * ancestor command files are only reachable by the native upward walk.
+   */
+  async function commandFixture(): Promise<string> {
+    const fixture = await createRegistryFixture()
+    cleanups.push(() => fixture.cleanup())
+    await fixture.write("workspace/A/.opencode/command/x.md", DOC("x"))
+    await fixture.write(".opencode/command/a.md", DOC("a"))
+    await fixture.write(".opencode/command/b.md", DOC("b"))
+    return fixture.realpathOf("workspace")
+  }
+
+  it("shares maxFiles with the native command walk", async () => {
+    const location = await commandFixture()
+    const limitedFake = fakeContext([], { directory: location, options: { maxFiles: 1 } })
+    const plainFake = fakeContext([], { directory: location })
+    const limited = createRegistry(limitedFake.ctx)
+    const plain = createRegistry(plainFake.ctx)
+    cleanups.push(() => limited.dispose(), () => plain.dispose())
+
+    const limitedOutcome = await limited.activate()
+    const plainOutcome = await plain.activate()
+
+    const budgetLines = (lines: readonly string[]): readonly string[] =>
+      lines.filter((line) => line.startsWith("budget-files:"))
+    expect(limitedOutcome.ok).toBe(true)
+    expect(budgetLines(limitedOutcome.diagnostics)).toEqual(["budget-files: maxFiles=1"])
+    // The only admitting walk is the native one: the scan sees a single command file.
+    expect(plainOutcome.diagnostics).toEqual([])
+    expect(plainFake.commandDefinitions.map((entry) => entry.name)).toEqual(["A:x"])
+    expect(limitedFake.commandDefinitions.map((entry) => entry.name)).toEqual(["A:x"])
+  })
+})
