@@ -189,3 +189,71 @@ describe("invalid scan options", () => {
     }
   })
 })
+
+interface Nested {
+  readonly fixture: RegistryFixture
+  readonly outer: ReturnType<typeof createRegistry>
+  readonly inner: ReturnType<typeof createRegistry>
+  readonly outerFake: ReturnType<typeof fakeContext>
+  readonly innerFake: ReturnType<typeof fakeContext>
+}
+
+/** `<root>` and `<root>/pkg` are two locations; each sees only its own options (RD5). */
+async function nested(outerOptions: FakeContextOptions["options"], innerOptions: FakeContextOptions["options"]): Promise<Nested> {
+  const fixture = await createRegistryFixture()
+  cleanups.push(() => fixture.cleanup())
+  await fixture.write("pkg/A/.opencode/skills/a.md", DOC("a"))
+  await fixture.write("pkg/B/.opencode/skills/b.md", DOC("b"))
+  const pkg = await fixture.realpathOf("pkg")
+  const outerFake = fakeContext([], { directory: fixture.root, options: outerOptions })
+  const innerFake = fakeContext([], { directory: pkg, options: innerOptions })
+  const outer = createRegistry(outerFake.ctx)
+  const inner = createRegistry(innerFake.ctx)
+  cleanups.push(() => outer.dispose(), () => inner.dispose())
+  return { fixture, outer, inner, outerFake, innerFake }
+}
+
+describe("per-location scan limits", () => {
+  it("keeps an outer budget out of the inner registry", async () => {
+    const pair = await nested({ maxDirectories: 3 }, undefined)
+
+    const outerFirst = await pair.outer.activate()
+    const innerFirst = await pair.inner.activate()
+
+    expect(outerFirst.ok).toBe(true)
+    expect(outerFirst.diagnostics).toContain("budget-directories: maxDirectories=3")
+    expect(outerFirst.diagnostics).toContain("scan-truncated")
+    expect(innerFirst.diagnostics).not.toContain("scan-truncated")
+    expect(innerFirst.skills).toBe(2)
+
+    const outerSecond = await pair.outer.refresh()
+    const innerSecond = await pair.inner.refresh()
+
+    expect(outerSecond.diagnostics).toContain("scan-truncated")
+    expect(innerSecond.diagnostics).not.toContain("scan-truncated")
+    expect(innerSecond.skills).toBe(2)
+    expect(pair.innerFake.editor.list()).toHaveLength(2)
+  })
+
+  it("keeps an inner budget out of the outer registry", async () => {
+    const pair = await nested(undefined, { maxDirectories: 3 })
+
+    const outerFirst = await pair.outer.activate()
+    const innerFirst = await pair.inner.activate()
+
+    expect(outerFirst.ok).toBe(true)
+    expect(outerFirst.diagnostics).not.toContain("scan-truncated")
+    expect(outerFirst.skills).toBe(2)
+    expect(innerFirst.diagnostics).toContain("budget-directories: maxDirectories=3")
+    expect(innerFirst.diagnostics).toContain("scan-truncated")
+    expect(innerFirst.skills).toBe(1)
+
+    const outerSecond = await pair.outer.refresh()
+    const innerSecond = await pair.inner.refresh()
+
+    expect(outerSecond.skills).toBe(2)
+    expect(outerSecond.diagnostics).not.toContain("scan-truncated")
+    expect(innerSecond.skills).toBe(1)
+    expect(innerSecond.diagnostics).toContain("scan-truncated")
+  })
+})
