@@ -1,16 +1,19 @@
 # Limits
 
-Every bound the plugin accepts, what triggers it, and what you see when it bites. The values
-are constants in `src/contracts.ts`: the refresh passes no `limits` override, so
-`DEFAULT_SCAN_LIMITS` always applies (`src/registry.ts:541-543`), and this release reads no
-plugin configuration, so none of them can be changed from `opencode.json`.
+Every bound the plugin accepts, what triggers it, and what you see when it bites. The five
+scan budgets are **defaults** declared in `src/contracts.ts:142-148` and each one is
+overridable from the plugin entry's `options` object: the registry resolves them once at
+construction (`src/options.ts:34-52`, `src/registry.ts:319`) and hands the same object to the
+skill scan (`src/registry.ts:546`) and to the native command-name walk
+(`src/registry.ts:605`). An auto-discovered directory plugin receives `{}`, so zero-config
+behaviour is the defaults — apart from the raised directory budget below.
 
 ## Summary
 
 | Limit | Value | Consequence |
 |---|---|---|
 | Subproject depth | 5 directories below the location | a depth-6 subproject is invisible |
-| Directories scanned | 20,000 | scan stops, partial index advertised |
+| Directories scanned | 100,000 (default) | scan stops, partial index advertised |
 | Skill and command files | 5,000 | scan stops, partial index advertised |
 | One skill or command file | 128 KiB | that file is skipped, scan continues |
 | Total skill and command bytes | 16 MiB | scan stops, partial index advertised |
@@ -28,6 +31,9 @@ The command template is the file body after the closing fence, so it is bounded 
 snapshot reader re-checks the limit on the bytes it read, because a file can grow between the
 scan and the read (`src/command-snapshot.ts:88-91`), and the template is then stored in
 `nested/<locationToken>/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
+That ceiling is independent of the `maxFileBytes` option: raising the option scans a larger
+command file and then drops it at this stage with `command-oversize:`, while lowering it drops
+the file before the snapshot stage.
 
 A `model:` selection is canonicalised before storage: both frontmatter forms —
 `providerID/model#variant?` and the `{providerID, model, variant?}` mapping — become the one
@@ -38,6 +44,60 @@ The template is stored verbatim, but the append step trims the template's traili
 before inserting the blank line, so a body ending in a newline plus trailing arguments expands
 with the same one blank line native produces by trimming at decode
 (`packages/core/src/config/plugin/command.ts:177`, `src/command-expand.ts:71-77`).
+
+## Configuring the limits
+
+The five scan budgets are optional plugin options (ADR R8). Only the `opencode.json` object
+form carries them — a bare string names the source but passes no options:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    {
+      "package": "./.opencode/plugins/nested-skill-discovery",
+      "options": { "maxDirectories": 100000 }
+    }
+  ]
+}
+```
+
+| Option | Default | Bounds |
+|---|---|---|
+| `maxDepth` | 5 | subproject directories below the location |
+| `maxDirectories` | 100,000 | directories visited by the scan, and by the native command walk |
+| `maxFiles` | 5,000 | admitted skill and command files, both walks |
+| `maxFileBytes` | 131,072 (128 KiB) | one skill or command file |
+| `maxTotalBytes` | 16,777,216 (16 MiB) | all admitted bytes together |
+
+Resolution is fail-safe per key (`src/options.ts:34-52`): a value that is not a finite number
+`>= 0` — a string such as `"100000"`, `null`, `true`, `NaN`, `Infinity`, a negative — falls
+back to that key's default, activation still succeeds, and the refresh outcome carries one
+location-independent line:
+
+```
+option-invalid: maxDirectories="100000"
+```
+
+Each rejected key gets its own line, in the order above, inside the existing 200-line
+diagnostic cap. Everything else is quiet, and the sharp edges are these:
+
+- **A typo is invisible.** An unknown key (`maxDirectorie`) is ignored silently, so the
+  default applies with no diagnostic.
+- **`0` is a value, not an error.** `maxDepth: 0` keeps only the location's own roots;
+  `maxDirectories: 0` or `maxFiles: 0` admits nothing, advertises an empty index, and reports
+  `truncated`.
+- **No ceiling.** Any large finite value is honoured, so `maxTotalBytes: 1e15` disables that
+  budget in practice.
+- **Non-integers are thresholds.** `maxFiles: 2.5` admits two files and stops on the third.
+- **A raised budget costs time.** The cold walk is linear in the directories visited; the
+  prompt-triggered refresh is throttled, not bounded, by the directory budget.
+- **The command template keeps its own ceiling.** `buildCommandSnapshot` re-checks
+  `maxFileBytes` at its default 128 KiB regardless of the option
+  (`src/command-snapshot.ts:88-91`): raise the option and a >128 KiB command file is scanned
+  and then dropped with `command-oversize:`; lower it and the scan drops the file first.
+- **A directory plugin gets no options.** Discovery by folder passes `{}`, so an installed
+  checkout behaves exactly as before, at the raised 100,000 directory budget.
 
 ## Depth
 
@@ -88,7 +148,7 @@ marker kinds are `src/contracts.ts:182-189`:
 | `hg` | a real `.hg` directory |
 
 Markers nest and never stop the walk: the deepest marker owner wins, and its relative path
-becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:122`). A symlinked
+becomes the entry's name prefix (`src/scan.ts:147`, `src/registry.ts:123`). A symlinked
 skill-root directory is not a marker and is not followed.
 
 ## Worktree families
@@ -195,10 +255,10 @@ the walk (`src/scan.ts:425-465`, `540-561`). A single file over 128 KiB is skipp
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:545`).
+(`src/registry.ts:549`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:44`, `89-98`, ending
-in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:85-90`),
+in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:86-91`),
 where the overflow is summarised as `truncated: N more diagnostics`. A scan that truncates
 still feeds the outcome budget. Post-reload audit lines share that budget in stage order, so
 a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders them — see
@@ -209,7 +269,7 @@ a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders
 | Field | Cap | Behaviour |
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
-| skill description | 500 code points | cut (`src/registry.ts:115-119`); a command description is stored verbatim |
+| skill description | 500 code points | cut (`src/registry.ts:116-120`); a command description is stored verbatim |
 | scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:48-50`) |
 | skill slug | 40 | cut, same (`src/indexer.ts:62-64`) |
 
@@ -225,8 +285,8 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:680-686`, `src/registry.ts:239-255`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:38`, `src/registry.ts:802-858`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
-| Config | no plugin options are read in this release; caps and budgets are constants |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:684-690`, `src/registry.ts:240-256`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:39`, `src/registry.ts:806-862`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Config | the five scan budgets are plugin options on the `opencode.json` entry (object form); display caps and the command-template ceiling stay constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
 from `disable-model-invocation: true` (`src/frontmatter.ts:153-155`,
@@ -248,5 +308,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:784-800`, `src/registry.ts:758-762`, `src/registry.ts:736-763`). Details in
+(`src/registry.ts:788-804`, `src/registry.ts:762-766`, `src/registry.ts:740-767`). Details in
 [architecture.md](architecture.md#refresh-model).

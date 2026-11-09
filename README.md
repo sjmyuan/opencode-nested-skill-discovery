@@ -130,7 +130,7 @@ all. The `nested.` prefix is a naming convention, not a policy boundary.
 | Limit | Value |
 |---|---|
 | Subproject depth | 5 directories below the workspace; unbounded inside an opened skill root |
-| Scan budgets | 20,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total |
+| Scan budgets | 100,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total (defaults) |
 | Skill display caps | name 80 code points · description 500; a command description is never capped |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |
@@ -138,7 +138,9 @@ all. The `nested.` prefix is a naming convention, not a policy boundary.
 | Worktree family | a linked worktree of the main checkout is hidden from an ancestor workspace, at the checkout root and in every nested subproject beneath it; only the main checkout's skills are advertised |
 | Scale | around 50 nested entries is the point to revisit on-demand listing |
 
-A truncated scan still advertises what it found. No limit is configurable in this release.
+A truncated scan still advertises what it found. The five scan budgets are optional plugin
+options on the `opencode.json` entry — defaults, the object form, and the fail-safe for an
+invalid value are in [docs/limits.md](docs/limits.md#configuring-the-limits).
 
 ## Permissions
 

@@ -69,7 +69,10 @@ or as an absolute path (`packages/core/src/config/plugin/source.ts:139-155`):
 
 A configured target must be a directory; a path that points at a single file is rejected
 with `configured plugin path must be a directory`
-(`packages/core/src/config/plugin/source.ts:149-153`).
+(`packages/core/src/config/plugin/source.ts:149-153`). An entry in the object form
+(`{"package": …, "options": {…}}`) also carries the five optional scan budgets; an
+auto-discovered directory receives no options and scans at the defaults
+([limits.md](limits.md#configuring-the-limits)).
 
 ## Verify it loaded
 
