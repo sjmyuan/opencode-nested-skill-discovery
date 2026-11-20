@@ -152,12 +152,13 @@ describe("the index stage publishes both agent sources", () => {
 })
 
 describe("isolation", () => {
-  it("keeps the refresh ok when the agent stage throws", async () => {
+  it("keeps the last good agent list when the agent stage throws", async () => {
     const h = await harness(async (fixture) => {
       await fixture.write("A/.opencode/skills/deploy/SKILL.md", "---\nname: deploy\n---\n# Deploy\n")
       await fixture.write("A/.opencode/command/release.md", "---\ndescription: r\n---\nrelease\n")
       await fixture.write("A/opencode.json", JSON.stringify({ agents: { translator: {} } }))
     })
+    const before = h.registry.agents
     control.failure = new Error("agent stage exploded")
 
     try {
@@ -165,10 +166,31 @@ describe("isolation", () => {
 
       expect(h.registry.outcome.ok).toBe(true)
       expect(h.registry.outcome.skills).toBe(1)
-      expect(h.registry.agents).toEqual([])
+      expect(before.map((agent) => agent.name)).toEqual(["translator"])
+      // A throw suppresses the assignment, never publishes `[]` over a good list (M1).
+      expect(h.registry.agents).toEqual(before)
       expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-index:"))).toEqual([
         "agent-index: agent stage exploded",
       ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("still publishes an empty list when a document drops its last agent", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write("A/opencode.json", JSON.stringify({ agents: { translator: {} } }))
+    })
+
+    try {
+      expect(h.registry.agents.map((agent) => agent.name)).toEqual(["translator"])
+
+      await h.fixture.write("A/opencode.json", "{}")
+      await h.registry.refresh()
+
+      expect(h.registry.outcome.ok).toBe(true)
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-index:"))).toEqual([])
+      expect(h.registry.agents).toEqual([])
     } finally {
       await h.dispose()
     }

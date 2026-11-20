@@ -586,8 +586,10 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           : undefined
       const skills = await indexCandidates(scanned.value.candidates, { location: base, nativeRoots, family })
       // A15: the agent stage never fails the refresh — a throw costs one diagnostic and
-      // leaves the previous agent list published.
+      // leaves the previous agent list published. `agentsFresh` is what makes that true: a
+      // successful index always publishes (even `[]`), a throw suppresses the assignment.
       let agents: readonly IndexedAgent[] = []
+      let agentsFresh = true
       let agentDiagnostics: readonly string[] = []
       if (agentCandidates.length + agentConfigs.length > 0) {
         try {
@@ -601,6 +603,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           agents = indexedAgents.agents
           agentDiagnostics = indexedAgents.diagnostics
         } catch (error) {
+          agentsFresh = false
           agentDiagnostics = [`agent-index: ${reasonOf(error)}`]
         }
       }
@@ -610,6 +613,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           commands,
           diagnostics: [...skills.diagnostics, ...agentDiagnostics],
           agents,
+          agentsFresh,
         }
       }
       const filtered = await filterCommandFamilies(commands, { family })
@@ -618,10 +622,11 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
         commands: filtered.commands,
         diagnostics: [...skills.diagnostics, ...filtered.diagnostics, ...agentDiagnostics],
         agents,
+        agentsFresh,
       }
     })
     if (!indexed.ok) return record(fail(diagnostics))
-    currentAgents = indexed.value.agents
+    if (indexed.value.agentsFresh) currentAgents = indexed.value.agents
     diagnostics.push(...indexed.value.diagnostics)
 
     const built = await runStage(diagnostics, "snapshot", () =>
