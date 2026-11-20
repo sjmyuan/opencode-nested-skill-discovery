@@ -140,11 +140,12 @@ describe("the index stage publishes both agent sources", () => {
     }
   })
 
-  it("makes no ctx.agent call", async () => {
+  it("reads the listing once before the transform registers", async () => {
     const h = await harness(withConfigs)
 
     try {
-      expect(h.agents).toEqual([])
+      expect(h.agents.filter((call) => call === "list").length).toBeGreaterThanOrEqual(1)
+      expect([...new Set(h.agents)]).toEqual(["list", "reload"])
     } finally {
       await h.dispose()
     }

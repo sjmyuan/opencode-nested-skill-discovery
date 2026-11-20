@@ -1,6 +1,6 @@
 import { realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { join, relative, resolve, sep } from "node:path"
 import type { Plugin } from "@opencode/plugin"
 import {
   DEBOUNCE_MS,
@@ -19,6 +19,7 @@ import {
 } from "./contracts.ts"
 import { createBackstop, type Backstop } from "./backstop.ts"
 import { indexAgents, type IndexedAgent } from "./agent-index.ts"
+import { admitAgents, type AdmittedAgent } from "./agent-project.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
 import { auditReloadedCommands, EMPTY_NATIVE_COMMANDS } from "./command-audit.ts"
 import { filterCommandFamilies } from "./command-family.ts"
@@ -32,7 +33,7 @@ import { persistCommands, persistRegistry } from "./manifest.ts"
 import { resolveNativeAgentRoots, resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { resolveScanLimits } from "./options.ts"
-import { applyRegistry } from "./replay.ts"
+import { applyAgents, applyRegistry } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
 import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory } from "./watch.ts"
 
@@ -290,6 +291,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let registering: Promise<void> | undefined
   let commandRegistration: Registration | undefined
   let registeringCommand: Promise<void> | undefined
+  let agentRegistration: Registration | undefined
+  let registeringAgent: Promise<void> | undefined
+  /** A rejected transform is final for this instance: retrying would only repeat the diagnostic. */
+  let agentRegistrationFailed = false
+  let currentAgentPayload: readonly AdmittedAgent[] | undefined
+  let agentSeeded = false
   let seeded = false
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
@@ -302,7 +309,10 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const deferredDiagnostics: string[] = []
   const replayDiagnostics: string[] = []
   const commandDiagnostics: string[] = []
+  const agentDiagnostics: string[] = []
   const watchDiagnostics: string[] = []
+  /** IDs the host map held when the transform registered, grown by the reload audit (G8, G9). */
+  const heldAgents = new Set<string>()
   const nameLedger = createNameLedger()
   const shadowTracker = createShadowTracker()
 
@@ -316,6 +326,19 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     } catch (error) {
       commandDiagnostics.push(`command-seed: ${reasonOf(error)}`)
     }
+  }
+
+  /**
+   * The pre-registration agent listing (ADR agent G8, C4): read once, before the transform
+   * exists. A post-registration read would hold our own entries, so it is never re-read —
+   * the audit grows the set afterwards instead (D6).
+   */
+  const seedHeldAgents = async (): Promise<void> => {
+    if (agentSeeded) return
+    const listed = await runStage(agentDiagnostics, "agent-seed", () => ctx.agent.list())
+    if (!listed.ok) return
+    for (const entry of listed.value.data) heldAgents.add(String(entry.id))
+    agentSeeded = true
   }
 
   const now = options.now ?? (() => Date.now())
@@ -428,6 +451,40 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     }
   }
 
+  /** One early agent transform (ADR agent G1; C3). A rejection never blocks skills or commands. */
+  const ensureAgentRegistered = async (): Promise<void> => {
+    if (agentRegistration !== undefined || agentRegistrationFailed || disposed) return
+
+    try {
+      if (registeringAgent === undefined) {
+        registeringAgent = (async () => {
+          await seedHeldAgents()
+          return ctx.agent.transform((editor) => {
+            try {
+              agentDiagnostics.push(...applyAgents(editor, currentAgentPayload))
+            } catch (error) {
+              agentDiagnostics.push(`agent-replay: ${reasonOf(error)}`)
+            }
+          })
+        })()
+          .then((created) => {
+            agentRegistration = created
+          })
+          .catch((error) => {
+            agentRegistrationFailed = true
+            agentDiagnostics.push(`agent-register: ${reasonOf(error)}`)
+          })
+          .finally(() => {
+            registeringAgent = undefined
+          })
+      }
+      await registeringAgent
+    } catch (error) {
+      agentRegistrationFailed = true
+      agentDiagnostics.push(`agent-register: ${reasonOf(error)}`)
+    }
+  }
+
   /** Reconciles the watcher set from a successful scan. Never throws (PD7). */
   const syncWatchers = async (
     base: string,
@@ -500,6 +557,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       ...scanLimits.diagnostics,
       ...replayDiagnostics.splice(0),
       ...commandDiagnostics.splice(0),
+      ...agentDiagnostics.splice(0),
       ...deferredDiagnostics.splice(0),
       ...watchDiagnostics.splice(0),
     ]
@@ -536,6 +594,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       for (const line of clearedCommands.diagnostics) diagnostics.push(`command-persist: ${line}`)
 
       const commandReloaded = await runStage(diagnostics, "command-reload", () => ctx.command.reload())
+      currentAgentPayload = Object.freeze([])
+      await runStage(diagnostics, "agent-reload", () => ctx.agent.reload())
 
       const reloaded = await runStage(diagnostics, "reload", () => ctx.skill.reload())
       if (!reloaded.ok) return record(fail(diagnostics))
@@ -586,13 +646,15 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           : undefined
       const skills = await indexCandidates(scanned.value.candidates, { location: base, nativeRoots, family })
       // A15: the agent stage never fails the refresh — a throw costs one diagnostic and
-      // leaves the previous agent list published. `agentsFresh` is what makes that true: a
-      // successful index always publishes (even `[]`), a throw suppresses the assignment.
+      // leaves the previous agent list and payload published. `agentsFresh` is what makes
+      // that true: a successful index always publishes (even `[]`), a throw suppresses the
+      // assignment.
       let agents: readonly IndexedAgent[] = []
       let agentsFresh = true
-      let agentDiagnostics: readonly string[] = []
-      if (agentCandidates.length + agentConfigs.length > 0) {
-        try {
+      let agentLines: readonly string[] = []
+      let admitted: readonly AdmittedAgent[] = Object.freeze([])
+      try {
+        if (agentCandidates.length + agentConfigs.length > 0) {
           const indexedAgents = await indexAgents({
             location: base,
             home: nativeInput().home,
@@ -602,32 +664,50 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
             ...(family === undefined ? {} : { family }),
           })
           agents = indexedAgents.agents
-          agentDiagnostics = indexedAgents.diagnostics
-        } catch (error) {
-          agentsFresh = false
-          agentDiagnostics = [`agent-index: ${reasonOf(error)}`]
+          agentLines = indexedAgents.diagnostics
         }
+        // One projection per successful index, frozen before the transform can read it, so the
+        // replay performs no I/O (G1) and a rebuild never mutates what is being replayed.
+        const projected = admitAgents({
+          agents,
+          home: nativeInput().home,
+          held: heldAgents,
+          display: (path) => relative(base, path).split(sep).join("/"),
+        })
+        admitted = Object.freeze(projected.admitted.map((entry) => Object.freeze(entry)))
+        const overlays = admitted
+          .filter((entry) => Object.keys(entry.request.headers).length + Object.keys(entry.request.body).length > 0)
+          .map((entry) => `agent-request: ${entry.id}`)
+        agentLines = [...agentLines, ...projected.diagnostics, ...overlays]
+      } catch (error) {
+        agentsFresh = false
+        agentLines = [`agent-index: ${reasonOf(error)}`]
       }
       if (family === undefined || commands.length === 0) {
         return {
           skills: skills.skills,
           commands,
-          diagnostics: [...skills.diagnostics, ...agentDiagnostics],
+          diagnostics: [...skills.diagnostics, ...agentLines],
           agents,
           agentsFresh,
+          admitted,
         }
       }
       const filtered = await filterCommandFamilies(commands, { family })
       return {
         skills: skills.skills,
         commands: filtered.commands,
-        diagnostics: [...skills.diagnostics, ...filtered.diagnostics, ...agentDiagnostics],
+        diagnostics: [...skills.diagnostics, ...filtered.diagnostics, ...agentLines],
         agents,
         agentsFresh,
+        admitted,
       }
     })
     if (!indexed.ok) return record(fail(diagnostics))
-    if (indexed.value.agentsFresh) currentAgents = indexed.value.agents
+    if (indexed.value.agentsFresh) {
+      currentAgents = indexed.value.agents
+      currentAgentPayload = indexed.value.admitted
+    }
     diagnostics.push(...indexed.value.diagnostics)
 
     const built = await runStage(diagnostics, "snapshot", () =>
@@ -703,6 +783,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
     // F9: audit `ctx.command.list()` once this reload settles, before reporting a shadow.
     const commandReloaded = await runStage(diagnostics, "command-reload", () => ctx.command.reload())
+
+    // The map rebuilds from the transform on reload, so one reload publishes the swap (G1).
+    await runStage(diagnostics, "agent-reload", () => ctx.agent.reload())
 
     // F9 (ADR command R4): after the reload settles, classify the listing against the
     // snapshot we just replayed. A shadow is reported here and denied for the next snapshot.
@@ -806,6 +889,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
         return record(fail([`register: ${reasonOf(error)}`]))
       }
       await ensureCommandRegistered()
+      await ensureAgentRegistered()
       return runRefresh()
     })()
 
@@ -831,6 +915,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
       return record(fail([`register: ${reasonOf(error)}`]))
     }
     await ensureCommandRegistered()
+    await ensureAgentRegistered()
     const activated = await refresh()
     // Built after the first refresh so activation is already recorded, and regardless of its outcome.
     await ensureBackstop()
@@ -951,6 +1036,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     const createdCommand = commandRegistration
     commandRegistration = undefined
     if (createdCommand !== undefined) await createdCommand.dispose().catch(() => undefined)
+
+    if (registeringAgent !== undefined) await registeringAgent.catch(() => undefined)
+
+    const createdAgent = agentRegistration
+    agentRegistration = undefined
+    if (createdAgent !== undefined) await createdAgent.dispose().catch(() => undefined)
   }
 
   return {
