@@ -13,7 +13,7 @@ const pinAvailable = existsSync(PIN)
 const EXTERNAL_PREFIX = "packages/"
 
 /** Re-measured at the F15 step 7 head; re-measure both whenever a doc gains or loses a citation. */
-const EXPECTED_IN_REPO = 208
+const EXPECTED_IN_REPO = 220
 const EXPECTED_EXTERNAL = 55
 
 const DOCS = [
@@ -138,9 +138,9 @@ const ANCHORS: ReadonlyArray<{
   readonly marker: string
 }> = [
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "493-790", marker: "const runRefresh = async" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "87-92", marker: "function capDiagnostics" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "96-107", marker: "async function runStage" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "197-206", marker: "export interface RefreshOutcome" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "89-94", marker: "function capDiagnostics" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "98-109", marker: "async function runStage" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "199-208", marker: "export interface RefreshOutcome" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "705-721", marker: 'runStage(diagnostics, "command-audit"' },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "42", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "911", marker: "dedupe-deferred: ${reasonOf(error)}" },
