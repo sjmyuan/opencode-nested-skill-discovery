@@ -286,7 +286,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:684-690`, `src/registry.ts:240-256`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:39`, `src/registry.ts:806-862`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:684-690`, `src/registry.ts:240-256`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:40`, `src/registry.ts:806-862`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | the five scan budgets are plugin options on the `opencode.json` entry (object form); display caps and the command-template ceiling stay constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or

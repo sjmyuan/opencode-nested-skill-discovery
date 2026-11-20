@@ -195,8 +195,8 @@ nested entry's `canonicalPath` with the **realpath** of every foreign entry's `p
 suppresses a match (`src/registry.ts:684-690`, `src/registry.ts:240-256`). Dedupe is two-phase: the immediate
 pass runs inside the refresh and emits one `dedupe: <id>` diagnostic per suppressed entry
 (`src/registry.ts:692`); when the foreign tier still looks incomplete a deferred check runs at
-1.5 s and again at 4 s (`src/registry.ts:39`, `src/registry.ts:788-804`, `src/registry.ts:806-862`). That check is silent on
-success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:866`).
+1.5 s and again at 4 s (`src/registry.ts:40`, `src/registry.ts:788-804`, `src/registry.ts:806-862`). That check is silent on
+success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:868`).
 `refresh()` returns without waiting for that check (`src/registry.ts:740-767`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
 timeout that reports failure: the deferred check simply re-lists and re-filters.
@@ -318,10 +318,10 @@ advertised list is whatever the last completed step produced.
 | A plugin option is invalid | that key's default applies, activation succeeds, and one `option-invalid: <key>=<value>` line is prepended to the outcome's diagnostics, ahead of every scan line | `src/options.ts:34-51`, `src/registry.ts:492` |
 | Scan diagnostics exceed 200 | truncated with `diagnostics-truncated` | `src/scan.ts:44`, `src/scan.ts:89-98` |
 | A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:549`, `src/scan.ts:425-465` |
-| The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:671-672` |
+| The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:673-674` |
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:676`, `src/registry.ts:694-712` |
 | Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:426-442`, `src/registry.ts:446-473`, `src/registry.ts:491-497`, `src/plugin.ts:34-38` |
-| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:866` |
+| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:868` |
 | A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:598-662` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
 | A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |

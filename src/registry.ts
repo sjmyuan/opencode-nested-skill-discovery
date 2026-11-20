@@ -8,6 +8,7 @@ import {
   compareText,
   MAX_NAME_LENGTH,
   PROMPT_THROTTLE_MS,
+  type AgentCandidate,
   type CommandCandidate,
   type CommandSnapshotSet,
   type RegistryEntry,
@@ -427,11 +428,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     base: string,
     candidates: readonly ScanCandidate[],
     commands: readonly CommandCandidate[],
+    agents: readonly AgentCandidate[],
   ): Promise<void> => {
     if (disposed || watchers === undefined) return
 
     try {
-      const derived = await deriveWatchTargets({ location: base, candidates, commands })
+      const derived = await deriveWatchTargets({ location: base, candidates, commands, agents })
       watchDiagnostics.push(...derived.diagnostics)
       watchers.sync(derived.targets)
     } catch (error) {
@@ -557,7 +559,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     diagnostics.push(...scanned.value.diagnostics)
     // A good scan is a valid watcher set even if a later stage fails (PD7). Command candidates
     // are the pre-suppression list, so a family flip opens and closes no handle (PD3).
-    await syncWatchers(base, scanned.value.candidates, scanned.value.commands)
+    await syncWatchers(base, scanned.value.candidates, scanned.value.commands, scanned.value.agents)
 
     // One family pass per refresh, shared with the skill indexer inside the existing
     // index stage (ADR command R8). Publication composes the survivors' names later.
