@@ -249,6 +249,43 @@ describe("A8 native merge", () => {
     expect(byName(result.agents).solo).toBeDefined()
   })
 
+  it("maps a config agent's fields exactly, with no synthesised colour and no empty system", async () => {
+    const f = await fixture()
+    await f.write(
+      "A/opencode.json",
+      JSON.stringify({
+        agents: {
+          full: {
+            system: "own prompt",
+            description: "a description",
+            model: { providerID: "anthropic", model: "claude", variant: "fast" },
+            steps: 3,
+            mode: "all",
+            hidden: true,
+            permissions: [{ action: "read", resource: "a/**", effect: "deny" }],
+            request: { headers: { "x-a": "1" }, body: { temperature: 0.2 } },
+          },
+          bare: { description: "no prompt" },
+        },
+      }),
+    )
+
+    const agents = byName((await index(f)).agents)
+    const full = agents.full
+
+    expect(full?.system).toBe("own prompt")
+    expect(full?.description).toBe("a description")
+    expect(full?.model).toEqual({ providerID: "anthropic", id: "claude", variant: "fast" })
+    expect(full?.steps).toBe(3)
+    expect(full?.mode).toBe("all")
+    expect(full?.hidden).toBe(true)
+    expect(full?.permissions).toEqual([{ action: "read", resource: "a/**", effect: "deny" }])
+    expect(full?.request).toEqual({ headers: { "x-a": "1" }, body: { temperature: 0.2 } })
+    expect(full).not.toHaveProperty("color")
+    expect(agents.bare).not.toHaveProperty("system")
+    expect(agents.bare).not.toHaveProperty("color")
+  })
+
   it("prefixes a subproject's documents' permissions onto a file-derived agent only", async () => {
     const f = await fixture()
     await f.write(

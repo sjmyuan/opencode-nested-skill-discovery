@@ -11,7 +11,7 @@ permission rules are in [permissions.md](permissions.md), and the decision of re
 The plugin adds entries and removes nothing native. Each refresh scans the location,
 replays the result through the single `skill.transform` it registers, publishes commands
 through the single `command.transform` it registers, and leaves native, global, and session
-skills exactly as they were (`src/registry.ts:373-429`, `src/replay.ts:18-45`,
+skills exactly as they were (`src/registry.ts:399-455`, `src/replay.ts:19-46`,
 `src/command-replay.ts:43-90`). The only entry it ever drops is its own duplicate of a nested skill
 already registered under another path ([Advertisement](#advertisement)), and it never
 registers a second checkout of one repository ([Repo families](#repo-families)). Every entry
@@ -30,8 +30,8 @@ subprojects *below* the location.
 |---|---|
 | `index.ts` default-exports `Plugin.define(definition)` | `index.ts:1-4` |
 | Plugin ID is `nested-skill-discovery` | `src/plugin.ts:9` |
-| `setup` creates the registry and the subagent placement, activates both, and returns a cleanup that disposes both | `src/plugin.ts:25-45` |
-| An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:34-38` |
+| `setup` creates the registry and the subagent placement, activates both, and returns a cleanup that disposes both | `src/plugin.ts:26-46` |
+| An activation throw is swallowed so `setup` never rejects | `src/plugin.ts:35-39` |
 
 One registry exists per location instance, and a plugin list is a birth argument that stays
 immutable for that instance's lifetime (`packages/core/src/plugin/instance.ts:9-17`). A
@@ -40,41 +40,47 @@ different directory gets a fresh location context and a fresh activation
 
 ## Activation pipeline
 
-`runRefresh` (`src/registry.ts:493-796`) runs these stages in order. A stage that throws
+`runRefresh` (`src/registry.ts:553-899`) runs these stages in order. A stage that throws
 stops the run: a failure before the snapshot swap keeps the previous snapshot, one after it
 leaves the new snapshot in place (see [Failure model](#failure-model)).
 
 | # | Stage | Where |
 |---|---|---|
-| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:44-50`, `506-507` |
-| 2 | Resolve the native skill and agent roots to exclude | `src/registry.ts:508`, `src/native.ts:51-53` |
-| 3 | Scan the location for skill, command, agent and config-document candidates, then reconcile the watcher set from them | `src/registry.ts:555-568`, `src/scan.ts:107-176` |
-| 4 | Read, parse and dedupe candidates, substitute each config document within its confinement and caps, decode its read set per entry, index both agent sources, then drop every non-survivor checkout of a repo family | `src/registry.ts:579-630`, `src/indexer.ts:205-258`, `src/agent-index.ts:106-206`, `src/family.ts:276-304` |
-| 5 | Compose display names and assemble frozen entries | `src/registry.ts:633-635`, `src/registry.ts:115-134` |
-| 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:146-197` |
-| 7 | Persist manifest, cache, and version | `src/registry.ts:639-651`, `src/manifest.ts:132-213` |
-| 8 | Swap the in-memory snapshot, then `skill.reload()` | `src/registry.ts:645-723` |
-| 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:733-781`, `src/registry.ts:245-261` |
+| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:46-52`, `568-569` |
+| 2 | Resolve the native skill and agent roots to exclude | `src/registry.ts:569`, `src/native.ts:51-53` |
+| 3 | Scan the location for skill, command, agent and config-document candidates, then reconcile the watcher set from them | `src/registry.ts:618-631`, `src/scan.ts:107-176` |
+| 4 | Read, parse and dedupe candidates, substitute each config document within its confinement and caps, decode its read set per entry, index both agent sources and project the admitted ones into a frozen payload, then drop every non-survivor checkout of a repo family | `src/registry.ts:642-709`, `src/indexer.ts:205-258`, `src/agent-index.ts:106-206`, `src/agent-project.ts:74-126`, `src/family.ts:276-304` |
+| 5 | Compose display names and assemble frozen entries | `src/registry.ts:717-719`, `src/registry.ts:117-136` |
+| 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:148-199` |
+| 7 | Persist manifest, cache, and version | `src/registry.ts:723-735`, `src/manifest.ts:132-213` |
+| 8 | Swap the in-memory snapshot, reload the agent map and audit its reloaded field set, then `skill.reload()` | `src/registry.ts:729-826`, `src/registry.ts:791-810` |
+| 9 | List the registry, suppress nested duplicates of foreign entries, reload again if anything was suppressed, and schedule the deferred check | `src/registry.ts:836-884`, `src/registry.ts:247-263` |
 
 That table is the skill pipeline. After the skill manifest stage, six **non-fatal** command
 steps run in five stages around the skill reload — `command-index` composes the surviving
 commands' names and drops the native collisions, `command-snapshot` builds the frozen snapshot,
 `command-persist` persists and swaps it, `command-reload` calls `command.reload()` exactly once,
 and `command-audit` compares the reloaded listing with that snapshot before reporting a shadow
-(`src/registry.ts:656-720`). A failure in any of them is a `command-<stage>:` diagnostic; it
+(`src/registry.ts:740-822`). A failure in any of them is a `command-<stage>:` diagnostic; it
 never replaces the previous command snapshot and never blocks the skill reload. The one seed
 read before registration is not a stage: a rejected read is a single `command-seed:` diagnostic.
 
 Step 8 swaps before it reloads on purpose: the transform reads the current snapshot, so
-the swap must be visible before the host rebuilds its skill list.
+the swap must be visible before the host rebuilds its skill list. The agent map is reloaded
+once per refresh after the command reload and before the skill reload, and the reload is
+followed by the audit (`src/registry.ts:791-810`). A failure in either is an `agent-reload:` or
+`agent-audit:` diagnostic; the published map stays as the host built it.
 
-Exactly one skill transform (`src/registry.ts:373-392`) and one command transform
-(`src/registry.ts:395-429`) are registered per registry, guarded by a `registering` promise.
-Refreshes reuse them and never add a second one.
+Exactly one skill transform (`src/registry.ts:399-418`), one command transform
+(`src/registry.ts:421-455`) and one agent transform (`src/registry.ts:457-490`) are registered
+per registry, guarded by a `registering` promise. Refreshes reuse them and never add a second
+one.
 
 The first registration reads `ctx.command.list()` once before that transform exists, so every
 name the host already holds seeds the native pre-drop and stays native-owned until the registry
-is recreated. Of those pre-phase names only an MCP prompt can collide: a prompt is named
+is recreated. The agent registration reads `ctx.agent.list()` once in the same way, before its
+own transform exists, and never again: a later read would hold the entries we registered, so
+the held set only grows from the audit (`src/registry.ts:334-347`). Of those pre-phase names only an MCP prompt can collide: a prompt is named
 `server:prompt`, a builtin (`init`, `review`) carries no `:`, and every published name carries
 its subproject qualifier. A name that appears later is never seeded, and the two later cases
 differ. A later MCP prompt is added in the pre phase, before our transform, so our `add` wins
@@ -85,7 +91,7 @@ the next snapshot.
 
 A refresh reloads skills once, twice when it
 suppresses a duplicate in the same pass, and a deferred check that later suppresses one
-reloads on its own after the refresh has returned (`src/registry.ts:915`). Commands reload
+reloads on its own after the refresh has returned (`src/registry.ts:1020`). Commands reload
 exactly once per refresh that reaches the command stages, alongside — never instead of — the
 skill reload.
 
@@ -125,8 +131,16 @@ indexed from it, file and config alike, before the agent's own rules
 (`src/agent-index.ts:113-181`).
 
 Both agent sources are indexed, family-filtered and minted as
-`nested.<scopeToken>.<agentToken>`, then published on `registry.agents`; nothing is
-registered, projected or reloaded in this build (`src/registry.ts:579-599`).
+`nested.<scopeToken>.<agentToken>`. The index stage projects each admitted candidate into one
+frozen payload — qualified sanitized name, sanitized description, the authored `mode` and
+`hidden` verbatim, `~`/`$HOME` expanded on the three path actions, the subproject's rules before
+the agent's own — and the single early transform replays it insert-on-miss only
+(`src/agent-project.ts:74-126`, `src/replay.ts:57-99`). Native and config entries are never
+written, `default()` and `remove()` are never called, and the location's rules still land last
+because the host appends them after every transform. After the reload the audit compares the
+full field set and the seed-plus-ours permission prefix; a mismatch is reported once as
+`agent-shadow-audit:` and the ID is held out, so it leaves the next snapshot by omission
+(`src/agent-audit.ts:41-58`). A nested deny stays advisory: the parent's later allow wins.
 
 ## Identity
 
@@ -178,7 +192,7 @@ never minted, never enters the snapshot, cache, or manifest, and no corrective r
 needed. The rule applies only when the checkout and the survivor are both strict descendants
 of the location: a session inside the worktree has the main checkout outside its subtree, so
 it still sees the worktree unchanged. Watchers derive from the pre-suppression candidates
-(`src/registry.ts:568-573`), so suppression opens and closes no handle. A `.git` created on an
+(`src/registry.ts:631-636`), so suppression opens and closes no handle. A `.git` created on an
 ancestor is not watched, so that nested subproject starts deduping at the next prompt or move
 (Q10).
 
@@ -194,10 +208,10 @@ for that checkout: the pre-suppression entries are advertised and one
 path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeText` removes
 `<`, `>`, `"`, `&`, and control characters, collapses whitespace, and trims
 (`src/names.ts:48-55`). The entry name is capped at 80 code points and the description at
-500 in `assembleEntries` (`src/registry.ts:115-134`, `src/contracts.ts:172-173`).
+500 in `assembleEntries` (`src/registry.ts:117-136`, `src/contracts.ts:172-173`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
-canonical path, never on the name (`src/registry.ts:123-132`, `src/registry.ts:252-258`, `src/indexer.ts:199`).
+canonical path, never on the name (`src/registry.ts:125-134`, `src/registry.ts:254-260`, `src/indexer.ts:199`).
 
 A description falls back in three tiers: frontmatter `description`, then the first
 non-heading, non-blank body line, then `skill <name>` (`src/indexer.ts:109-118`, `196`).
@@ -208,23 +222,23 @@ description-less entries from the model's guidance block
 ## Advertisement
 
 `applyRegistry` replays one immutable snapshot into the transform editor
-(`src/replay.ts:18-45`):
+(`src/replay.ts:19-46`):
 
-- entries are replayed in ID order (`src/replay.ts:25-27`)
-- an entry whose ID is already present is skipped, never replaced (`src/replay.ts:29-35`)
+- entries are replayed in ID order (`src/replay.ts:26-28`)
+- an entry whose ID is already present is skipped, never replaced (`src/replay.ts:30-36`)
 - nothing is removed, so native and session skills survive untouched
 - a failing `get`/`add` becomes a `replay:` diagnostic instead of an exception
-  (`src/replay.ts:32-41`); the buffered diagnostics are drained at the start of the next
-  refresh (`src/registry.ts:499-505`)
+  (`src/replay.ts:33-42`); the buffered diagnostics are drained at the start of the next
+  refresh (`src/registry.ts:559-565`)
 
 After the first reload the registry lists what the host actually holds, then compares each
 nested entry's `canonicalPath` with the **realpath** of every foreign entry's `path` and
-suppresses a match (`src/registry.ts:745-751`, `src/registry.ts:245-261`). Dedupe is two-phase: the immediate
+suppresses a match (`src/registry.ts:848-854`, `src/registry.ts:247-263`). Dedupe is two-phase: the immediate
 pass runs inside the refresh and emits one `dedupe: <id>` diagnostic per suppressed entry
-(`src/registry.ts:750`); when the foreign tier still looks incomplete a deferred check runs at
-1.5 s and again at 4 s (`src/registry.ts:42`, `src/registry.ts:846-862`, `src/registry.ts:864-920`). That check is silent on
-success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:917`).
-`refresh()` returns without waiting for that check (`src/registry.ts:798-825`), so a
+(`src/registry.ts:853`); when the foreign tier still looks incomplete a deferred check runs at
+1.5 s and again at 4 s (`src/registry.ts:44`, `src/registry.ts:951-967`, `src/registry.ts:969-1025`). That check is silent on
+success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:1022`).
+`refresh()` returns without waiting for that check (`src/registry.ts:901-929`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
 timeout that reports failure: the deferred check simply re-lists and re-filters.
 
@@ -277,7 +291,7 @@ describe that cache as reloaded on bind; those documents are stale on that point
 storage reads in the plugin are the two version counters, the format marker, and the command
 cache the change comparison inspects (`src/manifest.ts:393-422`). The manifest is likewise an
 audit and diagnostics artifact — it is never a filter for what gets advertised
-(`src/registry.ts:493-796` reads only live scan output).
+(`src/registry.ts:553-899` reads only live scan output).
 
 Raw keys are namespaced by the host as `plugin:<hex of the plugin id>:`; the plugin-visible
 key is the suffix (`packages/core/src/plugin/host.ts:609-616`). A raw-KV query therefore
@@ -286,21 +300,21 @@ matches `LIKE 'plugin:%:nested/%'`.
 ## Refresh model
 
 Three triggers feed one refresh path. `refresh()` joins an in-flight run instead of
-starting a second one, so concurrent triggers cost one scan (`src/registry.ts:798-825`).
+starting a second one, so concurrent triggers cost one scan (`src/registry.ts:901-929`).
 
 | Trigger | Mechanism | Bound |
 |---|---|---|
-| activation | `setup` → `activate()` (`src/plugin.ts:25-45`) | once per location instance |
+| activation | `setup` → `activate()` (`src/plugin.ts:26-46`) | once per location instance |
 | filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory, per command root, per command directory, per agent root, per agent directory, per config-document directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:174`) |
 | prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts:23-54`) | `PROMPT_THROTTLE_MS = 2_000` (`src/contracts.ts:177`), skipped when any refresh just finished |
 
-The debounce is a single timer (`src/registry.ts:327-330`), not a per-event delay: the first
+The debounce is a single timer (`src/registry.ts:353-356`), not a per-event delay: the first
 event arms it, later events inside the window are swallowed, so a save burst is one refresh
 and a sustained stream yields at most four per second. The backstop awaits an in-flight
 refresh instead of starting a second one, so a prompt never waits for two scans.
 
 The watcher set is derived from the **last good scan** and reconciled immediately after it
-(`src/registry.ts:568-573`, `src/registry.ts:432-449`): canonical, deduped, sorted, with pruned segments and
+(`src/registry.ts:631-636`, `src/registry.ts:492-509`): canonical, deduped, sorted, with pruned segments and
 symlinked directories dropped. Each reconciliation closes handles that are no longer in the
 set, so a deleted subproject does not leak a watcher.
 
@@ -311,14 +325,14 @@ different IDs. The cost is bounded by the debounce and the throttle — one boun
 roughly 0.17 s on the reference workspace.
 
 Watch and hook failures never escape: `syncWatchers` buffers them as `watch: <path>: <code>`
-(`src/registry.ts:432-449`) and `ensureBackstop` buffers `hook: <reason>`
-(`src/registry.ts:454-481`), both drained into the next outcome (`src/registry.ts:499-505`). The watcher set
-advances as soon as the scan succeeds, even if a later stage fails (`src/registry.ts:568-573`),
+(`src/registry.ts:492-509`) and `ensureBackstop` buffers `hook: <reason>`
+(`src/registry.ts:514-541`), both drained into the next outcome (`src/registry.ts:559-565`). The watcher set
+advances as soon as the scan succeeds, even if a later stage fails (`src/registry.ts:631-636`),
 so only a failed scan leaves the previous set watched. `dispose()` clears the deferred timers
 and the debounce timer, closes every handle, awaits any in-flight refresh with errors
 swallowed, then disposes the hook and the transform; it is idempotent
-(`src/registry.ts:923-954`). A deferred dedupe check that is still pending can follow a
-completed refresh without delaying it (`src/registry.ts:820-824`, `src/registry.ts:798-825`).
+(`src/registry.ts:1028-1065`). A deferred dedupe check that is still pending can follow a
+completed refresh without delaying it (`src/registry.ts:924-928`, `src/registry.ts:901-929`).
 
 Watcher, debounce, and backstop behaviour is implemented in `src/watch.ts` and
 `src/backstop.ts` (`deriveWatchTargets` at `src/watch.ts:272-341`, `createDebouncer` at
@@ -326,12 +340,12 @@ Watcher, debounce, and backstop behaviour is implemented in `src/watch.ts` and
 covered by `test/watch-targets.test.ts`, `test/watch-triggers.test.ts`,
 `test/backstop.test.ts`, `test/registry-refresh.test.ts`, and
 `test/registry-command-refresh.test.ts`. Command candidates join the derivation from the
-**pre-suppression** scan result (`src/registry.ts:568-573`), so a repo-family flip changes which
+**pre-suppression** scan result (`src/registry.ts:631-636`), so a repo-family flip changes which
 names publish without opening or closing a handle.
 
 ## Failure model
 
-The snapshot boundary is the swap at `src/registry.ts:645`. Everything before it — scan,
+The snapshot boundary is the swap at `src/registry.ts:729`. Everything before it — scan,
 index, snapshot assembly, manifest — leaves the **previous** snapshot in place when it
 throws. Everything after it — the first reload, the `list`, the dedupe persist and the
 corrected reload — returns `ok: false` while the **new** snapshot is already current, so the
@@ -339,20 +353,20 @@ advertised list is whatever the last completed step produced.
 
 | Case | Behaviour | Where |
 |---|---|---|
-| Scan, index, snapshot, or manifest throws | one `<stage>: <reason>` diagnostic, **previous** snapshot kept, `ok: false` | `src/registry.ts:98-109`, `src/registry.ts:555-651` |
-| The location is missing or not a directory | empty snapshot persisted and swapped, `scan: … is not a directory`, `ok: false` | `src/registry.ts:512-553` |
-| Diagnostics exceed 200 | truncated with `truncated: N more diagnostics` | `src/registry.ts:89-94` |
-| A plugin option is invalid | that key's default applies, activation succeeds, and one `option-invalid: <key>=<value>` line is prepended to the outcome's diagnostics, ahead of every scan line | `src/options.ts:34-51`, `src/registry.ts:500` |
+| Scan, index, snapshot, or manifest throws | one `<stage>: <reason>` diagnostic, **previous** snapshot kept, `ok: false` | `src/registry.ts:100-111`, `src/registry.ts:618-735` |
+| The location is missing or not a directory | empty snapshot persisted and swapped, `scan: … is not a directory`, `ok: false` | `src/registry.ts:573-616` |
+| Diagnostics exceed 200 | truncated with `truncated: N more diagnostics` | `src/registry.ts:91-96` |
+| A plugin option is invalid | that key's default applies, activation succeeds, and one `option-invalid: <key>=<value>` line is prepended to the outcome's diagnostics, ahead of every scan line | `src/options.ts:34-51`, `src/registry.ts:560` |
 | Scan diagnostics exceed 200 | truncated with `diagnostics-truncated` | `src/scan.ts:70`, `src/scan.ts:125-133` |
-| A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:564`, `src/scan.ts:562-602` |
-| The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:722-723` |
-| `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:734`, `src/registry.ts:752-770` |
-| Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:432-449`, `src/registry.ts:454-481`, `src/registry.ts:499-505`, `src/plugin.ts:34-38` |
-| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:917` |
-| A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:656-720` |
+| A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:627`, `src/scan.ts:562-602` |
+| The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:825-826` |
+| `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:837`, `src/registry.ts:855-873` |
+| Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:492-509`, `src/registry.ts:514-541`, `src/registry.ts:559-565`, `src/plugin.ts:35-39` |
+| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:1022` |
+| A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:740-822` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
 | A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |
-| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:711-727`, `src/command-shadow.ts:86-117` |
+| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:814-830`, `src/command-shadow.ts:86-117` |
 
 When the pre-drop stage never ran, the audit is handed `EMPTY_NATIVE_COMMANDS`
 (`src/command-audit.ts:5-10`): its `complete: true` asserts only that **no walk happened**, so
@@ -361,7 +375,7 @@ filesystem; a walk that was truncated instead reports `budget-*` and is never tr
 complete.
 
 Diagnostics are readable from the `RefreshOutcome` that `activate()`/`refresh()` return
-(`src/registry.ts:199-208`), which also reports `commands` and `commandReloads` next to the
+(`src/registry.ts:201-210`), which also reports `commands` and `commandReloads` next to the
 skill `skills`/`reloads` counts. opencode `v2.0.26` renders no plugin log or diagnostic surface,
 so a user sees them only through a caller that inspects the outcome; the observable
 fallbacks are the guidance block, the `@` menu, and storage keys.

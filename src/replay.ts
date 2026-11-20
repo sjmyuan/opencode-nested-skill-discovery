@@ -1,6 +1,7 @@
-import type { Skill } from "@opencode/plugin"
+import type { Agent, Skill } from "@opencode/plugin"
+import type { AdmittedAgent } from "./agent-project.ts"
 import { compareText, type RegistryEntry, type RegistrySnapshot } from "./contracts.ts"
-import type { SkillEditor } from "./plugin.ts"
+import type { AgentEditor, SkillEditor } from "./plugin.ts"
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -38,6 +39,59 @@ export function applyRegistry(
       editor.add(toInfo(entry))
     } catch (error) {
       diagnostics.push(`replay: ${entry.id}: ${reasonOf(error)}`)
+    }
+  }
+
+  return diagnostics
+}
+
+/**
+ * Insert-on-miss replay of the agent payload (ADR agent G1, G8).
+ *
+ * `update` is the only write: the host seeds a missing ID with `Agent.Info.default` and the
+ * config plugin appends the location's rules after every transform, so our rules must go last
+ * among ours and the parent's stay later still. An ID the map already returns is left alone —
+ * native and config entries are never overwritten — and neither `default` nor `remove` is ever
+ * called. Verification runs per entry, so one bad row never costs its siblings.
+ */
+export function applyAgents(editor: AgentEditor, agents: readonly AdmittedAgent[] | undefined): readonly string[] {
+  if (agents === undefined) return []
+
+  const diagnostics: string[] = []
+  const seen = new Set<string>()
+  const entries = [...agents].sort((left, right) => compareText(left.id, right.id))
+
+  for (const entry of entries) {
+    if (seen.has(entry.id)) continue
+    seen.add(entry.id)
+
+    try {
+      if (editor.get(entry.id) !== undefined) continue
+    } catch (error) {
+      diagnostics.push(`agent-replay: ${entry.id}: ${reasonOf(error)}`)
+      continue
+    }
+
+    try {
+      editor.update(entry.id, (agent) => {
+        agent.name = entry.name as Agent.Name
+        if (entry.description !== undefined) agent.description = entry.description
+        if (entry.system !== undefined) agent.system = entry.system
+        if (entry.model !== undefined)
+          agent.model = {
+            id: entry.model.id,
+            providerID: entry.model.providerID,
+            ...(entry.model.variant === undefined ? {} : { variant: entry.model.variant }),
+          } as Agent.Info["model"]
+        if (entry.steps !== undefined) agent.steps = entry.steps as Agent.Info["steps"]
+        if (entry.mode !== undefined) agent.mode = entry.mode
+        if (entry.hidden !== undefined) agent.hidden = entry.hidden
+        agent.permissions.push(...entry.permissions)
+        Object.assign(agent.request.headers, entry.request.headers)
+        Object.assign(agent.request.body, entry.request.body)
+      })
+    } catch (error) {
+      diagnostics.push(`agent-replay: ${entry.id}: ${reasonOf(error)}`)
     }
   }
 

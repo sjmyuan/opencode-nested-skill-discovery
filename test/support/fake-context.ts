@@ -2,11 +2,14 @@ import { mkdtempSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Plugin, PluginOptions, Skill } from "@opencode/plugin"
+import { Agent } from "@opencode/schema/agent"
+import type { Permission } from "@opencode/schema/permission"
 import type { Schema } from "effect"
-import type { CommandEditor, SkillEditor } from "../../src/plugin.ts"
+import type { AgentEditor, CommandEditor, SkillEditor } from "../../src/plugin.ts"
 
 type TransformCallback = (editor: SkillEditor) => void
 type CommandTransformCallback = (editor: CommandEditor) => void
+type AgentTransformCallback = (editor: AgentEditor) => void
 type ToolEditor = Parameters<Parameters<Plugin.Context["tool"]["transform"]>[0]>[0]
 type ToolTransformCallback = (editor: ToolEditor) => void
 type HookCallback = (input: unknown) => Promise<void> | void
@@ -44,13 +47,16 @@ export type FailureTarget =
   | "command.transform"
   | "command.reload"
   | "command.list"
+  | "agent.transform"
+  | "agent.reload"
+  | "agent.list"
   | "session.hook"
   | "storage.get"
   | "storage.set"
   | "storage.remove"
   | "storage.scan"
 
-export type SyncFailureTarget = "command.transform" | "skill.transform"
+export type SyncFailureTarget = "command.transform" | "skill.transform" | "agent.transform"
 
 export interface FakeLocation {
   directory: string
@@ -73,10 +79,36 @@ export interface FakeModelRef {
   readonly variant?: string
 }
 
+export interface FakeAgentRequest {
+  readonly settings?: Readonly<Record<string, unknown>>
+  readonly headers?: Readonly<Record<string, string>>
+  readonly body?: Readonly<Record<string, unknown>>
+}
+
+/** The full `Agent.Info` shape; every omitted field falls back to `Agent.Info.default`. */
 export interface FakeAgentSeed {
   readonly id: string
+  readonly name?: string
   readonly mode?: "subagent" | "primary" | "all"
+  readonly hidden?: boolean
+  readonly system?: string
+  readonly description?: string
   readonly model?: FakeModelRef
+  readonly request?: FakeAgentRequest
+  readonly permissions?: readonly Permission.Rule[]
+}
+
+/** The mutable map row the editor rewrites, shaped as `Types.DeepMutable<Agent.Info>`. */
+interface AgentRow {
+  id: string
+  name: string
+  mode: "subagent" | "primary" | "all"
+  hidden: boolean
+  system?: string
+  description?: string
+  model?: FakeModelRef
+  request: { settings: Record<string, unknown>; headers: Record<string, string>; body: Record<string, unknown> }
+  permissions: Permission.Rule[]
 }
 
 export interface FakeSessionSeed {
@@ -156,6 +188,8 @@ export interface FakeContextOptions {
   readonly nativeCommands?: readonly CommandSeed[]
   readonly onCommandReload?: () => void
   readonly agents?: readonly FakeAgentSeed[]
+  /** The location's rules, appended to every entry after the transforms (`config/plugin/agent.ts:64-67`). */
+  readonly agentConfigRules?: readonly Permission.Rule[]
   readonly sessions?: readonly FakeSessionSeed[]
   readonly tools?: readonly FakeToolSeed[]
   readonly onSessionOperation?: (operation: SessionOperation) => void
@@ -183,6 +217,13 @@ export interface FakeContext {
   readonly commandListCalls: number
   readonly sessionCalls: readonly SessionOperation[]
   readonly agentCalls: readonly string[]
+  readonly agentTransforms: readonly AgentTransformCallback[]
+  readonly agentReloadCalls: number
+  readonly agentDefaultCalls: number
+  readonly agentRemoveCalls: number
+  agentEntry(id: string): Record<string, unknown> | undefined
+  setAgent(id: string, patch: Partial<FakeAgentSeed>): void
+  removeAgentEntry(id: string): void
   readonly childSessions: readonly Record<string, unknown>[]
   readonly prompts: readonly FakePromptCall[]
   readonly switches: readonly FakeSwitchCall[]
@@ -230,7 +271,7 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
   let hiddenKeep: ReadonlySet<string> = new Set()
   const transforms: TransformCallback[] = []
   const commandTransforms: CommandTransformCallback[] = []
-  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0, toolDispose: 0, toolReload: 0 }
+  const counters = { dispose: 0, reload: 0, hookRegistrations: 0, hookDisposals: 0, commandReload: 0, commandDispose: 0, commandList: 0, toolDispose: 0, toolReload: 0, agentReload: 0, agentDispose: 0, agentDefault: 0, agentRemove: 0 }
   const hookRegistry = new Map<string, HookCallback[]>()
   const failures = new Map<FailureTarget, unknown>()
   const syncFailures = new Map<SyncFailureTarget, unknown>()
@@ -253,6 +294,12 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     }
   }
   const agents = new Map<string, FakeAgentSeed>((options.agents ?? []).map((agent) => [agent.id, { ...agent }]))
+  const agentConfigRules: readonly Permission.Rule[] = options.agentConfigRules ?? []
+  const agentTransforms: AgentTransformCallback[] = []
+  /** Later producers' edits: applied to a row that some producer still offers. */
+  const agentOverlays = new Map<string, Partial<FakeAgentSeed>>()
+  const agentDrops = new Set<string>()
+  let agentRows = new Map<string, AgentRow>()
   const sessions = new Map<string, Record<string, unknown>>()
   for (const session of options.sessions ?? []) sessions.set(session.id, sessionInfo({ ...session }))
   const sessionCalls: SessionOperation[] = []
@@ -313,15 +360,93 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     pendingApply = undefined
   }
 
-  const agentInfo = (seed: FakeAgentSeed) => ({
-    id: seed.id,
-    name: seed.id,
-    mode: seed.mode ?? "primary",
-    hidden: false,
-    request: {},
-    permissions: [],
-    ...(seed.model === undefined ? {} : { model: seed.model }),
+  const agentInfo = (row: AgentRow): Record<string, unknown> => ({
+    id: row.id,
+    name: row.name,
+    mode: row.mode,
+    hidden: row.hidden,
+    request: {
+      settings: { ...row.request.settings },
+      headers: { ...row.request.headers },
+      body: { ...row.request.body },
+    },
+    permissions: row.permissions.map((rule) => ({ ...rule })),
+    ...(row.system === undefined ? {} : { system: row.system }),
+    ...(row.description === undefined ? {} : { description: row.description }),
+    ...(row.model === undefined ? {} : { model: { ...row.model } }),
   })
+
+  const agentRow = (seed: FakeAgentSeed): AgentRow => {
+    const defaults = Agent.Info.default(seed.id as Agent.ID)
+    return {
+      id: seed.id,
+      name: seed.name ?? defaults.name,
+      mode: seed.mode ?? defaults.mode,
+      hidden: seed.hidden ?? defaults.hidden,
+      ...(seed.system === undefined ? {} : { system: seed.system }),
+      ...(seed.description === undefined ? {} : { description: seed.description }),
+      ...(seed.model === undefined ? {} : { model: { ...seed.model } }),
+      request: {
+        settings: { ...(seed.request?.settings ?? {}) },
+        headers: { ...(seed.request?.headers ?? {}) },
+        body: { ...(seed.request?.body ?? {}) },
+      },
+      permissions: (seed.permissions ?? defaults.permissions).map((rule) => ({ ...rule })),
+    }
+  }
+
+  const applyAgentPatch = (row: AgentRow, patch: Partial<FakeAgentSeed>): void => {
+    if (patch.name !== undefined) row.name = patch.name
+    if (patch.mode !== undefined) row.mode = patch.mode
+    if (patch.hidden !== undefined) row.hidden = patch.hidden
+    if (patch.system !== undefined) row.system = patch.system
+    if (patch.description !== undefined) row.description = patch.description
+    if (patch.model !== undefined) row.model = { ...patch.model }
+    if (patch.request !== undefined) {
+      Object.assign(row.request.settings, patch.request.settings ?? {})
+      Object.assign(row.request.headers, patch.request.headers ?? {})
+      Object.assign(row.request.body, patch.request.body ?? {})
+    }
+    if (patch.permissions !== undefined) row.permissions = patch.permissions.map((rule) => ({ ...rule }))
+  }
+
+  const agentEditor = {
+    list: () => [...agentRows.values()],
+    get: (id: string) => agentRows.get(id),
+    default: () => {
+      counters.agentDefault += 1
+    },
+    remove: (id: string) => {
+      counters.agentRemove += 1
+      agentRows.delete(id)
+    },
+    update: (id: string, update: (row: AgentRow) => void) => {
+      const existing = agentRows.get(id)
+      if (existing !== undefined) {
+        update(existing)
+        return
+      }
+      const created = agentRow({ id })
+      agentRows.set(id, created)
+      update(created)
+    },
+  } as unknown as AgentEditor
+
+  // Host semantics (`packages/core/src/state.ts:191-213`): a rebuild restarts from the seeds,
+  // replays every transform, applies what later producers changed, then appends the
+  // location's rules last.
+  const replayAgents = (): void => {
+    agentRows = new Map([...agents.values()].map((seed) => [seed.id, agentRow(seed)]))
+    for (const transform of agentTransforms) transform(agentEditor)
+    for (const [id, patch] of agentOverlays) {
+      const row = agentRows.get(id)
+      if (row !== undefined) applyAgentPatch(row, patch)
+    }
+    for (const id of agentDrops) agentRows.delete(id)
+    for (const row of agentRows.values()) row.permissions.push(...agentConfigRules)
+  }
+
+  replayAgents()
 
   const page = ({ prefix, after, limit = DEFAULT_SCAN_LIMIT }: FakeStorageScanOptions) => {
     const keys = [...values.keys()]
@@ -484,16 +609,35 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     agent: {
       get: async (input: { agentID: string }) => {
         agentCalls.push("get")
-        const seed = agents.get(input.agentID)
-        if (seed === undefined) throw new Error(`unknown agent ${input.agentID}`)
-        return { location: { directory: location.directory }, data: agentInfo(seed) }
+        const row = agentRows.get(input.agentID)
+        if (row === undefined) throw new Error(`unknown agent ${input.agentID}`)
+        return { location: { directory: location.directory }, data: agentInfo(row) }
       },
+      transform: (callback: AgentTransformCallback) => {
+        const sync = syncFailures.get("agent.transform")
+        if (sync !== undefined) throw sync
+        return guarded("agent.transform", () => {
+          agentTransforms.push(callback)
+          replayAgents()
+          return {
+            dispose: async () => {
+              counters.agentDispose += 1
+            },
+          }
+        })
+      },
+      reload: async () =>
+        guarded("agent.reload", () => {
+          agentCalls.push("reload")
+          replayAgents()
+          counters.agentReload += 1
+        }),
       list: async () => {
         agentCalls.push("list")
-        return {
+        return guarded("agent.list", () => ({
           location: { directory: location.directory },
-          data: [...agents.values()].map((seed) => agentInfo(seed)),
-        }
+          data: [...agentRows.values()].map((row) => agentInfo(row)),
+        }))
       },
     },
     location,
@@ -629,6 +773,32 @@ export function fakeContext(seed: readonly Skill.Info[] = [], options: FakeConte
     },
     get agentCalls() {
       return agentCalls
+    },
+    get agentTransforms() {
+      return agentTransforms
+    },
+    get agentReloadCalls() {
+      return counters.agentReload
+    },
+    get agentDefaultCalls() {
+      return counters.agentDefault
+    },
+    get agentRemoveCalls() {
+      return counters.agentRemove
+    },
+    agentEntry(id: string) {
+      const row = agentRows.get(id)
+      return row === undefined ? undefined : agentInfo(row)
+    },
+    setAgent(id: string, patch: Partial<FakeAgentSeed>) {
+      const previous = agentOverlays.get(id) ?? {}
+      agentOverlays.set(id, { ...previous, ...patch })
+      const row = agentRows.get(id)
+      if (row !== undefined) applyAgentPatch(row, patch)
+    },
+    removeAgentEntry(id: string) {
+      agentDrops.add(id)
+      agentRows.delete(id)
     },
     get childSessions() {
       return childSessions
