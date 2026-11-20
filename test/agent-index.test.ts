@@ -303,9 +303,9 @@ describe("skips and isolation", () => {
 
     expect(result.agents.map((agent) => agent.name)).toEqual(["kept"])
     expect(result.diagnostics).toEqual([
+      "agent-skip: A/.opencode/opencode.jsonc: entry bad schema",
       "agent-skip: legacy A/.opencode/agent/legacy.md",
       "agent-skip: malformed A/opencode.json",
-      "agent-skip: schema A/.opencode/opencode.jsonc",
     ])
   })
 
@@ -318,6 +318,28 @@ describe("skips and isolation", () => {
 
     expect(result.agents).toEqual([])
     expect(result.diagnostics).toEqual(["agent-skip: unreadable A/opencode.json: EACCES"])
+  })
+
+  it("drops one bad agents key and keeps the document's top-level deny", async () => {
+    const f = await fixture()
+    await f.write(
+      "A/opencode.json",
+      JSON.stringify({
+        permissions: [{ action: "read", resource: "**", effect: "deny" }],
+        agents: { good: { description: "g" }, bad: { mode: "bogus" } },
+      }),
+    )
+    await f.write("A/.opencode/agent/writer.md", "---\ndescription: w\n---\nbody\n")
+
+    const result = await index(f)
+
+    expect(result.agents.map((agent) => agent.name)).toEqual(["good", "writer"])
+    // A15: the sibling key and the document's nested deny survive — including on the
+    // file-derived agent, which is the fail-open direction the per-entry drop removes.
+    for (const agent of result.agents) {
+      expect(agent.subprojectPermissions).toEqual([{ action: "read", resource: "**", effect: "deny" }])
+    }
+    expect(result.diagnostics).toEqual(["agent-skip: A/opencode.json: entry bad schema"])
   })
 
   it("keeps an agent whose document references an escaping {file:}", async () => {

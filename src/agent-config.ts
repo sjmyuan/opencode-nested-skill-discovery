@@ -53,13 +53,10 @@ export interface SubstitutionResult {
 }
 
 /** A14: only these three keys are read; everything else is ignored, silently. */
-const Projection = Schema.Struct({
-  agents: Schema.optional(Schema.Record(Schema.String, ConfigAgent.Info)),
-  permissions: Schema.optional(Permission.Ruleset),
-  default_agent: Schema.optional(Schema.String),
-})
-
-const decodeProjection = SchemaParser.decodeUnknownResult(Projection)
+const decodeAgents = SchemaParser.decodeUnknownResult(Schema.Record(Schema.String, Schema.Unknown))
+const decodePermissions = SchemaParser.decodeUnknownResult(Permission.Ruleset)
+const decodeDefaultAgent = SchemaParser.decodeUnknownResult(Schema.String)
+const decodeAgentEntry = SchemaParser.decodeUnknownResult(ConfigAgent.Info)
 
 export async function readConfigDocument(
   input: ReadConfigDocumentInput,
@@ -82,26 +79,69 @@ export async function readConfigDocument(
   const errors: ParseError[] = []
   const parsed = parse(substituted.text, errors, { allowTrailingComma: true })
   // A10: any JSONC error rejects the document; so does an empty one, which native also rejects.
-  if (parsed === undefined || errors.length > 0) {
+  if (parsed === undefined || errors.length > 0 || typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { diagnostics: [...refusals, `agent-skip: malformed ${input.display}`] }
   }
+  const fields = parsed as Record<string, unknown>
 
-  const decoded = decodeProjection(parsed, { errors: "all" })
-  if (Result.isFailure(decoded)) return { diagnostics: [...refusals, `agent-skip: schema ${input.display}`] }
+  // A15/D11: the read set is checked in a fixed order; the first failure drops the document
+  // with one line naming the field whose rules are lost.
+  const agentsField = fields.agents
+  let rawAgents: Readonly<Record<string, unknown>> = {}
+  if (agentsField !== undefined) {
+    const decoded = decodeAgents(agentsField, { errors: "all" })
+    if (Result.isFailure(decoded)) {
+      return { diagnostics: [...refusals, `agent-skip: ${input.display}: agents schema`] }
+    }
+    rawAgents = decoded.success
+  }
 
-  const projection = decoded.success
-  const diagnostics =
-    projection.default_agent === undefined ? [] : [`agent-default-ignored: ${input.display}`]
+  const permissionsField = fields.permissions
+  let permissions: readonly Permission.Rule[] = []
+  if (permissionsField !== undefined) {
+    const decoded = decodePermissions(permissionsField, { errors: "all" })
+    if (Result.isFailure(decoded)) {
+      return { diagnostics: [...refusals, `agent-skip: ${input.display}: permissions schema`] }
+    }
+    permissions = decoded.success
+  }
+
+  const defaultField = fields.default_agent
+  let defaultAgent: string | undefined
+  if (defaultField !== undefined) {
+    const decoded = decodeDefaultAgent(defaultField, { errors: "all" })
+    if (Result.isFailure(decoded)) {
+      return { diagnostics: [...refusals, `agent-skip: ${input.display}: default_agent schema`] }
+    }
+    defaultAgent = decoded.success
+  }
+
+  // A15: one bad key drops that key only — its siblings and the document's top-level rules
+  // survive, so a nested `deny` can no longer be erased by an unrelated entry.
+  const agents = new Map<string, ConfigAgent.Info>()
+  const dropped: string[] = []
+  for (const [key, value] of Object.entries(rawAgents)) {
+    const decoded = decodeAgentEntry(value, { errors: "all" })
+    if (Result.isFailure(decoded)) {
+      dropped.push(`agent-skip: ${input.display}: entry ${key} schema`)
+      continue
+    }
+    agents.set(key, decoded.success)
+  }
 
   return {
     document: {
       path: input.path,
       canonicalPath: input.canonicalPath,
-      agents: new Map(Object.entries(projection.agents ?? {})),
-      permissions: projection.permissions ?? [],
-      ...(projection.default_agent === undefined ? {} : { defaultAgent: projection.default_agent }),
+      agents,
+      permissions,
+      ...(defaultAgent === undefined ? {} : { defaultAgent }),
     },
-    diagnostics: [...refusals, ...diagnostics],
+    diagnostics: [
+      ...refusals,
+      ...(defaultAgent === undefined ? [] : [`agent-default-ignored: ${input.display}`]),
+      ...dropped,
+    ],
   }
 }
 

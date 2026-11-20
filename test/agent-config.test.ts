@@ -413,13 +413,61 @@ describe("drops", () => {
     expect(result.diagnostics).toEqual(["agent-skip: malformed A/opencode.json"])
   })
 
-  it("drops the whole document when one entry is invalid", async () => {
-    const path = await document(`{"agents":{"a":{"mode":"bogus"}}}`)
+  it("drops only the failed key, keeping siblings and the document's rules", async () => {
+    const path = await document(
+      JSON.stringify({
+        permissions: [{ action: "read", resource: "**", effect: "deny" }],
+        agents: { good: { description: "g" }, bad: { mode: "bogus" } },
+      }),
+    )
+
+    const result = await read(path)
+
+    expect([...(result.document?.agents.keys() ?? [])]).toEqual(["good"])
+    expect(result.document?.agents.get("good")?.description).toBe("g")
+    expect(result.document?.permissions).toEqual([{ action: "read", resource: "**", effect: "deny" }])
+    expect(result.diagnostics).toEqual(["agent-skip: A/opencode.json: entry bad schema"])
+  })
+
+  it("reports one entry line per bad key and keeps the good sibling", async () => {
+    const path = await document(
+      JSON.stringify({ agents: { one: { mode: "bogus" }, kept: {}, two: { mode: "nope" } } }),
+    )
+
+    const result = await read(path)
+
+    expect([...(result.document?.agents.keys() ?? [])]).toEqual(["kept"])
+    expect(result.diagnostics).toEqual([
+      "agent-skip: A/opencode.json: entry one schema",
+      "agent-skip: A/opencode.json: entry two schema",
+    ])
+  })
+
+  it("drops the document when the top-level permissions do not decode", async () => {
+    const path = await document(JSON.stringify({ permissions: "nope" }))
 
     const result = await read(path)
 
     expect(result.document).toBeUndefined()
-    expect(result.diagnostics).toEqual(["agent-skip: schema A/opencode.json"])
+    expect(result.diagnostics).toEqual(["agent-skip: A/opencode.json: permissions schema"])
+  })
+
+  it("drops the document when default_agent is not a string, with no ignored line", async () => {
+    const path = await document(JSON.stringify({ default_agent: 42 }))
+
+    const result = await read(path)
+
+    expect(result.document).toBeUndefined()
+    expect(result.diagnostics).toEqual(["agent-skip: A/opencode.json: default_agent schema"])
+  })
+
+  it("drops the document when agents is not a map", async () => {
+    const path = await document(JSON.stringify({ agents: 5 }))
+
+    const result = await read(path)
+
+    expect(result.document).toBeUndefined()
+    expect(result.diagnostics).toEqual(["agent-skip: A/opencode.json: agents schema"])
   })
 
   it("reports an unreadable document by error code, never by message", async () => {
