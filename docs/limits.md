@@ -1,7 +1,7 @@
 # Limits
 
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The five
-scan budgets are **defaults** declared in `src/contracts.ts:162-168` and each one is
+scan budgets are **defaults** declared in `src/contracts.ts:179-185` and each one is
 overridable from the plugin entry's `options` object: the registry resolves them once at
 construction (`src/options.ts:34-51`, `src/registry.ts:320`) and hands the same object to the
 skill scan (`src/registry.ts:550-555`) and to the native command-name walk
@@ -27,7 +27,7 @@ behaviour is the defaults — apart from the raised directory budget below.
 | Command template | the file body, so the same 128 KiB per-file limit | the whole command file is skipped with `command-oversize:`; the command snapshot adds no new budget |
 
 The command template is the file body after the closing fence, so it is bounded by the shared
-128 KiB per-file limit (`src/contracts.ts:162-168`) rather than by a budget of its own. The
+128 KiB per-file limit (`src/contracts.ts:179-185`) rather than by a budget of its own. The
 snapshot reader re-checks the limit on the bytes it read, because a file can grow between the
 scan and the read (`src/command-snapshot.ts:88-91`), and the template is then stored in
 `nested/<locationToken>/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
@@ -103,7 +103,7 @@ diagnostic cap. Everything else is quiet, and the sharp edges are these:
 
 Depth counts directories between the location and the **subproject** — a directory that
 carries a marker — not directories between the location and the skill file
-(`src/scan.ts:163`, `179-182`; `src/contracts.ts:130-136`). The cap is the `maxDepth`
+(`src/scan.ts:163`, `179-182`; `src/contracts.ts:146-152`). The cap is the `maxDepth`
 option, defaulting to 5:
 
 - a subproject at depth 5 is discovered at the default, and its `SKILL.md` may sit many
@@ -121,7 +121,7 @@ The location itself is a depth-0 subproject: skills directly under
 
 The walk skips these names at every level, before classifying the entry, so a pruned symlink
 is skipped as silently as a pruned directory (`src/scan.ts:169-174`,
-`src/contracts.ts:170-184`):
+`src/contracts.ts:187-201`):
 
 `node_modules`, `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `target`, `dist`,
 `build`, `.next`, `.cache`, `vendor`
@@ -133,7 +133,7 @@ copied plugin checkout or an installed dependency from flooding the registry.
 ## Markers
 
 A marker makes a directory a subproject and gives it a scope token and a name prefix. The
-marker kinds are `src/contracts.ts:214-222`:
+marker kinds are `src/contracts.ts:249-257`:
 
 | Kind | Detected as |
 |---|---|
@@ -257,7 +257,7 @@ boundary.
 ## Budgets and truncation
 
 The scan counts directories, accepted files, and bytes against the budgets in
-`src/contracts.ts:162-168`. Hitting a directory, file-count, or total-byte budget sets
+`src/contracts.ts:179-185`. Hitting a directory, file-count, or total-byte budget sets
 `truncated`, emits `budget-directories` / `budget-files` / `budget-total-bytes`, and stops
 the walk (`src/scan.ts:542-582`, `682-703`). A single file over 128 KiB is skipped with
 `budget-file-bytes` while the walk continues (`src/scan.ts:564-570`).

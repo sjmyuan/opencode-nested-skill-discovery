@@ -15,7 +15,7 @@ skills exactly as they were (`src/registry.ts:368-424`, `src/replay.ts:18-45`,
 `src/command-replay.ts:43-90`). The only entry it ever drops is its own duplicate of a nested skill
 already registered under another path ([Advertisement](#advertisement)), and it never
 registers a second checkout of one repository ([Repo families](#repo-families)). Every entry
-it adds carries an ID starting with `nested.` (`src/contracts.ts:151`).
+it adds carries an ID starting with `nested.` (`src/contracts.ts:167`).
 
 opencode's own discovery reads `<config-dir>/skill` and `<config-dir>/skills` for the
 workspace, its ancestor config roots, and the global ones
@@ -98,13 +98,13 @@ never stop the walk, and the deepest marker owner wins (`src/scan.ts:163`, `181-
 Inside an opened skill root the walk has no depth cap (`src/scan.ts:232-280`).
 
 Pruned directory names are skipped before any classification, so a pruned symlink is as
-silent as a pruned directory (`src/scan.ts:169-174`, `src/contracts.ts:170-184`). The list
+silent as a pruned directory (`src/scan.ts:169-174`, `src/contracts.ts:187-201`). The list
 is in [limits.md](limits.md).
 
 The walk carries a third source beside skills and commands. A directory that holds an
 `opencode.json`, an `opencode.jsonc`, or a `.opencode` entry is an `opencode-project`
 subproject, and the marker is read from the listing the walk already holds, so nothing extra
-is stat'ed or resolved (`src/scan.ts:687-694`, `src/contracts.ts:214-222`). Its
+is stat'ed or resolved (`src/scan.ts:687-694`, `src/contracts.ts:249-257`). Its
 `.opencode/{agent,agents}` is then an agent root: claimed like a command root, every `.md`
 below it a candidate, no depth cap inside it (`src/scan.ts:367-399`). The location's own
 agent roots are claimed and never scanned, and a candidate whose realpath is inside a
@@ -131,7 +131,7 @@ subproject changes its scope token and therefore every ID below it. A permission
 pinned to an exact ID stops matching after such a move ([permissions.md](permissions.md)).
 
 The composed maximum is 90 characters (7 + 24 + 1 + 8 + 1 + 40 + 1 + 8), so the declared
-`MAX_ID_LENGTH` of 96 (`src/contracts.ts:152`) is a contract bound rather than a truncation
+`MAX_ID_LENGTH` of 96 (`src/contracts.ts:168`) is a contract bound rather than a truncation
 step (`src/indexer.ts:199` builds the ID without cutting it).
 
 ## Repo families
@@ -178,7 +178,7 @@ for that checkout: the pre-suppression entries are advertised and one
 path fits, and finally cut the last segment (`src/names.ts:32-46`). `sanitizeText` removes
 `<`, `>`, `"`, `&`, and control characters, collapses whitespace, and trims
 (`src/names.ts:48-55`). The entry name is capped at 80 code points and the description at
-500 in `assembleEntries` (`src/registry.ts:113-132`, `src/contracts.ts:155-156`).
+500 in `assembleEntries` (`src/registry.ts:113-132`, `src/contracts.ts:172-173`).
 
 The name is display-only. IDs, permission rules, and dedupe all key on the ID or the
 canonical path, never on the name (`src/registry.ts:121-130`, `src/registry.ts:248-254`, `src/indexer.ts:199`).
@@ -214,8 +214,8 @@ timeout that reports failure: the deferred check simply re-lists and re-filters.
 
 ## Storage model
 
-Three skill keys (`src/contracts.ts:235-237`) and three command keys
-(`src/contracts.ts:238-240`), all location-qualified:
+Three skill keys (`src/contracts.ts:270-272`) and three command keys
+(`src/contracts.ts:273-275`), all location-qualified:
 
 | Key | Contents |
 |---|---|
@@ -224,7 +224,7 @@ Three skill keys (`src/contracts.ts:235-237`) and three command keys
 | `nested/<locationToken>/subproject/<scopeToken>` | the same grouping with each entry's `content` (`src/manifest.ts:66-73`, `167-185`) |
 | `nested/<locationToken>/commands/version` | the command store's own counter; it moves only when the command set changes (`src/manifest.ts:401-461`) |
 | `nested/<locationToken>/commands/manifest/<scopeToken>` | `{ manifestVersion, scopeToken, directory, entries }`, no `template` (`src/manifest.ts:464-469`) |
-| `nested/<locationToken>/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:90-112`, `src/manifest.ts:470-475`) |
+| `nested/<locationToken>/commands/<scopeToken>` | the same grouping plus each entry's `template`, `agent`, `model`, `subagent` (`src/contracts.ts:105-127`, `src/manifest.ts:470-475`) |
 
 The token is the slug of the canonical location's basename cut to 24 characters, plus the
 first 8 hex digits of its sha256: one key segment, no `/`. The plugin derives it verbatim
@@ -275,8 +275,8 @@ starting a second one, so concurrent triggers cost one scan (`src/registry.ts:74
 | Trigger | Mechanism | Bound |
 |---|---|---|
 | activation | `setup` → `activate()` (`src/plugin.ts:25-45`) | once per location instance |
-| filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory, per command root, per command directory, per agent root, per agent directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:157`) |
-| prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts:23-54`) | `PROMPT_THROTTLE_MS = 2_000` (`src/contracts.ts:160`), skipped when any refresh just finished |
+| filesystem change | non-recursive `fs.watch` per location root, per subproject with candidates, per skill root, per skill directory, per command root, per command directory, per agent root, per agent directory (`src/watch.ts`) | one coalescing timer at `DEBOUNCE_MS = 250` (`src/contracts.ts:174`) |
+| prompt admission | a `prompt` session hook calling a throttled backstop (`src/backstop.ts:23-54`) | `PROMPT_THROTTLE_MS = 2_000` (`src/contracts.ts:177`), skipped when any refresh just finished |
 
 The debounce is a single timer (`src/registry.ts:322-325`), not a per-event delay: the first
 event arms it, later events inside the window are swallowed, so a save burst is one refresh

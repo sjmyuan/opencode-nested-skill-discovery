@@ -39,6 +39,7 @@ describe("opencode-project marker", () => {
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("Q")
     expect(result.candidates[0]?.markers).toEqual(["claude-skills", "opencode-project"])
+    expect(result.agentConfigs.map((candidate) => candidate.document)).toEqual(["opencode.jsonc"])
   })
 
   for (const document of ["opencode.json", "opencode.jsonc"] as const) {
@@ -51,6 +52,7 @@ describe("opencode-project marker", () => {
 
       expect(result.candidates[0]?.subproject).toBe("Q")
       expect(result.candidates[0]?.markers).toEqual(["agents-skills", "opencode-project"])
+      expect(result.agentConfigs.map((candidate) => candidate.document)).toEqual([document])
     })
   }
 
