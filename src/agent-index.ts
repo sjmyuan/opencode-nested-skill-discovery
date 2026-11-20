@@ -11,7 +11,7 @@ import {
   type AgentConfigCandidate,
   type AgentRootKind,
 } from "./contracts.ts"
-import { readConfigDocument, type ConfigDocument } from "./agent-config.ts"
+import { readConfigDocument, errorCode, type ConfigDocument } from "./agent-config.ts"
 import { decodeAgentFile, type AgentFields } from "./agent-decode.ts"
 import { filterAgentFamilies, type AgentFamilyEntry } from "./agent-family.ts"
 import { createFamilyPass, type FamilyPass } from "./family.ts"
@@ -122,9 +122,9 @@ export async function indexAgents(input: IndexAgentsInput): Promise<IndexAgentsR
         canonicalPath: config.canonicalPath,
         home: input.home,
         display: display(config.path),
-      }).catch(() => ({
+      }).catch((error: unknown) => ({
         document: undefined,
-        diagnostics: [`agent-skip: unreadable ${display(config.path)}`] as readonly string[],
+        diagnostics: [`agent-skip: unreadable ${display(config.path)}: ${errorCode(error)}`] as readonly string[],
       }))
       document = read.document
       diagnostics.push(...read.diagnostics)
@@ -140,9 +140,11 @@ export async function indexAgents(input: IndexAgentsInput): Promise<IndexAgentsR
   }
 
   for (const agent of input.agents) {
-    const text = await readFile(agent.canonicalPath, "utf8").catch(() => undefined)
-    if (text === undefined) {
-      diagnostics.push(`agent-skip: unreadable ${display(agent.path)}`)
+    let text: string
+    try {
+      text = await readFile(agent.canonicalPath, "utf8")
+    } catch (error) {
+      diagnostics.push(`agent-skip: unreadable ${display(agent.path)}: ${errorCode(error)}`)
       continue
     }
     const decoded = decodeAgentFile(text, display(agent.path))

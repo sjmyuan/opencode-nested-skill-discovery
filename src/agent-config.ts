@@ -147,7 +147,7 @@ async function substituteFiles(
 }
 
 /** D3: diagnostics carry `error.code`, never `Error.message` (which embeds absolute paths). */
-function errorCode(error: unknown): string {
+export function errorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = (error as { readonly code?: unknown }).code
     if (typeof code === "string") return code

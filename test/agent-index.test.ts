@@ -318,6 +318,18 @@ describe("skips and isolation", () => {
     expect(result.agents).toEqual([])
     expect(result.diagnostics).toEqual(["agent-skip: unreadable A/opencode.json: EACCES"])
   })
+
+  it("carries the error code on an unreadable agent file", async () => {
+    if (process.getuid?.() === 0) return
+    const f = await fixture()
+    await f.write("A/.opencode/agent/x.md", "---\ndescription: d\n---\nbody\n")
+    await f.chmod("A/.opencode/agent/x.md", 0o000)
+
+    const result = await index(f)
+
+    expect(result.agents).toEqual([])
+    expect(result.diagnostics).toEqual(["agent-skip: unreadable A/.opencode/agent/x.md: EACCES"])
+  })
 })
 
 describe("family filtering on both sources", () => {
