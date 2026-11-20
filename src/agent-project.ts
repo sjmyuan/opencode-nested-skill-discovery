@@ -111,6 +111,8 @@ export function admitAgents(input: AdmitAgentsInput): AdmitAgentsResult {
       continue
     }
     if (input.held.has(candidate.id)) {
+      // `shadowed` is reachable only after the audit has grown the held set; before that, every
+      // held ID came from the pre-registration listing and is reported as `id-held`.
       const reason = input.shadowed?.has(candidate.id) === true ? "shadowed" : "id-held"
       diagnostics.push(`agent-skip: ${reason} ${display}`)
       continue

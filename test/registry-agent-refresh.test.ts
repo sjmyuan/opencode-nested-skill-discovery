@@ -89,7 +89,7 @@ describe("agent-root watcher coverage", () => {
     }
   })
 
-  it("re-scans once for an agent-root event and stays ok", async () => {
+  it("re-scans once for an agent-root event and keeps the fixture's skill and agent published", async () => {
     const h = await harness()
 
     try {

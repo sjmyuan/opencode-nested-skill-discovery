@@ -220,7 +220,7 @@ migrated (`src/agent-decode.ts:51-68`).
 | `agent-default-ignored: <rel>` | the document sets `default_agent`; never applied |
 | `agent-field: <rel> ignored <key,…>` | a non-legacy agent file carries an unknown key |
 | `agent-merge: <name> (<rel> + …)` | one per merged native name, sources in native order |
-| `agent-index: <reason>` | the agent stage threw; the refresh still succeeds |
+| `agent-index: <reason>` | the agent stage threw; the last good agent list and payload stay published and the refresh still succeeds |
 | `agent-skip: disabled <rel>` | the source is disabled; never registered |
 | `agent-skip: id-held <rel>` | the host map already held this ID before the transform registered |
 | `agent-skip: shadowed <rel>` | a previous audit held this ID out; the entry is omitted from the map |

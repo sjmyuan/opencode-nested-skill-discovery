@@ -137,14 +137,14 @@ const ANCHORS: ReadonlyArray<{
   readonly ranges: string
   readonly marker: string
 }> = [
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "561-909", marker: "const runRefresh = async" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "561-911", marker: "const runRefresh = async" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "91-96", marker: "function capDiagnostics" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "100-111", marker: "async function runStage" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "201-210", marker: "export interface RefreshOutcome" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "824-840", marker: 'runStage(diagnostics, "command-audit"' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "826-842", marker: 'runStage(diagnostics, "command-audit"' },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "44", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "1032", marker: "dedupe-deferred: ${reasonOf(error)}" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "835-836", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "1034", marker: "dedupe-deferred: ${reasonOf(error)}" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "837-838", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
   { doc: "docs/architecture.md", target: "src/command-audit.ts", ranges: "5-10", marker: "EMPTY_NATIVE_COMMANDS" },
   { doc: "README.md", target: "src/command-execute.ts", ranges: "30-104", marker: "export function createCommandExecutor" },
   { doc: "docs/limits.md", target: "src/command-model.ts", ranges: "58-64", marker: "export function canonicalModelSelection" },

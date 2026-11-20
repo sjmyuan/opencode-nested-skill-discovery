@@ -678,7 +678,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           agentLines = indexedAgents.diagnostics
         }
         // One projection per successful index, frozen before the transform can read it, so the
-        // replay performs no I/O (G1) and a rebuild never mutates what is being replayed.
+        // replay performs no I/O (G1) and a rebuild never mutates what is being replayed. The
+        // freeze is shallow: the array and each entry, not the nested rules array, which the
+        // replay only reads and never edits.
         const projected = admitAgents({
           agents,
           home: nativeInput().home,
