@@ -39,6 +39,8 @@ export interface ScanOptions {
   readonly skillRoots?: readonly SkillRootKind[]
   readonly commandRoots?: readonly CommandRootKind[]
   readonly agentRoots?: readonly AgentRootKind[]
+  /** Canonical native agent roots; a candidate whose realpath is inside one is skipped (A5). */
+  readonly agentNativeRoots?: readonly string[]
   readonly excludeRoots?: readonly string[]
 }
 
@@ -84,6 +86,7 @@ interface Context {
   readonly roots: readonly SkillRootKind[]
   readonly commandRoots: readonly CommandRootKind[]
   readonly agentRoots: readonly AgentRootKind[]
+  readonly agentNativeRoots: ReadonlySet<string>
   readonly excluded: readonly string[]
   readonly state: State
   readonly emit: (message: string) => void
@@ -149,6 +152,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
     commandRoots: options.commandRoots ?? COMMAND_ROOT_DIRECTORIES,
     agentRoots: options.agentRoots ?? AGENT_ROOT_DIRECTORIES,
+    agentNativeRoots: new Set(options.agentNativeRoots ?? []),
     excluded: await canonicalRoots(options.excludeRoots ?? []),
     state,
     emit,
@@ -505,6 +509,14 @@ async function acceptAgentLink(
   await acceptAgent(context, path, kind, owner, rootDir, link.realPath)
 }
 
+/** A5: source-set rule, not an index filter — native already publishes these files. */
+function isInsideAnyRoot(roots: ReadonlySet<string>, target: string): boolean {
+  for (const root of roots) {
+    if (isInside(root, target)) return true
+  }
+  return false
+}
+
 function isExcluded(context: Context, path: string): boolean {
   return context.excluded.some((root) => path === root || path.startsWith(`${root}${sep}`))
 }
@@ -595,7 +607,11 @@ async function acceptAgent(
   rootDir: string,
   realPath?: string,
 ): Promise<void> {
-  const admitted = await admit(context, path, realPath)
+  // D5: canonicalise first and drop native-owned files before `admit`, so a skipped file
+  // never charges the shared file or byte budget and never produces a diagnostic.
+  const canonicalPath = realPath ?? (await canonical(path))
+  if (canonicalPath !== null && isInsideAnyRoot(context.agentNativeRoots, canonicalPath)) return
+  const admitted = await admit(context, path, canonicalPath ?? undefined)
   if (admitted === null) return
   context.state.agents.push({
     name: deriveAgentName(rootDir, path),

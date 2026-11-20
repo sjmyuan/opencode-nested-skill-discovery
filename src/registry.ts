@@ -26,7 +26,7 @@ import { createShadowTracker } from "./command-shadow.ts"
 import { buildCommandSnapshot } from "./command-snapshot.ts"
 import { createFamilyPass } from "./family.ts"
 import { persistCommands, persistRegistry } from "./manifest.ts"
-import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
+import { resolveNativeAgentRoots, resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { resolveScanLimits } from "./options.ts"
 import { applyRegistry } from "./replay.ts"
@@ -498,6 +498,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     const base = await canonicalDirectory(ctx.location.directory)
     canonical = base
     const nativeRoots = await resolveNativeRoots(nativeInput())
+    // A5: the same ancestor sweep, for the native agent roots the scan must not re-publish.
+    const agentNativeRoots = await resolveNativeAgentRoots(nativeInput())
 
     let locationInfo
     try {
@@ -543,7 +545,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     }
 
     const scanned = await runStage(diagnostics, "scan", () =>
-      scanSkills({ location: base, excludeRoots: nativeRoots, limits: scanLimits.limits }),
+      scanSkills({
+        location: base,
+        excludeRoots: nativeRoots,
+        agentNativeRoots,
+        limits: scanLimits.limits,
+      }),
     )
     if (!scanned.ok) return record(fail(diagnostics))
     if (scanned.value.truncated) diagnostics.push("scan-truncated")
