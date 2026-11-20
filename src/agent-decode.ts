@@ -95,8 +95,11 @@ function withJoinedModel(data: Record<string, unknown>, body: string): unknown {
   return { ...joined, system: body }
 }
 
-/** Map the decoded class to plain fields, so no schema class instance leaves this module. */
-function toFields(info: ConfigAgent.Info): AgentFields {
+/**
+ * Map the decoded class to plain fields. Both arms — a file and a config document — go
+ * through this one function, so a `ConfigAgent.Info` instance never leaves this module.
+ */
+export function toFields(info: ConfigAgent.Info): AgentFields {
   const model = info.model
   const request = info.request
   return {

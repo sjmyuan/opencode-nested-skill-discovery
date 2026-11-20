@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { relative, sep } from "node:path"
-import { ConfigAgent } from "@opencode/schema/config/agent"
 import { Permission } from "@opencode/schema/permission"
 import {
   CONFIG_DOCUMENT_ORDER,
@@ -13,7 +12,7 @@ import {
   type ScanLimits,
 } from "./contracts.ts"
 import { readConfigDocument, errorCode, type ConfigDocument } from "./agent-config.ts"
-import { decodeAgentFile, type AgentFields } from "./agent-decode.ts"
+import { decodeAgentFile, toFields, type AgentFields } from "./agent-decode.ts"
 import { filterAgentFamilies, type AgentFamilyEntry } from "./agent-family.ts"
 import { createFamilyPass, type FamilyPass } from "./family.ts"
 import { scopeTokenFor, slug } from "./indexer.ts"
@@ -218,43 +217,8 @@ function configSources(
     name: key,
     subproject: config.subproject,
     subprojectRealPath: config.subprojectRealPath,
-    fields: fieldsFromConfig(item),
+    fields: toFields(item),
   }))
-}
-
-/** A `ConfigAgent.Info` class instance never leaves this boundary. */
-function fieldsFromConfig(item: ConfigAgent.Info): AgentFields {
-  const request = item.request
-  return {
-    ...(item.system === undefined ? {} : { system: item.system }),
-    ...(item.description === undefined ? {} : { description: item.description }),
-    ...(item.model === undefined
-      ? {}
-      : {
-          model: {
-            providerID: item.model.providerID,
-            id: item.model.model,
-            ...(item.model.variant === undefined ? {} : { variant: item.model.variant }),
-          },
-        }),
-    ...(item.mode === undefined ? {} : { mode: item.mode }),
-    ...(item.hidden === undefined ? {} : { hidden: item.hidden }),
-    ...(item.color === undefined ? {} : { color: item.color }),
-    ...(item.steps === undefined ? {} : { steps: item.steps }),
-    ...(item.disabled === undefined ? {} : { disabled: item.disabled }),
-    ...(item.permissions === undefined
-      ? {}
-      : {
-          permissions: item.permissions.map((rule) => ({
-            action: rule.action,
-            resource: rule.resource,
-            effect: rule.effect,
-          })),
-        }),
-    ...(request === undefined
-      ? {}
-      : { request: { headers: { ...(request.headers ?? {}) }, body: { ...(request.body ?? {}) } } }),
-  }
 }
 
 /** One group per (subproject, native name): the only key A8 merges on. */
