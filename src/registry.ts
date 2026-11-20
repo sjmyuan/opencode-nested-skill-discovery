@@ -9,6 +9,7 @@ import {
   MAX_NAME_LENGTH,
   PROMPT_THROTTLE_MS,
   type AgentCandidate,
+  type AgentConfigCandidate,
   type CommandCandidate,
   type CommandSnapshotSet,
   type RegistryEntry,
@@ -433,11 +434,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     candidates: readonly ScanCandidate[],
     commands: readonly CommandCandidate[],
     agents: readonly AgentCandidate[],
+    agentConfigs: readonly AgentConfigCandidate[],
   ): Promise<void> => {
     if (disposed || watchers === undefined) return
 
     try {
-      const derived = await deriveWatchTargets({ location: base, candidates, commands, agents })
+      const derived = await deriveWatchTargets({ location: base, candidates, commands, agents, agentConfigs })
       watchDiagnostics.push(...derived.diagnostics)
       watchers.sync(derived.targets)
     } catch (error) {
@@ -563,7 +565,13 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     diagnostics.push(...scanned.value.diagnostics)
     // A good scan is a valid watcher set even if a later stage fails (PD7). Command candidates
     // are the pre-suppression list, so a family flip opens and closes no handle (PD3).
-    await syncWatchers(base, scanned.value.candidates, scanned.value.commands, scanned.value.agents)
+    await syncWatchers(
+      base,
+      scanned.value.candidates,
+      scanned.value.commands,
+      scanned.value.agents,
+      scanned.value.agentConfigs,
+    )
 
     // One family pass per refresh, shared with the skill indexer and the agent index inside
     // the existing index stage (ADR command R8, agent A11). Publication composes the
