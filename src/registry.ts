@@ -17,6 +17,7 @@ import {
   type Snapshot,
 } from "./contracts.ts"
 import { createBackstop, type Backstop } from "./backstop.ts"
+import { indexAgents, type IndexedAgent } from "./agent-index.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
 import { auditReloadedCommands, EMPTY_NATIVE_COMMANDS } from "./command-audit.ts"
 import { filterCommandFamilies } from "./command-family.ts"
@@ -209,6 +210,8 @@ export interface Registry {
   readonly location: string
   readonly snapshot: RegistrySnapshot
   readonly outcome: RefreshOutcome
+  /** The last successfully indexed agents (both sources), in ID order; `[]` before the first. */
+  readonly agents: readonly IndexedAgent[]
   activate(): Promise<RefreshOutcome>
   refresh(): Promise<RefreshOutcome>
   dispose(): Promise<void>
@@ -280,6 +283,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     snapshots: Object.freeze([]),
   })
   let outcome = EMPTY_OUTCOME
+  let currentAgents: readonly IndexedAgent[] = []
   let currentCommands: CommandSnapshotSet | undefined
   let registration: Registration | undefined
   let registering: Promise<void> | undefined
@@ -561,24 +565,55 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     // are the pre-suppression list, so a family flip opens and closes no handle (PD3).
     await syncWatchers(base, scanned.value.candidates, scanned.value.commands, scanned.value.agents)
 
-    // One family pass per refresh, shared with the skill indexer inside the existing
-    // index stage (ADR command R8). Publication composes the survivors' names later.
+    // One family pass per refresh, shared with the skill indexer and the agent index inside
+    // the existing index stage (ADR command R8, agent A11). Publication composes the
+    // survivors' names later.
     const indexed = await runStage(diagnostics, "index", async () => {
       const commands = scanned.value.commands
+      const agentCandidates = scanned.value.agents
+      const agentConfigs = scanned.value.agentConfigs
       const family =
-        scanned.value.candidates.length + commands.length > 0 ? await createFamilyPass(base) : undefined
+        scanned.value.candidates.length + commands.length + agentCandidates.length + agentConfigs.length > 0
+          ? await createFamilyPass(base)
+          : undefined
       const skills = await indexCandidates(scanned.value.candidates, { location: base, nativeRoots, family })
+      // A15: the agent stage never fails the refresh — a throw costs one diagnostic and
+      // leaves the previous agent list published.
+      let agents: readonly IndexedAgent[] = []
+      let agentDiagnostics: readonly string[] = []
+      if (agentCandidates.length + agentConfigs.length > 0) {
+        try {
+          const indexedAgents = await indexAgents({
+            location: base,
+            home: nativeInput().home,
+            agents: agentCandidates,
+            configs: agentConfigs,
+            ...(family === undefined ? {} : { family }),
+          })
+          agents = indexedAgents.agents
+          agentDiagnostics = indexedAgents.diagnostics
+        } catch (error) {
+          agentDiagnostics = [`agent-index: ${reasonOf(error)}`]
+        }
+      }
       if (family === undefined || commands.length === 0) {
-        return { skills: skills.skills, commands, diagnostics: skills.diagnostics }
+        return {
+          skills: skills.skills,
+          commands,
+          diagnostics: [...skills.diagnostics, ...agentDiagnostics],
+          agents,
+        }
       }
       const filtered = await filterCommandFamilies(commands, { family })
       return {
         skills: skills.skills,
         commands: filtered.commands,
-        diagnostics: [...skills.diagnostics, ...filtered.diagnostics],
+        diagnostics: [...skills.diagnostics, ...filtered.diagnostics, ...agentDiagnostics],
+        agents,
       }
     })
     if (!indexed.ok) return record(fail(diagnostics))
+    currentAgents = indexed.value.agents
     diagnostics.push(...indexed.value.diagnostics)
 
     const built = await runStage(diagnostics, "snapshot", () =>
@@ -913,6 +948,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     },
     get outcome() {
       return outcome
+    },
+    get agents() {
+      return currentAgents
     },
     activate,
     refresh,
