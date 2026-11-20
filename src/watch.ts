@@ -4,6 +4,7 @@ import { dirname, resolve, sep } from "node:path"
 import { PRUNE_DIRECTORIES, compareText } from "./contracts.ts"
 import type {
   AgentCandidate,
+  AgentConfigCandidate,
   AgentRootKind,
   CommandCandidate,
   CommandRootKind,
@@ -184,6 +185,7 @@ export interface DeriveWatchTargetsInput {
   readonly candidates: readonly ScanCandidate[]
   readonly commands?: readonly CommandCandidate[]
   readonly agents?: readonly AgentCandidate[]
+  readonly agentConfigs?: readonly AgentConfigCandidate[]
   readonly prune?: readonly string[]
 }
 
@@ -272,6 +274,7 @@ export async function deriveWatchTargets({
   candidates,
   commands,
   agents,
+  agentConfigs,
   prune,
 }: DeriveWatchTargetsInput): Promise<DeriveWatchTargetsResult> {
   const diagnostics: string[] = []
@@ -320,6 +323,14 @@ export async function deriveWatchTargets({
       wanted.add(agentRoot)
     }
     wanted.add(dirname(agentPath))
+  }
+
+  // Config documents are the fourth kind (A13, C6): the subproject and the document's own
+  // directory, with no root rule — a config document has no agent-root kind.
+  for (const config of agentConfigs ?? []) {
+    const configPath = resolve(root, config.path)
+    wanted.add(resolve(root, config.subproject === "" ? "." : config.subproject))
+    wanted.add(dirname(configPath))
   }
 
   const kept = new Set<string>()

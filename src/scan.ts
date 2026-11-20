@@ -5,6 +5,7 @@ import {
   AGENT_ROOT_DIRECTORIES,
   COMMAND_ROOT_DIRECTORIES,
   CONFIG_DOCUMENT_NAMES,
+  CONFIG_DOCUMENT_ORDER,
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
   SKILL_ROOT_DIRECTORIES,
@@ -12,9 +13,11 @@ import {
 } from "./contracts.ts"
 import type {
   AgentCandidate,
+  AgentConfigCandidate,
   AgentRootKind,
   CommandCandidate,
   CommandRootKind,
+  ConfigDocumentName,
   ScanCandidate,
   ScanLimits,
   ScanResult,
@@ -56,12 +59,21 @@ const ROOT_SEGMENTS: Record<SkillRootKind | CommandRootKind | AgentRootKind, rea
   "opencode-agents": [".opencode", "agents"],
 }
 
+/** A3's four documents → the segments below the owning directory (POSIX names, joined by path). */
+const CONFIG_DOCUMENT_SEGMENTS: Record<ConfigDocumentName, readonly [string] | readonly [string, string]> = {
+  "opencode.json": ["opencode.json"],
+  "opencode.jsonc": ["opencode.jsonc"],
+  ".opencode/opencode.json": [".opencode", "opencode.json"],
+  ".opencode/opencode.jsonc": [".opencode", "opencode.jsonc"],
+}
+
 const DIAGNOSTIC_LIMIT = 200
 
 interface State {
   readonly candidates: ScanCandidate[]
   readonly commands: CommandCandidate[]
   readonly agents: AgentCandidate[]
+  readonly agentConfigs: AgentConfigCandidate[]
   readonly diagnostics: string[]
   directories: number
   files: number
@@ -99,6 +111,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     candidates: [],
     commands: [],
     agents: [],
+    agentConfigs: [],
     diagnostics: [],
     directories: 0,
     files: 0,
@@ -124,6 +137,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     candidates: [...state.candidates].sort(compareCandidates),
     commands: [...state.commands].sort(compareCommands),
     agents: [...state.agents].sort(compareAgents),
+    agentConfigs: [...state.agentConfigs].sort(compareAgentConfigs),
     stats: {
       directories: state.directories,
       files: state.files,
@@ -173,6 +187,12 @@ async function walk(
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
   const owner = (await probeMarkers(context, dir, rel, entries)) ?? parent
+
+  // A12/A3: only a directory that owns itself and is a strict descendant has config
+  // documents of its own; the location's four belong to native discovery.
+  if (rel !== "" && owner !== null && owner.rel === rel) {
+    await collectConfigDocuments(context, dir, rel, owner)
+  }
 
   // PD3: the cap measures subproject distance from the location, not skill-file depth.
   const childDepth = depth + 1
@@ -599,6 +619,44 @@ async function accept(
   })
 }
 
+/**
+ * The four config documents of a directory that owns itself (A3, A12). At most four
+ * `lstat` calls on a directory the walk already opened: no listing, no content read, and
+ * the shared `admit` ladder charges them like any other candidate file.
+ */
+async function collectConfigDocuments(
+  context: Context,
+  dir: string,
+  rel: string,
+  owner: Ownership,
+): Promise<void> {
+  for (const document of CONFIG_DOCUMENT_ORDER) {
+    const path = join(dir, ...CONFIG_DOCUMENT_SEGMENTS[document])
+    let info
+    try {
+      info = await lstat(path)
+    } catch {
+      continue
+    }
+    // D13: native would read through the link; refusing keeps realpath confined to the location.
+    if (info.isSymbolicLink()) {
+      context.emit(`config-symlink: ${joinRel(rel, document)}`)
+      continue
+    }
+    if (!info.isFile()) continue
+    const admitted = await admit(context, path)
+    if (admitted === null) continue
+    context.state.agentConfigs.push({
+      path,
+      canonicalPath: admitted.canonicalPath,
+      subproject: owner.rel,
+      subprojectRealPath: owner.realPath,
+      markers: [...owner.markers],
+      document,
+    })
+  }
+}
+
 async function acceptAgent(
   context: Context,
   path: string,
@@ -781,6 +839,12 @@ function compareCommands(left: CommandCandidate, right: CommandCandidate): numbe
 }
 
 function compareAgents(left: AgentCandidate, right: AgentCandidate): number {
+  if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
+  if (left.path !== right.path) return left.path < right.path ? -1 : 1
+  return 0
+}
+
+function compareAgentConfigs(left: AgentConfigCandidate, right: AgentConfigCandidate): number {
   if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
   if (left.path !== right.path) return left.path < right.path ? -1 : 1
   return 0

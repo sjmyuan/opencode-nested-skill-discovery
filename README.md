@@ -20,8 +20,8 @@ display names, add-only advertisement (the transform appends; a nested entry tha
 a native skill's path is suppressed), manifest/cache persistence, and refresh. Refresh
 means a watcher set derived from the last good scan — every discovered skill and command
 root — so an added, edited, or deleted command file republishes within one coalescing timer
-at `DEBOUNCE_MS = 250` (`src/contracts.ts:157`), with a prompt backstop throttled to one
-refresh per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:160`); the implementation is
+at `DEBOUNCE_MS = 250` (`src/contracts.ts:174`), with a prompt backstop throttled to one
+refresh per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:177`); the implementation is
 `src/watch.ts` and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
 projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
 ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes

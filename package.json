@@ -11,7 +11,10 @@
     "smoke:check": "node smoke/run.mjs --suite all"
   },
   "dependencies": {
-    "effect": "4.0.6"
+    "@opencode/schema": "2.2.5",
+    "effect": "4.0.6",
+    "gray-matter": "4.0.3",
+    "jsonc-parser": "3.3.1"
   },
   "devDependencies": {
     "@opencode/plugin": "2.2.5",

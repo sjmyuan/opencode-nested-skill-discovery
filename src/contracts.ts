@@ -84,6 +84,21 @@ export interface AgentCandidate {
 }
 
 /**
+ * A config document of a subproject that owns itself (ADR agent A3, A8; contract C2).
+ *
+ * Identity only, like `AgentCandidate`: the document's content is read at the index
+ * stage, and `document` is the A8 rank key — never re-derived from a path.
+ */
+export interface AgentConfigCandidate {
+  readonly path: string
+  readonly canonicalPath: string
+  readonly subproject: string
+  readonly subprojectRealPath: string
+  readonly markers: readonly SubprojectMarker[]
+  readonly document: ConfigDocumentName
+}
+
+/**
  * The published command, split into what the snapshot records and what it replays
  * (ADR command R16; plan PD1). The composed name is the identity.
  */
@@ -122,6 +137,7 @@ export interface ScanResult {
   readonly candidates: readonly ScanCandidate[]
   readonly commands: readonly CommandCandidate[]
   readonly agents: readonly AgentCandidate[]
+  readonly agentConfigs: readonly AgentConfigCandidate[]
   readonly stats: ScanStats
   readonly truncated: boolean
   readonly diagnostics: readonly string[]
@@ -152,6 +168,7 @@ export const ID_PREFIX = "nested."
 export const MAX_ID_LENGTH = 96
 export const MAX_SCOPE_SLUG_LENGTH = 24
 export const MAX_SKILL_SLUG_LENGTH = 40
+export const MAX_AGENT_SLUG_LENGTH = 40
 export const MAX_NAME_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 500
 export const DEBOUNCE_MS = 250
@@ -205,6 +222,24 @@ export const AGENT_ROOT_DIRECTORIES: readonly AgentRootKind[] = [
  * name is tested here; F16 reads the content (A3). Both are exact names, as A2 words it.
  */
 export const CONFIG_DOCUMENT_NAMES = ["opencode.json", "opencode.jsonc"] as const
+
+/** The four documents A3 names, one per directory: the project root pair and its `.opencode` pair. */
+export type ConfigDocumentName =
+  | "opencode.json"
+  | "opencode.jsonc"
+  | ".opencode/opencode.json"
+  | ".opencode/opencode.jsonc"
+
+/**
+ * The A8 native order: a document's rank is its index here, so the merge never re-derives
+ * an order from a path. Config documents rank before every agent file.
+ */
+export const CONFIG_DOCUMENT_ORDER: readonly ConfigDocumentName[] = [
+  "opencode.json",
+  "opencode.jsonc",
+  ".opencode/opencode.json",
+  ".opencode/opencode.jsonc",
+]
 
 // Symbolic kinds, not file names; F2 owns the kind → R6 name map:
 // .opencode/skills, .opencode/skill, .claude/skills, .agents/skills,
