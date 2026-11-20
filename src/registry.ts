@@ -18,6 +18,7 @@ import {
   type Snapshot,
 } from "./contracts.ts"
 import { createBackstop, type Backstop } from "./backstop.ts"
+import { auditReloadedAgents } from "./agent-audit.ts"
 import { indexAgents, type IndexedAgent } from "./agent-index.ts"
 import { admitAgents, type AdmittedAgent } from "./agent-project.ts"
 import { indexCandidates, scopeTokenFor, type IndexedSkill } from "./indexer.ts"
@@ -313,6 +314,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   const watchDiagnostics: string[] = []
   /** IDs the host map held when the transform registered, grown by the reload audit (G8, G9). */
   const heldAgents = new Set<string>()
+  /** The subset the audit reported, so the skip says why the ID is held (D10). */
+  const shadowedAgents = new Set<string>()
   const nameLedger = createNameLedger()
   const shadowTracker = createShadowTracker()
 
@@ -672,6 +675,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           agents,
           home: nativeInput().home,
           held: heldAgents,
+          shadowed: shadowedAgents,
           display: (path) => relative(base, path).split(sep).join("/"),
         })
         admitted = Object.freeze(projected.admitted.map((entry) => Object.freeze(entry)))
@@ -785,7 +789,23 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     const commandReloaded = await runStage(diagnostics, "command-reload", () => ctx.command.reload())
 
     // The map rebuilds from the transform on reload, so one reload publishes the swap (G1).
-    await runStage(diagnostics, "agent-reload", () => ctx.agent.reload())
+    const agentReloaded = await runStage(diagnostics, "agent-reload", () => ctx.agent.reload())
+
+    // G8, G9: compare the reloaded field set with what we replayed. A mismatch is reported
+    // once and held out of the next projection, which then omits it from the map.
+    if (agentReloaded.ok && currentAgentPayload !== undefined) {
+      const payload = currentAgentPayload
+      const audited = await runStage(diagnostics, "agent-audit", () =>
+        auditReloadedAgents({ agents: payload, shadowed: shadowedAgents, list: () => ctx.agent.list() }),
+      )
+      if (audited.ok) {
+        diagnostics.push(...audited.value.diagnostics)
+        for (const id of audited.value.shadowed) {
+          heldAgents.add(id)
+          shadowedAgents.add(id)
+        }
+      }
+    }
 
     // F9 (ADR command R4): after the reload settles, classify the listing against the
     // snapshot we just replayed. A shadow is reported here and denied for the next snapshot.

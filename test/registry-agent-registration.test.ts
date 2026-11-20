@@ -107,14 +107,16 @@ describe("registration order", () => {
     const h = await harness(withBoth)
 
     try {
-      expect(h.fake.agentCalls[0]).toBe("list")
+      // The seed read comes first, then the swap's reload; the audit's read follows it.
+      expect(h.fake.agentCalls.slice(0, 2)).toEqual(["list", "reload"])
       expect(h.fake.agentTransforms).toHaveLength(1)
-      expect(h.fake.agentCalls).toEqual(["list", "reload"])
+      // One seed read plus one audit read per refresh — never a second seed.
+      expect(h.fake.agentCalls.filter((call) => call === "list")).toHaveLength(2)
 
       await h.registry.refresh()
 
       expect(h.fake.agentTransforms).toHaveLength(1)
-      expect(h.fake.agentCalls.filter((call) => call === "list")).toHaveLength(1)
+      expect(h.fake.agentCalls.filter((call) => call === "list")).toHaveLength(3)
     } finally {
       await h.dispose()
     }
@@ -247,6 +249,106 @@ describe("admission diagnostics", () => {
       expect((await listing(h.fake)).map((entry) => entry.name)).toEqual(["A/translator"])
     } finally {
       await h.dispose()
+    }
+  })
+})
+
+describe("audit", () => {
+  const shadowId = async (fake: FakeContext): Promise<string> =>
+    String((await fake.ctx.agent.list()).data.find((entry) => entry.name === "A/reviewer")?.id)
+
+  it("reports a hand-edited entry once, then holds it out by omission", async () => {
+    const h = await harness(withBoth)
+
+    try {
+      const id = await shadowId(h.fake)
+      h.fake.setAgent(id, { description: "edited" })
+
+      const second = await h.registry.refresh()
+
+      expect(second.diagnostics.filter((line) => line.startsWith("agent-shadow-audit:"))).toEqual([
+        `agent-shadow-audit: ${id}`,
+      ])
+      expect((await listing(h.fake)).some((entry) => String(entry.id) === id)).toBe(true)
+
+      const third = await h.registry.refresh()
+
+      expect(third.diagnostics.filter((line) => line.startsWith("agent-shadow-audit:"))).toEqual([])
+      expect(third.diagnostics.filter((line) => line.startsWith("agent-skip: shadowed"))).toEqual([
+        "agent-skip: shadowed A/opencode.json",
+      ])
+      expect((await listing(h.fake)).some((entry) => String(entry.id) === id)).toBe(false)
+      expect(h.registry.outcome.ok).toBe(true)
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("does not shadow an entry that only carries the parent's appended rules", async () => {
+    const h = await harness(withBoth, {
+      agentConfigRules: [{ action: "bash", resource: "*", effect: "deny" }],
+    })
+
+    try {
+      const outcome = await h.registry.refresh()
+      const entries = await listing(h.fake)
+      const reviewer = entries.find((entry) => entry.name === "A/reviewer")
+
+      expect(outcome.diagnostics.filter((line) => line.startsWith("agent-shadow-audit:"))).toEqual([])
+      expect((reviewer?.permissions as readonly unknown[]).slice(-1)).toEqual([
+        { action: "bash", resource: "*", effect: "deny" },
+      ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("registers the identical set on a second registry over the same fixture", async () => {
+    const h = await harness(withBoth)
+    const first = await listing(h.fake)
+
+    try {
+      const restart = fakeContext([], { directory: h.fixture.root })
+      const registry = createRegistry(restart.ctx, { now: () => 0 })
+
+      try {
+        await registry.activate()
+        const second = await listing(restart)
+
+        const shape = (entries: readonly Record<string, unknown>[]) =>
+          [...entries]
+            .map((entry) => ({ id: String(entry.id), name: entry.name, mode: entry.mode, hidden: entry.hidden }))
+            .sort((left, right) => left.id.localeCompare(right.id))
+
+        expect(shape(second)).toEqual(shape(first))
+      } finally {
+        await registry.dispose()
+      }
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("reports a failed audit read and keeps the map published", async () => {
+    const fixture = await createRegistryFixture()
+    await withBoth(fixture)
+    const fake = fakeContext([], { directory: fixture.root })
+    const registry = createRegistry(fake.ctx, { now: () => 0 })
+    await registry.activate()
+    fake.fail("agent.list", new Error("audit listing refused"))
+
+    try {
+      const outcome = await registry.refresh()
+
+      expect(outcome.ok).toBe(true)
+      expect(outcome.diagnostics.filter((line) => line.startsWith("agent-audit:"))).toEqual([
+        "agent-audit: audit listing refused",
+      ])
+      fake.clearFailures()
+      expect((await listing(fake)).map((entry) => entry.name).sort()).toEqual(["A/reviewer", "A/translator"])
+    } finally {
+      await registry.dispose()
+      await fixture.cleanup()
     }
   })
 })
