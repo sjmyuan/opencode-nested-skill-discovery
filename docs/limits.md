@@ -5,7 +5,7 @@ scan budgets are **defaults** declared in `src/contracts.ts:179-185` and each on
 overridable from the plugin entry's `options` object: the registry resolves them once at
 construction (`src/options.ts:34-51`, `src/registry.ts:325`) and hands the same object to the
 skill scan (`src/registry.ts:556-561`) and to the native command-name walk
-(`src/registry.ts:657`). An auto-discovered directory plugin receives `{}`, so zero-config
+(`src/registry.ts:663`). An auto-discovered directory plugin receives `{}`, so zero-config
 behaviour is the defaults — apart from the raised directory budget below.
 
 ## Summary
@@ -169,29 +169,52 @@ documents: `opencode.json`, `opencode.jsonc`, `.opencode/opencode.json` and
 discovery and are never collected. A symlinked document is refused, not followed, with one
 `config-symlink:` line.
 
-The walk only stats them; the index stage reads them. Reading mirrors native: `{env:VAR}`
-and `{file:path}` are substituted with the escaping retry, the document is parsed as JSONC,
-and only three keys are read — `agents`, the document's own top-level `permissions`, and
-`default_agent` (`src/agent-config.ts:43-47`). Every other key is ignored silently.
+The walk only stats them; the index stage reads them. Reading mirrors native for `{env:VAR}`
+— substituted raw, then re-substituted with the JSON-escaped value when the raw pass leaves
+the document unparseable — and the document is parsed as JSONC. Only three keys are read —
+`agents`, the document's own top-level `permissions`, and `default_agent`
+(`src/agent-config.ts:55-59`). Every other key is ignored silently.
+
+`{file:path}` is confined, not trusted. A reference resolves only inside the realpath of the
+marked directory `d`: a `~`-leading or absolute token, a relative escape, a missing, broken
+or non-regular target, and a realpath that leaves `d` each substitute empty with one
+`agent-skip: <doc>: file-ref <token> outside-root` line, and none of them is ever opened — a
+lexical refusal costs no system call. A symlink whose realpath stays inside `d` substitutes
+like a regular file; an outward one, or one behind an intermediate directory symlink that
+points outside, is refused (ADR agent A10). Two caps bound the content, both taken from the
+R8 option values and counted per document: a target larger than `maxFileBytes` is
+`cap-file`, and a running total past `maxTotalBytes` is `cap-total`. Neither is charged to
+the scan budget, and each token costs at most one read per document — the escaped retry
+reuses it. This inverts native's trust direction (an ancestor reading a descendant's files),
+so substituted text is untrusted prompt and display text, sanitized downstream.
 
 Merging follows native document order — `opencode.json` < `opencode.jsonc` <
 `.opencode/opencode.json` < `.opencode/opencode.jsonc` < agent files sorted
 (`src/contracts.ts:226-242`). A field applies when the source sets it, so a later source
 overrides and an absent field never erases one; `permissions` append and `request` keys
 assign. One entry remains per (subproject, native name), the first source owns the token, and
-a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:103-199`).
+a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:106-206`).
 
 `default_agent` is never applied: it is decoded only to emit one
-`agent-default-ignored: <document>` line. A document decodes as a unit — a malformed
-document, an entry the schema rejects, or an unreadable file drops the whole document with
-one `agent-skip:` line and no partial agent (ADR agent A15). A pre-V2 agent file is skipped
-with `agent-skip: legacy …` and never migrated (`src/agent-decode.ts:51-68`).
+`agent-default-ignored: <document>` line. A document's read set is checked in a fixed order
+— the `agents` shape, the top-level `permissions`, `default_agent` — and the first failure
+drops the document, naming the field whose rules are lost. One bad `agents.<key>` is not a
+document failure: it drops that key with `agent-skip: <doc>: entry <key> schema` and keeps
+its siblings and the document's top-level rules (ADR agent A15). An unreadable or malformed
+document drops whole. A pre-V2 agent file is skipped with `agent-skip: legacy …` and never
+migrated (`src/agent-decode.ts:51-68`).
 
 | Line | Meaning |
 |---|---|
 | `agent-skip: unreadable <rel>: <CODE>` | the document or agent file could not be read |
 | `agent-skip: malformed <rel>` | the document is not valid JSONC |
-| `agent-skip: schema <rel>` | the read set rejected the document; it drops as a unit |
+| `agent-skip: <doc>: file-ref <token> outside-root` | the reference leaves the marked directory, or its target is missing, broken or not a regular file; it substitutes empty and is never read |
+| `agent-skip: <doc>: file-ref <token> cap-file` | the target is larger than `maxFileBytes` |
+| `agent-skip: <doc>: file-ref <token> cap-total` | the document's running total would pass `maxTotalBytes` |
+| `agent-skip: <doc>: entry <key> schema` | one `agents` key failed; its siblings and the document's rules survive |
+| `agent-skip: <doc>: agents schema` | `agents` is not a map; the document drops |
+| `agent-skip: <doc>: permissions schema` | the top-level `permissions` do not decode; the document and its ruleset are lost |
+| `agent-skip: <doc>: default_agent schema` | `default_agent` does not decode; the document drops |
 | `agent-skip: legacy <rel>` | pre-V2 agent frontmatter; skipped, never migrated |
 | `agent-skip: markdown <rel>` | agent frontmatter that never parses, even after the sanitize retry |
 | `agent-default-ignored: <rel>` | the document sets `default_agent`; never applied |
@@ -200,8 +223,10 @@ with `agent-skip: legacy …` and never migrated (`src/agent-decode.ts:51-68`).
 | `agent-index: <reason>` | the agent stage threw; the refresh still succeeds |
 | `config-symlink: <rel>` | a config document is a symlink; refused, never followed |
 
-`<rel>` is the location-relative POSIX path. Nothing is registered from either source in
-this build.
+`<doc>` is the document's location-relative POSIX path, the `<rel>` of the other rows.
+`<token>` is the literal `{file:…}` token as written, unexpanded; `<key>` is the `agents` map
+key verbatim — it may contain `/` and is never treated as a path. Nothing is registered from
+either source in this build.
 
 ## Worktree families
 
@@ -337,7 +362,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:739-745`, `src/registry.ts:245-261`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:42`, `src/registry.ts:858-914`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:745-751`, `src/registry.ts:245-261`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:42`, `src/registry.ts:864-920`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | the five scan budgets are plugin options on the `opencode.json` entry (object form); display caps and the command-template ceiling stay constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -360,5 +385,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:840-856`, `src/registry.ts:814-818`, `src/registry.ts:792-819`). Details in
+(`src/registry.ts:846-862`, `src/registry.ts:820-824`, `src/registry.ts:798-825`). Details in
 [architecture.md](architecture.md#refresh-model).
