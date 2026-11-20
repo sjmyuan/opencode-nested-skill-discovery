@@ -227,8 +227,9 @@ migrated (`src/agent-decode.ts:51-68`).
 | `agent-request: <id>` | one per admitted agent that carries a `request` overlay |
 | `agent-shadow-audit: <id>` | the reloaded entry did not match the snapshot; held out of the next |
 | `agent-seed: <reason>` | the pre-registration listing read threw; registration is still attempted |
-| `agent-register: <reason>` | the transform registration rejected; no agent is registered in this instance |
+| `agent-register: <reason>` | the transform registration rejected; reported once, and the next refresh retries it |
 | `agent-replay: <id>: <reason>` | one entry failed to replay; its siblings still applied |
+| `agent-replay: payload: <reason>` | the whole payload failed to replay; nothing is applied and the transform never rethrows, so the group stays enabled |
 | `agent-reload: <reason>` | the agent reload threw; the map keeps whatever the host built |
 | `agent-audit: <reason>` | the post-reload listing read threw; the published map stays |
 | `config-symlink: <rel>` | a config document is a symlink; refused, never followed |

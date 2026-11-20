@@ -1,8 +1,25 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Permission } from "@opencode/schema/permission"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext, type FakeAgentSeed, type FakeContext } from "./support/fake-context.ts"
 import { createRegistryFixture, type RegistryFixture } from "./support/registry-fixtures.ts"
+
+const replayControl = vi.hoisted(() => ({ payloadError: undefined as Error | undefined }))
+
+vi.mock("../src/replay.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/replay.ts")>()
+  return {
+    ...actual,
+    applyAgents: (editor: Parameters<typeof actual.applyAgents>[0], agents: Parameters<typeof actual.applyAgents>[1]) => {
+      if (replayControl.payloadError !== undefined) throw replayControl.payloadError
+      return actual.applyAgents(editor, agents)
+    },
+  }
+})
+
+beforeEach(() => {
+  replayControl.payloadError = undefined
+})
 
 /**
  * F17 Step 5 (ADR agent G1, G8–G11; C3, C4): one early `ctx.agent.transform` replays a frozen
@@ -375,6 +392,52 @@ describe("isolation", () => {
         "agent-register: transform refused",
       ])
     } finally {
+      await h.dispose()
+    }
+  })
+
+  it("retries a rejected transform on the next refresh and reports the rejection once", async () => {
+    const h = await harness(withBoth, { activate: false })
+    h.fake.fail("agent.transform", new Error("transform refused"))
+
+    try {
+      const first = await h.registry.activate()
+      expect(first.diagnostics.filter((line) => line.startsWith("agent-register:"))).toEqual([
+        "agent-register: transform refused",
+      ])
+      expect(h.fake.agentTransforms).toHaveLength(0)
+      expect(await listing(h.fake)).toEqual([])
+
+      // The registration is retried, not abandoned: one transient host rejection must not
+      // cost the instance its agents for its whole life.
+      h.fake.clearFailures()
+      const second = await h.registry.refresh()
+
+      expect(second.diagnostics.filter((line) => line.startsWith("agent-register:"))).toEqual([])
+      expect(h.fake.agentTransforms).toHaveLength(1)
+      expect((await listing(h.fake)).map((entry) => entry.name).sort()).toEqual(["A/reviewer", "A/translator"])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("names a whole-payload replay failure once, in the payload form", async () => {
+    const h = await harness(withBoth)
+
+    try {
+      // A throw outside one entry (not attributable to an ID) is the payload form; the host
+      // must never see it, because a throw escaping the transform disables the plugin group.
+      replayControl.payloadError = new Error("payload exploded")
+
+      await h.registry.refresh()
+      // Diagnostics raised during a reload surface in the next refresh's outcome.
+      const outcome = await h.registry.refresh()
+      expect(outcome.diagnostics.filter((line) => line.startsWith("agent-replay:"))).toEqual([
+        "agent-replay: payload: payload exploded",
+      ])
+      expect(outcome.ok).toBe(true)
+    } finally {
+      replayControl.payloadError = undefined
       await h.dispose()
     }
   })
