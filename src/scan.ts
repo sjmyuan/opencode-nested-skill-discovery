@@ -2,6 +2,7 @@ import type { Dirent } from "node:fs"
 import { lstat, readdir, realpath, stat } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 import {
+  AGENT_ROOT_DIRECTORIES,
   COMMAND_ROOT_DIRECTORIES,
   CONFIG_DOCUMENT_NAMES,
   DEFAULT_SCAN_LIMITS,
@@ -10,6 +11,8 @@ import {
   SUBPROJECT_MARKERS,
 } from "./contracts.ts"
 import type {
+  AgentCandidate,
+  AgentRootKind,
   CommandCandidate,
   CommandRootKind,
   ScanCandidate,
@@ -35,17 +38,20 @@ export interface ScanOptions {
   readonly markers?: readonly SubprojectMarker[]
   readonly skillRoots?: readonly SkillRootKind[]
   readonly commandRoots?: readonly CommandRootKind[]
+  readonly agentRoots?: readonly AgentRootKind[]
   readonly excludeRoots?: readonly string[]
 }
 
 /** Kind → the two directory segments that make a directory a root (PD1). */
-const ROOT_SEGMENTS: Record<SkillRootKind | CommandRootKind, readonly [string, string]> = {
+const ROOT_SEGMENTS: Record<SkillRootKind | CommandRootKind | AgentRootKind, readonly [string, string]> = {
   "opencode-skills": [".opencode", "skills"],
   "opencode-skill": [".opencode", "skill"],
   "claude-skills": [".claude", "skills"],
   "agents-skills": [".agents", "skills"],
   "opencode-command": [".opencode", "command"],
   "opencode-commands": [".opencode", "commands"],
+  "opencode-agent": [".opencode", "agent"],
+  "opencode-agents": [".opencode", "agents"],
 }
 
 const DIAGNOSTIC_LIMIT = 200
@@ -53,6 +59,7 @@ const DIAGNOSTIC_LIMIT = 200
 interface State {
   readonly candidates: ScanCandidate[]
   readonly commands: CommandCandidate[]
+  readonly agents: AgentCandidate[]
   readonly diagnostics: string[]
   directories: number
   files: number
@@ -76,6 +83,7 @@ interface Context {
   readonly markers: ReadonlySet<SubprojectMarker>
   readonly roots: readonly SkillRootKind[]
   readonly commandRoots: readonly CommandRootKind[]
+  readonly agentRoots: readonly AgentRootKind[]
   readonly excluded: readonly string[]
   readonly state: State
   readonly emit: (message: string) => void
@@ -87,6 +95,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const state: State = {
     candidates: [],
     commands: [],
+    agents: [],
     diagnostics: [],
     directories: 0,
     files: 0,
@@ -111,6 +120,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const finish = (): ScanResult => ({
     candidates: [...state.candidates].sort(compareCandidates),
     commands: [...state.commands].sort(compareCommands),
+    agents: [...state.agents].sort(compareAgents),
     stats: {
       directories: state.directories,
       files: state.files,
@@ -138,6 +148,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
     roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
     commandRoots: options.commandRoots ?? COMMAND_ROOT_DIRECTORIES,
+    agentRoots: options.agentRoots ?? AGENT_ROOT_DIRECTORIES,
     excluded: await canonicalRoots(options.excludeRoots ?? []),
     state,
     emit,
@@ -219,6 +230,24 @@ async function openRoots(
     if (probe === "refused") continue
     if (isExcluded(context, root)) continue
     await walkCommandRoot(context, root, rootRel, kind, owner, root)
+  }
+  for (const kind of context.agentRoots) {
+    const [leading, leaf] = ROOT_SEGMENTS[kind]
+    if (leading !== name) continue
+    const root = join(dir, leaf)
+    // A12: the location's own `.opencode/agent(s)` belongs to native discovery, so it is
+    // claimed (never scanned, never reported) exactly like the command roots above.
+    if (rel === ".opencode") {
+      if (await existsNoFollow(root)) opened = true
+      continue
+    }
+    const rootRel = joinRel(rel, leaf)
+    const probe = await probeRoot(context, root, rootRel)
+    if (probe === "missing") continue
+    opened = true
+    if (probe === "refused") continue
+    if (isExcluded(context, root)) continue
+    await walkAgentRoot(context, root, rootRel, kind, owner, root)
   }
   return opened
 }
@@ -326,6 +355,55 @@ export function deriveCommandName(rootDir: string, path: string): string {
   return relative(rootDir, path).split(sep).join("/").replace(/\.md$/, "")
 }
 
+/**
+ * Walks one agent root the way native globs it — `{agent,agents}/**\/*.md`, dots and all,
+ * no depth cap (`packages/core/src/config/plugin/agent.ts:157-161`) — and never probes
+ * markers inside it: the owner is the subproject that opened the root (A1, A12).
+ */
+async function walkAgentRoot(
+  context: Context,
+  dir: string,
+  rel: string,
+  kind: AgentRootKind,
+  parent: Ownership | null,
+  rootDir: string,
+): Promise<void> {
+  const entries = await openDirectory(context, dir, rel)
+  if (entries === null) return
+
+  for (const entry of entries) {
+    if (context.state.stopped) return
+    if (context.prune.has(entry.name)) continue
+    const child = join(dir, entry.name)
+    if (entry.isSymbolicLink()) {
+      await acceptAgentLink(context, child, joinRel(rel, entry.name), kind, parent, rootDir)
+      continue
+    }
+    if (entry.isDirectory()) {
+      if (isExcluded(context, child)) continue
+      await walkAgentRoot(context, child, joinRel(rel, entry.name), kind, parent, rootDir)
+      continue
+    }
+    if (!entry.isFile()) continue
+    if (!agentEligible(entry.name)) continue
+    await acceptAgent(context, child, kind, parent, rootDir)
+  }
+}
+
+/** Every `.md` under an agent root is a candidate, at any depth, dots included (A1). */
+function agentEligible(name: string): boolean {
+  return name.endsWith(".md")
+}
+
+/**
+ * Native `decode()` parity (A6): root-relative, POSIX separators, one trailing `.md`
+ * stripped, inner separators kept — `agents/review-tools/pr.md` → `review-tools/pr`
+ * (`packages/core/src/config/plugin/agent.ts:157-161`).
+ */
+export function deriveAgentName(rootDir: string, path: string): string {
+  return relative(rootDir, path).split(sep).join("/").replace(/\.md$/, "")
+}
+
 type LinkTarget =
   | { readonly type: "directory" }
   | { readonly type: "file"; readonly realPath: string }
@@ -399,6 +477,32 @@ async function acceptCommandLink(
     return
   }
   await acceptCommand(context, path, kind, owner, rootDir, link.realPath)
+}
+
+/** Inside an agent root a link may be a candidate file; a directory link is never followed (A1, D2). */
+async function acceptAgentLink(
+  context: Context,
+  path: string,
+  rel: string,
+  kind: AgentRootKind,
+  owner: Ownership | null,
+  rootDir: string,
+): Promise<void> {
+  const link = await resolveLink(path)
+  if (link.type === "directory") {
+    context.emit(`directory-symlink: ${rel}`)
+    return
+  }
+  if (!agentEligible(basename(path))) return
+  if (link.type === "broken") {
+    context.emit(`file-symlink-broken: ${rel}`)
+    return
+  }
+  if (!isInside(context.location, link.realPath)) {
+    context.emit(`file-symlink-outside: ${rel}`)
+    return
+  }
+  await acceptAgent(context, path, kind, owner, rootDir, link.realPath)
 }
 
 function isExcluded(context: Context, path: string): boolean {
@@ -478,6 +582,27 @@ async function accept(
     path,
     realPath: admitted.canonicalPath,
     subproject: owner?.rel ?? "",
+    root: kind,
+    markers: owner === null ? [] : [...owner.markers],
+  })
+}
+
+async function acceptAgent(
+  context: Context,
+  path: string,
+  kind: AgentRootKind,
+  owner: Ownership | null,
+  rootDir: string,
+  realPath?: string,
+): Promise<void> {
+  const admitted = await admit(context, path, realPath)
+  if (admitted === null) return
+  context.state.agents.push({
+    name: deriveAgentName(rootDir, path),
+    path,
+    canonicalPath: admitted.canonicalPath,
+    subproject: owner?.rel ?? "",
+    subprojectRealPath: owner?.realPath ?? context.location,
     root: kind,
     markers: owner === null ? [] : [...owner.markers],
   })
@@ -634,6 +759,12 @@ function compareCandidates(left: ScanCandidate, right: ScanCandidate): number {
 }
 
 function compareCommands(left: CommandCandidate, right: CommandCandidate): number {
+  if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
+  if (left.path !== right.path) return left.path < right.path ? -1 : 1
+  return 0
+}
+
+function compareAgents(left: AgentCandidate, right: AgentCandidate): number {
   if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
   if (left.path !== right.path) return left.path < right.path ? -1 : 1
   return 0

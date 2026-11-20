@@ -68,6 +68,22 @@ export interface CommandCandidate {
 }
 
 /**
+ * An agent file found by the shared walk (ADR agent A1, A12; contract C2).
+ *
+ * Identity only: no frontmatter is read and nothing is registered in F15, so
+ * `description`, `mode`, `model` and the token arrive with F16/F17.
+ */
+export interface AgentCandidate {
+  readonly name: string
+  readonly path: string
+  readonly canonicalPath: string
+  readonly subproject: string
+  readonly subprojectRealPath: string
+  readonly root: AgentRootKind
+  readonly markers: readonly SubprojectMarker[]
+}
+
+/**
  * The published command, split into what the snapshot records and what it replays
  * (ADR command R16; plan PD1). The composed name is the identity.
  */
@@ -105,6 +121,7 @@ export interface ScanStats {
 export interface ScanResult {
   readonly candidates: readonly ScanCandidate[]
   readonly commands: readonly CommandCandidate[]
+  readonly agents: readonly AgentCandidate[]
   readonly stats: ScanStats
   readonly truncated: boolean
   readonly diagnostics: readonly string[]
