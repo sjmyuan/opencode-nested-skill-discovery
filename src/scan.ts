@@ -3,6 +3,7 @@ import { lstat, readdir, realpath, stat } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 import {
   COMMAND_ROOT_DIRECTORIES,
+  CONFIG_DOCUMENT_NAMES,
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
   SKILL_ROOT_DIRECTORIES,
@@ -156,7 +157,7 @@ async function walk(
 ): Promise<void> {
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
-  const owner = (await probeMarkers(context, dir, rel)) ?? parent
+  const owner = (await probeMarkers(context, dir, rel, entries)) ?? parent
 
   // PD3: the cap measures subproject distance from the location, not skill-file depth.
   const childDepth = depth + 1
@@ -254,7 +255,7 @@ async function walkRoot(
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
   // Markers nest inside an open root too: only the walk is unbounded, not the marker probe (PD3).
-  const owner = (await probeMarkers(context, dir, rel)) ?? parent
+  const owner = (await probeMarkers(context, dir, rel, entries)) ?? parent
 
   for (const entry of entries) {
     if (context.state.stopped) return
@@ -509,18 +510,27 @@ function relativeToLocation(context: Context, path: string): string {
 }
 
 /** The marker kinds observed on `dir`, in SUBPROJECT_MARKERS order; null when none (PD8). */
-async function probeMarkers(context: Context, dir: string, rel: string): Promise<Ownership | null> {
+async function probeMarkers(
+  context: Context,
+  dir: string,
+  rel: string,
+  entries: readonly Dirent<string>[],
+): Promise<Ownership | null> {
   const found: SubprojectMarker[] = []
   for (const kind of SUBPROJECT_MARKERS) {
     if (!context.markers.has(kind)) continue
-    if (await hasMarker(dir, kind)) found.push(kind)
+    if (await hasMarker(dir, kind, entries)) found.push(kind)
   }
   if (found.length === 0) return null
   // Resolved once per subproject, not once per command file (Step 3).
   return { rel, markers: found, realPath: (await canonical(dir)) ?? dir }
 }
 
-async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> {
+async function hasMarker(
+  dir: string,
+  kind: SubprojectMarker,
+  entries: readonly Dirent<string>[],
+): Promise<boolean> {
   switch (kind) {
     case "agents-md":
       return isFile(join(dir, "AGENTS.md"))
@@ -530,6 +540,15 @@ async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> 
       return exists(join(dir, ".git"))
     case "hg":
       return isRealDirectory(join(dir, ".hg"))
+    // A2: the project marker is a name test on the listing this walk already paid for, so
+    // no `stat` and no `realpath` are added anywhere on the marker path. A directory named
+    // `.opencode` is never its own subproject.
+    case "opencode-project":
+      if (basename(dir) === ".opencode") return false
+      return entries.some(
+        (entry) =>
+          entry.name === ".opencode" || CONFIG_DOCUMENT_NAMES.some((name) => name === entry.name),
+      )
     default: {
       const [leading, leaf] = ROOT_SEGMENTS[kind]
       return isRealDirectory(join(dir, leading, leaf))

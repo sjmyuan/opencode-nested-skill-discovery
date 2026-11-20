@@ -32,9 +32,12 @@ export type SkillRootKind = "opencode-skills" | "opencode-skill" | "claude-skill
 
 export type CommandRootKind = "opencode-command" | "opencode-commands"
 
+export type AgentRootKind = "opencode-agent" | "opencode-agents"
+
 export type SubprojectMarker =
   | SkillRootKind
   | CommandRootKind
+  | "opencode-project"
   | "agents-md"
   | "claude-md"
   | "git"
@@ -175,13 +178,26 @@ export const COMMAND_ROOT_DIRECTORIES: readonly CommandRootKind[] = [
   "opencode-commands",
 ]
 
+export const AGENT_ROOT_DIRECTORIES: readonly AgentRootKind[] = [
+  "opencode-agent",
+  "opencode-agents",
+]
+
+/**
+ * The config documents that make a directory an `opencode-project` (ADR agent A2). Only the
+ * name is tested here; F16 reads the content (A3). Both are exact names, as A2 words it.
+ */
+export const CONFIG_DOCUMENT_NAMES = ["opencode.json", "opencode.jsonc"] as const
+
 // Symbolic kinds, not file names; F2 owns the kind → R6 name map:
 // .opencode/skills, .opencode/skill, .claude/skills, .agents/skills,
 // .opencode/command, .opencode/commands,
+// .opencode (or opencode.json/opencode.jsonc) as one project marker,
 // AGENTS.md, CLAUDE.md, .git (directory or file), .hg
 export const SUBPROJECT_MARKERS: readonly SubprojectMarker[] = [
   ...SKILL_ROOT_DIRECTORIES,
   ...COMMAND_ROOT_DIRECTORIES,
+  "opencode-project",
   "agents-md",
   "claude-md",
   "git",

@@ -49,6 +49,7 @@ const ADR_SUBPROJECT_MARKERS = [
   "hg",
   "opencode-command",
   "opencode-commands",
+  "opencode-project",
   "opencode-skill",
   "opencode-skills",
 ]
@@ -118,7 +119,7 @@ describe("discovery rules", () => {
     expect([...PRUNE_DIRECTORIES].sort()).toEqual(ADR_PRUNE_DIRECTORIES)
   })
 
-  it("enumerates the ten R6 subproject marker kinds", () => {
+  it("enumerates the eleven R6 subproject marker kinds", () => {
     expect([...SUBPROJECT_MARKERS].sort()).toEqual(ADR_SUBPROJECT_MARKERS)
   })
 

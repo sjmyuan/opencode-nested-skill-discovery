@@ -117,7 +117,7 @@ describe("markers and subproject attribution", () => {
 
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("")
-    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project"])
   })
 
   it("attributes a candidate to its nearest marker-carrying ancestor", async () => {
@@ -127,7 +127,7 @@ describe("markers and subproject attribution", () => {
     const result = await scanSkills({ location: f.root })
 
     expect(result.candidates[0]?.subproject).toBe("A")
-    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project"])
   })
 
   it("nests subprojects and never stops the walk at the first marker", async () => {
@@ -144,7 +144,7 @@ describe("markers and subproject attribution", () => {
     }))
 
     expect(found).toEqual([
-      { rel: "A/.opencode/skills/z/SKILL.md", subproject: "A", markers: ["opencode-skills"] },
+      { rel: "A/.opencode/skills/z/SKILL.md", subproject: "A", markers: ["opencode-skills", "opencode-project"] },
       {
         rel: "A/A.1/.claude/skills/y/SKILL.md",
         subproject: "A/A.1",
@@ -165,8 +165,8 @@ describe("markers and subproject attribution", () => {
     const result = await scanSkills({ location: f.root })
     const bySubproject = new Map(result.candidates.map((c) => [c.subproject, c.markers]))
 
-    expect(bySubproject.get("A")).toEqual(["opencode-skills", "git"])
-    expect(bySubproject.get("B")).toEqual(["opencode-skills", "git"])
+    expect(bySubproject.get("A")).toEqual(["opencode-skills", "opencode-project", "git"])
+    expect(bySubproject.get("B")).toEqual(["opencode-skills", "opencode-project", "git"])
   })
 
   it("detects hg and agents-md markers", async () => {
@@ -179,8 +179,8 @@ describe("markers and subproject attribution", () => {
     const result = await scanSkills({ location: f.root })
     const bySubproject = new Map(result.candidates.map((c) => [c.subproject, c.markers]))
 
-    expect(bySubproject.get("C")).toEqual(["opencode-skills", "hg"])
-    expect(bySubproject.get("D")).toEqual(["opencode-skills", "agents-md"])
+    expect(bySubproject.get("C")).toEqual(["opencode-skills", "opencode-project", "hg"])
+    expect(bySubproject.get("D")).toEqual(["opencode-skills", "opencode-project", "agents-md"])
   })
 
   it("honours a replaced marker set when attributing candidates", async () => {
@@ -194,7 +194,7 @@ describe("markers and subproject attribution", () => {
     expect(replaced.candidates[0]?.subproject).toBe("P")
     expect(replaced.candidates[0]?.markers).toEqual(["agents-md"])
     expect(fallback.candidates[0]?.subproject).toBe("P/Q")
-    expect(fallback.candidates[0]?.markers).toEqual(["opencode-skills"])
+    expect(fallback.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project"])
   })
 
   it("joins nested subproject segments with forward slashes", async () => {
@@ -220,7 +220,7 @@ describe("depth boundary on subprojects", () => {
     expect(result.diagnostics).toEqual([])
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("L1/L2/L3/L4/L5")
-    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project"])
   })
 
   it("hides a subproject that sits at depth 6", async () => {
@@ -279,7 +279,7 @@ describe("depth boundary on subprojects", () => {
     expect(result.truncated).toBe(false)
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("")
-    expect(result.candidates[0]?.markers).toEqual(["opencode-skills"])
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project"])
   })
 
   it("treats the location as a depth-0 subproject", async () => {
@@ -291,7 +291,7 @@ describe("depth boundary on subprojects", () => {
 
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("")
-    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "git"])
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project", "git"])
   })
 })
 

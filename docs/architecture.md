@@ -203,8 +203,8 @@ timeout that reports failure: the deferred check simply re-lists and re-filters.
 
 ## Storage model
 
-Three skill keys (`src/contracts.ts:201-204`) and three command keys
-(`src/contracts.ts:205-207`), all location-qualified:
+Three skill keys (`src/contracts.ts:218-220`) and three command keys
+(`src/contracts.ts:221-223`), all location-qualified:
 
 | Key | Contents |
 |---|---|
