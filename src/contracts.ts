@@ -32,9 +32,12 @@ export type SkillRootKind = "opencode-skills" | "opencode-skill" | "claude-skill
 
 export type CommandRootKind = "opencode-command" | "opencode-commands"
 
+export type AgentRootKind = "opencode-agent" | "opencode-agents"
+
 export type SubprojectMarker =
   | SkillRootKind
   | CommandRootKind
+  | "opencode-project"
   | "agents-md"
   | "claude-md"
   | "git"
@@ -61,6 +64,22 @@ export interface CommandCandidate {
   readonly subproject: string
   readonly subprojectRealPath: string
   readonly root: CommandRootKind
+  readonly markers: readonly SubprojectMarker[]
+}
+
+/**
+ * An agent file found by the shared walk (ADR agent A1, A12; contract C2).
+ *
+ * Identity only: no frontmatter is read and nothing is registered in F15, so
+ * `description`, `mode`, `model` and the token arrive with F16/F17.
+ */
+export interface AgentCandidate {
+  readonly name: string
+  readonly path: string
+  readonly canonicalPath: string
+  readonly subproject: string
+  readonly subprojectRealPath: string
+  readonly root: AgentRootKind
   readonly markers: readonly SubprojectMarker[]
 }
 
@@ -102,6 +121,7 @@ export interface ScanStats {
 export interface ScanResult {
   readonly candidates: readonly ScanCandidate[]
   readonly commands: readonly CommandCandidate[]
+  readonly agents: readonly AgentCandidate[]
   readonly stats: ScanStats
   readonly truncated: boolean
   readonly diagnostics: readonly string[]
@@ -175,13 +195,26 @@ export const COMMAND_ROOT_DIRECTORIES: readonly CommandRootKind[] = [
   "opencode-commands",
 ]
 
+export const AGENT_ROOT_DIRECTORIES: readonly AgentRootKind[] = [
+  "opencode-agent",
+  "opencode-agents",
+]
+
+/**
+ * The config documents that make a directory an `opencode-project` (ADR agent A2). Only the
+ * name is tested here; F16 reads the content (A3). Both are exact names, as A2 words it.
+ */
+export const CONFIG_DOCUMENT_NAMES = ["opencode.json", "opencode.jsonc"] as const
+
 // Symbolic kinds, not file names; F2 owns the kind → R6 name map:
 // .opencode/skills, .opencode/skill, .claude/skills, .agents/skills,
 // .opencode/command, .opencode/commands,
+// .opencode (or opencode.json/opencode.jsonc) as one project marker,
 // AGENTS.md, CLAUDE.md, .git (directory or file), .hg
 export const SUBPROJECT_MARKERS: readonly SubprojectMarker[] = [
   ...SKILL_ROOT_DIRECTORIES,
   ...COMMAND_ROOT_DIRECTORIES,
+  "opencode-project",
   "agents-md",
   "claude-md",
   "git",

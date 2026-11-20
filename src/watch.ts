@@ -2,7 +2,14 @@ import { watch } from "node:fs"
 import { lstat, realpath } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
 import { PRUNE_DIRECTORIES, compareText } from "./contracts.ts"
-import type { CommandCandidate, CommandRootKind, ScanCandidate, SkillRootKind } from "./contracts.ts"
+import type {
+  AgentCandidate,
+  AgentRootKind,
+  CommandCandidate,
+  CommandRootKind,
+  ScanCandidate,
+  SkillRootKind,
+} from "./contracts.ts"
 
 /**
  * R16 watcher set (F6 PD2): one non-recursive `fs.watch` per location root, per
@@ -166,10 +173,17 @@ export const WATCH_COMMAND_ROOT_SEGMENTS: Record<CommandRootKind, readonly [stri
   "opencode-commands": [".opencode", "commands"],
 }
 
+/** Kind → the two directory segments that make a directory an agent root (mirrors `src/scan.ts`). */
+export const WATCH_AGENT_ROOT_SEGMENTS: Record<AgentRootKind, readonly [string, string]> = {
+  "opencode-agent": [".opencode", "agent"],
+  "opencode-agents": [".opencode", "agents"],
+}
+
 export interface DeriveWatchTargetsInput {
   readonly location: string
   readonly candidates: readonly ScanCandidate[]
   readonly commands?: readonly CommandCandidate[]
+  readonly agents?: readonly AgentCandidate[]
   readonly prune?: readonly string[]
 }
 
@@ -257,6 +271,7 @@ export async function deriveWatchTargets({
   location,
   candidates,
   commands,
+  agents,
   prune,
 }: DeriveWatchTargetsInput): Promise<DeriveWatchTargetsResult> {
   const diagnostics: string[] = []
@@ -290,6 +305,21 @@ export async function deriveWatchTargets({
       wanted.add(commandRoot)
     }
     wanted.add(dirname(commandPath))
+  }
+
+  // Agents are the third kind on the same rule (A13): subproject, the last
+  // `.opencode/{agent,agents}` pair, and the candidate's own directory.
+  for (const agent of agents ?? []) {
+    const agentPath = resolve(root, agent.path)
+    wanted.add(resolve(root, agent.subproject === "" ? "." : agent.subproject))
+
+    const agentRoot = rootOf(root, agentPath, WATCH_AGENT_ROOT_SEGMENTS[agent.root])
+    if (agentRoot === undefined) {
+      diagnostics.push(`watch-root-unresolved: ${displayPath(root, agentPath)}`)
+    } else {
+      wanted.add(agentRoot)
+    }
+    wanted.add(dirname(agentPath))
   }
 
   const kept = new Set<string>()

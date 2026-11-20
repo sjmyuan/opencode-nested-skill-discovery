@@ -8,6 +8,7 @@ import {
   compareText,
   MAX_NAME_LENGTH,
   PROMPT_THROTTLE_MS,
+  type AgentCandidate,
   type CommandCandidate,
   type CommandSnapshotSet,
   type RegistryEntry,
@@ -26,7 +27,7 @@ import { createShadowTracker } from "./command-shadow.ts"
 import { buildCommandSnapshot } from "./command-snapshot.ts"
 import { createFamilyPass } from "./family.ts"
 import { persistCommands, persistRegistry } from "./manifest.ts"
-import { resolveNativeRoots, type NativeRootInput } from "./native.ts"
+import { resolveNativeAgentRoots, resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { resolveScanLimits } from "./options.ts"
 import { applyRegistry } from "./replay.ts"
@@ -427,11 +428,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     base: string,
     candidates: readonly ScanCandidate[],
     commands: readonly CommandCandidate[],
+    agents: readonly AgentCandidate[],
   ): Promise<void> => {
     if (disposed || watchers === undefined) return
 
     try {
-      const derived = await deriveWatchTargets({ location: base, candidates, commands })
+      const derived = await deriveWatchTargets({ location: base, candidates, commands, agents })
       watchDiagnostics.push(...derived.diagnostics)
       watchers.sync(derived.targets)
     } catch (error) {
@@ -498,6 +500,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     const base = await canonicalDirectory(ctx.location.directory)
     canonical = base
     const nativeRoots = await resolveNativeRoots(nativeInput())
+    // A5: the same ancestor sweep, for the native agent roots the scan must not re-publish.
+    const agentNativeRoots = await resolveNativeAgentRoots(nativeInput())
 
     let locationInfo
     try {
@@ -543,14 +547,19 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     }
 
     const scanned = await runStage(diagnostics, "scan", () =>
-      scanSkills({ location: base, excludeRoots: nativeRoots, limits: scanLimits.limits }),
+      scanSkills({
+        location: base,
+        excludeRoots: nativeRoots,
+        agentNativeRoots,
+        limits: scanLimits.limits,
+      }),
     )
     if (!scanned.ok) return record(fail(diagnostics))
     if (scanned.value.truncated) diagnostics.push("scan-truncated")
     diagnostics.push(...scanned.value.diagnostics)
     // A good scan is a valid watcher set even if a later stage fails (PD7). Command candidates
     // are the pre-suppression list, so a family flip opens and closes no handle (PD3).
-    await syncWatchers(base, scanned.value.candidates, scanned.value.commands)
+    await syncWatchers(base, scanned.value.candidates, scanned.value.commands, scanned.value.agents)
 
     // One family pass per refresh, shared with the skill indexer inside the existing
     // index stage (ADR command R8). Publication composes the survivors' names later.

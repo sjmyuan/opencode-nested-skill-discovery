@@ -40,7 +40,7 @@ describe("prune rules", () => {
 
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("A")
-    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "git"])
+    expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project", "git"])
   })
 
   it("replaces the default prune list wholesale", async () => {
@@ -269,7 +269,7 @@ describe("symlinked skill roots", () => {
     const result = await scanSkills({ location: f.root })
 
     expect(result.candidates).toHaveLength(1)
-    expect(result.candidates[0]?.markers).toEqual(["claude-skills"])
+    expect(result.candidates[0]?.markers).toEqual(["claude-skills", "opencode-project"])
     expect(result.candidates[0]?.subproject).toBe("A")
   })
 })

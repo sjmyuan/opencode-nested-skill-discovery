@@ -41,7 +41,7 @@ describe("command name derivation", () => {
       subproject: "A",
       subprojectRealPath: await realpath(join(f.root, "A")),
       root: "opencode-command",
-      markers: ["opencode-command"],
+      markers: ["opencode-command", "opencode-project"],
     })
     expect(command?.name).not.toContain(".md")
   })
@@ -103,13 +103,13 @@ describe("command subproject attribution", () => {
         name: "one",
         subproject: "A/team",
         subprojectRealPath: "A/team",
-        markers: ["opencode-command"],
+        markers: ["opencode-command", "opencode-project"],
       },
       {
         name: "two",
         subproject: "A/team/deep",
         subprojectRealPath: "A/team/deep",
-        markers: ["opencode-command", "claude-md"],
+        markers: ["opencode-command", "opencode-project", "claude-md"],
       },
     ])
   })
@@ -122,7 +122,7 @@ describe("command subproject attribution", () => {
 
     expect(result.commands).toHaveLength(1)
     expect(result.commands[0]?.subproject).toBe("A")
-    expect(result.commands[0]?.markers).toEqual(["opencode-command"])
+    expect(result.commands[0]?.markers).toEqual(["opencode-command", "opencode-project"])
     expect(result.commands[0]?.subprojectRealPath).toBe(await realpath(join(f.root, "A")))
   })
 })

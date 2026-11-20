@@ -2,13 +2,17 @@ import type { Dirent } from "node:fs"
 import { lstat, readdir, realpath, stat } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 import {
+  AGENT_ROOT_DIRECTORIES,
   COMMAND_ROOT_DIRECTORIES,
+  CONFIG_DOCUMENT_NAMES,
   DEFAULT_SCAN_LIMITS,
   PRUNE_DIRECTORIES,
   SKILL_ROOT_DIRECTORIES,
   SUBPROJECT_MARKERS,
 } from "./contracts.ts"
 import type {
+  AgentCandidate,
+  AgentRootKind,
   CommandCandidate,
   CommandRootKind,
   ScanCandidate,
@@ -34,17 +38,22 @@ export interface ScanOptions {
   readonly markers?: readonly SubprojectMarker[]
   readonly skillRoots?: readonly SkillRootKind[]
   readonly commandRoots?: readonly CommandRootKind[]
+  readonly agentRoots?: readonly AgentRootKind[]
+  /** Canonical native agent roots; a candidate whose realpath is inside one is skipped (A5). */
+  readonly agentNativeRoots?: readonly string[]
   readonly excludeRoots?: readonly string[]
 }
 
 /** Kind → the two directory segments that make a directory a root (PD1). */
-const ROOT_SEGMENTS: Record<SkillRootKind | CommandRootKind, readonly [string, string]> = {
+const ROOT_SEGMENTS: Record<SkillRootKind | CommandRootKind | AgentRootKind, readonly [string, string]> = {
   "opencode-skills": [".opencode", "skills"],
   "opencode-skill": [".opencode", "skill"],
   "claude-skills": [".claude", "skills"],
   "agents-skills": [".agents", "skills"],
   "opencode-command": [".opencode", "command"],
   "opencode-commands": [".opencode", "commands"],
+  "opencode-agent": [".opencode", "agent"],
+  "opencode-agents": [".opencode", "agents"],
 }
 
 const DIAGNOSTIC_LIMIT = 200
@@ -52,6 +61,7 @@ const DIAGNOSTIC_LIMIT = 200
 interface State {
   readonly candidates: ScanCandidate[]
   readonly commands: CommandCandidate[]
+  readonly agents: AgentCandidate[]
   readonly diagnostics: string[]
   directories: number
   files: number
@@ -75,6 +85,8 @@ interface Context {
   readonly markers: ReadonlySet<SubprojectMarker>
   readonly roots: readonly SkillRootKind[]
   readonly commandRoots: readonly CommandRootKind[]
+  readonly agentRoots: readonly AgentRootKind[]
+  readonly agentNativeRoots: ReadonlySet<string>
   readonly excluded: readonly string[]
   readonly state: State
   readonly emit: (message: string) => void
@@ -86,6 +98,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const state: State = {
     candidates: [],
     commands: [],
+    agents: [],
     diagnostics: [],
     directories: 0,
     files: 0,
@@ -110,6 +123,7 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
   const finish = (): ScanResult => ({
     candidates: [...state.candidates].sort(compareCandidates),
     commands: [...state.commands].sort(compareCommands),
+    agents: [...state.agents].sort(compareAgents),
     stats: {
       directories: state.directories,
       files: state.files,
@@ -137,6 +151,8 @@ export async function scanSkills(options: ScanOptions): Promise<ScanResult> {
     markers: new Set(options.markers ?? SUBPROJECT_MARKERS),
     roots: options.skillRoots ?? SKILL_ROOT_DIRECTORIES,
     commandRoots: options.commandRoots ?? COMMAND_ROOT_DIRECTORIES,
+    agentRoots: options.agentRoots ?? AGENT_ROOT_DIRECTORIES,
+    agentNativeRoots: new Set(options.agentNativeRoots ?? []),
     excluded: await canonicalRoots(options.excludeRoots ?? []),
     state,
     emit,
@@ -156,7 +172,7 @@ async function walk(
 ): Promise<void> {
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
-  const owner = (await probeMarkers(context, dir, rel)) ?? parent
+  const owner = (await probeMarkers(context, dir, rel, entries)) ?? parent
 
   // PD3: the cap measures subproject distance from the location, not skill-file depth.
   const childDepth = depth + 1
@@ -219,6 +235,24 @@ async function openRoots(
     if (isExcluded(context, root)) continue
     await walkCommandRoot(context, root, rootRel, kind, owner, root)
   }
+  for (const kind of context.agentRoots) {
+    const [leading, leaf] = ROOT_SEGMENTS[kind]
+    if (leading !== name) continue
+    const root = join(dir, leaf)
+    // A12: the location's own `.opencode/agent(s)` belongs to native discovery, so it is
+    // claimed (never scanned, never reported) exactly like the command roots above.
+    if (rel === ".opencode") {
+      if (await existsNoFollow(root)) opened = true
+      continue
+    }
+    const rootRel = joinRel(rel, leaf)
+    const probe = await probeRoot(context, root, rootRel)
+    if (probe === "missing") continue
+    opened = true
+    if (probe === "refused") continue
+    if (isExcluded(context, root)) continue
+    await walkAgentRoot(context, root, rootRel, kind, owner, root)
+  }
   return opened
 }
 
@@ -254,7 +288,7 @@ async function walkRoot(
   const entries = await openDirectory(context, dir, rel)
   if (entries === null) return
   // Markers nest inside an open root too: only the walk is unbounded, not the marker probe (PD3).
-  const owner = (await probeMarkers(context, dir, rel)) ?? parent
+  const owner = (await probeMarkers(context, dir, rel, entries)) ?? parent
 
   for (const entry of entries) {
     if (context.state.stopped) return
@@ -322,6 +356,55 @@ function commandEligible(name: string): boolean {
 
 /** Native `decode()` parity (PD6): root-relative, POSIX separators, one trailing `.md` stripped. */
 export function deriveCommandName(rootDir: string, path: string): string {
+  return relative(rootDir, path).split(sep).join("/").replace(/\.md$/, "")
+}
+
+/**
+ * Walks one agent root the way native globs it — `{agent,agents}/**\/*.md`, dots and all,
+ * no depth cap (`packages/core/src/config/plugin/agent.ts:157-161`) — and never probes
+ * markers inside it: the owner is the subproject that opened the root (A1, A12).
+ */
+async function walkAgentRoot(
+  context: Context,
+  dir: string,
+  rel: string,
+  kind: AgentRootKind,
+  parent: Ownership | null,
+  rootDir: string,
+): Promise<void> {
+  const entries = await openDirectory(context, dir, rel)
+  if (entries === null) return
+
+  for (const entry of entries) {
+    if (context.state.stopped) return
+    if (context.prune.has(entry.name)) continue
+    const child = join(dir, entry.name)
+    if (entry.isSymbolicLink()) {
+      await acceptAgentLink(context, child, joinRel(rel, entry.name), kind, parent, rootDir)
+      continue
+    }
+    if (entry.isDirectory()) {
+      if (isExcluded(context, child)) continue
+      await walkAgentRoot(context, child, joinRel(rel, entry.name), kind, parent, rootDir)
+      continue
+    }
+    if (!entry.isFile()) continue
+    if (!agentEligible(entry.name)) continue
+    await acceptAgent(context, child, kind, parent, rootDir)
+  }
+}
+
+/** Every `.md` under an agent root is a candidate, at any depth, dots included (A1). */
+function agentEligible(name: string): boolean {
+  return name.endsWith(".md")
+}
+
+/**
+ * Native `decode()` parity (A6): root-relative, POSIX separators, one trailing `.md`
+ * stripped, inner separators kept — `agents/review-tools/pr.md` → `review-tools/pr`
+ * (`packages/core/src/config/plugin/agent.ts:157-161`).
+ */
+export function deriveAgentName(rootDir: string, path: string): string {
   return relative(rootDir, path).split(sep).join("/").replace(/\.md$/, "")
 }
 
@@ -398,6 +481,40 @@ async function acceptCommandLink(
     return
   }
   await acceptCommand(context, path, kind, owner, rootDir, link.realPath)
+}
+
+/** Inside an agent root a link may be a candidate file; a directory link is never followed (A1, D2). */
+async function acceptAgentLink(
+  context: Context,
+  path: string,
+  rel: string,
+  kind: AgentRootKind,
+  owner: Ownership | null,
+  rootDir: string,
+): Promise<void> {
+  const link = await resolveLink(path)
+  if (link.type === "directory") {
+    context.emit(`directory-symlink: ${rel}`)
+    return
+  }
+  if (!agentEligible(basename(path))) return
+  if (link.type === "broken") {
+    context.emit(`file-symlink-broken: ${rel}`)
+    return
+  }
+  if (!isInside(context.location, link.realPath)) {
+    context.emit(`file-symlink-outside: ${rel}`)
+    return
+  }
+  await acceptAgent(context, path, kind, owner, rootDir, link.realPath)
+}
+
+/** A5: source-set rule, not an index filter — native already publishes these files. */
+function isInsideAnyRoot(roots: ReadonlySet<string>, target: string): boolean {
+  for (const root of roots) {
+    if (isInside(root, target)) return true
+  }
+  return false
 }
 
 function isExcluded(context: Context, path: string): boolean {
@@ -482,6 +599,31 @@ async function accept(
   })
 }
 
+async function acceptAgent(
+  context: Context,
+  path: string,
+  kind: AgentRootKind,
+  owner: Ownership | null,
+  rootDir: string,
+  realPath?: string,
+): Promise<void> {
+  // D5: canonicalise first and drop native-owned files before `admit`, so a skipped file
+  // never charges the shared file or byte budget and never produces a diagnostic.
+  const canonicalPath = realPath ?? (await canonical(path))
+  if (canonicalPath !== null && isInsideAnyRoot(context.agentNativeRoots, canonicalPath)) return
+  const admitted = await admit(context, path, canonicalPath ?? undefined)
+  if (admitted === null) return
+  context.state.agents.push({
+    name: deriveAgentName(rootDir, path),
+    path,
+    canonicalPath: admitted.canonicalPath,
+    subproject: owner?.rel ?? "",
+    subprojectRealPath: owner?.realPath ?? context.location,
+    root: kind,
+    markers: owner === null ? [] : [...owner.markers],
+  })
+}
+
 async function acceptCommand(
   context: Context,
   path: string,
@@ -509,18 +651,27 @@ function relativeToLocation(context: Context, path: string): string {
 }
 
 /** The marker kinds observed on `dir`, in SUBPROJECT_MARKERS order; null when none (PD8). */
-async function probeMarkers(context: Context, dir: string, rel: string): Promise<Ownership | null> {
+async function probeMarkers(
+  context: Context,
+  dir: string,
+  rel: string,
+  entries: readonly Dirent<string>[],
+): Promise<Ownership | null> {
   const found: SubprojectMarker[] = []
   for (const kind of SUBPROJECT_MARKERS) {
     if (!context.markers.has(kind)) continue
-    if (await hasMarker(dir, kind)) found.push(kind)
+    if (await hasMarker(dir, kind, entries)) found.push(kind)
   }
   if (found.length === 0) return null
   // Resolved once per subproject, not once per command file (Step 3).
   return { rel, markers: found, realPath: (await canonical(dir)) ?? dir }
 }
 
-async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> {
+async function hasMarker(
+  dir: string,
+  kind: SubprojectMarker,
+  entries: readonly Dirent<string>[],
+): Promise<boolean> {
   switch (kind) {
     case "agents-md":
       return isFile(join(dir, "AGENTS.md"))
@@ -530,6 +681,15 @@ async function hasMarker(dir: string, kind: SubprojectMarker): Promise<boolean> 
       return exists(join(dir, ".git"))
     case "hg":
       return isRealDirectory(join(dir, ".hg"))
+    // A2: the project marker is a name test on the listing this walk already paid for, so
+    // no `stat` and no `realpath` are added anywhere on the marker path. A directory named
+    // `.opencode` is never its own subproject.
+    case "opencode-project":
+      if (basename(dir) === ".opencode") return false
+      return entries.some(
+        (entry) =>
+          entry.name === ".opencode" || CONFIG_DOCUMENT_NAMES.some((name) => name === entry.name),
+      )
     default: {
       const [leading, leaf] = ROOT_SEGMENTS[kind]
       return isRealDirectory(join(dir, leading, leaf))
@@ -615,6 +775,12 @@ function compareCandidates(left: ScanCandidate, right: ScanCandidate): number {
 }
 
 function compareCommands(left: CommandCandidate, right: CommandCandidate): number {
+  if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
+  if (left.path !== right.path) return left.path < right.path ? -1 : 1
+  return 0
+}
+
+function compareAgents(left: AgentCandidate, right: AgentCandidate): number {
   if (left.canonicalPath !== right.canonicalPath) return left.canonicalPath < right.canonicalPath ? -1 : 1
   if (left.path !== right.path) return left.path < right.path ? -1 : 1
   return 0
