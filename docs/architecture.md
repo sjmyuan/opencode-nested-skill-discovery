@@ -40,7 +40,7 @@ different directory gets a fresh location context and a fresh activation
 
 ## Activation pipeline
 
-`runRefresh` (`src/registry.ts:493-795`) runs these stages in order. A stage that throws
+`runRefresh` (`src/registry.ts:493-796`) runs these stages in order. A stage that throws
 stops the run: a failure before the snapshot swap keeps the previous snapshot, one after it
 leaves the new snapshot in place (see [Failure model](#failure-model)).
 
@@ -222,7 +222,7 @@ suppresses a match (`src/registry.ts:739-745`, `src/registry.ts:245-261`). Dedup
 pass runs inside the refresh and emits one `dedupe: <id>` diagnostic per suppressed entry
 (`src/registry.ts:744`); when the foreign tier still looks incomplete a deferred check runs at
 1.5 s and again at 4 s (`src/registry.ts:42`, `src/registry.ts:840-856`, `src/registry.ts:858-914`). That check is silent on
-success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:916`).
+success and reports only `dedupe-deferred: <reason>` when it throws (`src/registry.ts:917`).
 `refresh()` returns without waiting for that check (`src/registry.ts:792-819`), so a
 duplicate can survive briefly — up to about 4 s — and then collapse. There is no settle
 timeout that reports failure: the deferred check simply re-lists and re-filters.
@@ -276,7 +276,7 @@ describe that cache as reloaded on bind; those documents are stale on that point
 storage reads in the plugin are the two version counters, the format marker, and the command
 cache the change comparison inspects (`src/manifest.ts:393-422`). The manifest is likewise an
 audit and diagnostics artifact — it is never a filter for what gets advertised
-(`src/registry.ts:493-795` reads only live scan output).
+(`src/registry.ts:493-796` reads only live scan output).
 
 Raw keys are namespaced by the host as `plugin:<hex of the plugin id>:`; the plugin-visible
 key is the suffix (`packages/core/src/plugin/host.ts:609-616`). A raw-KV query therefore
@@ -344,14 +344,14 @@ advertised list is whatever the last completed step produced.
 | A plugin option is invalid | that key's default applies, activation succeeds, and one `option-invalid: <key>=<value>` line is prepended to the outcome's diagnostics, ahead of every scan line | `src/options.ts:34-51`, `src/registry.ts:500` |
 | Scan diagnostics exceed 200 | truncated with `diagnostics-truncated` | `src/scan.ts:70`, `src/scan.ts:125-133` |
 | A budget is hit | `scan-truncated` plus `budget-*`, and the partial index is still swapped | `src/registry.ts:564`, `src/scan.ts:562-602` |
-| The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:721-722` |
+| The first `reload()` throws | diagnostic recorded, `ok: false`, **new** snapshot already swapped | `src/registry.ts:722-723` |
 | `list`, the dedupe persist, or the corrected reload throws | `ok: false`, the new (or corrected) snapshot stays current; the next refresh re-evaluates | `src/registry.ts:728`, `src/registry.ts:746-764` |
 | Watch or hook registration fails | buffered `watch:` / `hook:` diagnostic drained into the next outcome; other triggers keep working and `setup` still resolves | `src/registry.ts:432-449`, `src/registry.ts:454-481`, `src/registry.ts:499-505`, `src/plugin.ts:34-38` |
-| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:916` |
+| A deferred dedupe check throws | `dedupe-deferred: <reason>` buffered and surfaced on the next outcome; the snapshot is untouched | `src/registry.ts:917` |
 | A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:650-714` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
 | A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |
-| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:710-726`, `src/command-shadow.ts:86-117` |
+| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:711-727`, `src/command-shadow.ts:86-117` |
 
 When the pre-drop stage never ran, the audit is handed `EMPTY_NATIVE_COMMANDS`
 (`src/command-audit.ts:5-10`): its `complete: true` asserts only that **no walk happened**, so

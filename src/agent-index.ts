@@ -10,6 +10,7 @@ import {
   type AgentCandidate,
   type AgentConfigCandidate,
   type AgentRootKind,
+  type ScanLimits,
 } from "./contracts.ts"
 import { readConfigDocument, errorCode, type ConfigDocument } from "./agent-config.ts"
 import { decodeAgentFile, type AgentFields } from "./agent-decode.ts"
@@ -61,6 +62,8 @@ export interface IndexAgentsInput {
   readonly home: string
   readonly agents: readonly AgentCandidate[]
   readonly configs: readonly AgentConfigCandidate[]
+  /** A10: the caps for `{file:}` substitution, from the resolved R8 options. */
+  readonly limits: Pick<ScanLimits, "maxFileBytes" | "maxTotalBytes">
   /** One family pass per refresh (A11); omit to derive privately. */
   readonly family?: FamilyPass
 }
@@ -120,8 +123,10 @@ export async function indexAgents(input: IndexAgentsInput): Promise<IndexAgentsR
       const read = await readConfigDocument({
         path: config.path,
         canonicalPath: config.canonicalPath,
+        rootRealPath: config.subprojectRealPath,
         home: input.home,
         display: display(config.path),
+        limits: input.limits,
       }).catch((error: unknown) => ({
         document: undefined,
         diagnostics: [`agent-skip: unreadable ${display(config.path)}: ${errorCode(error)}`] as readonly string[],

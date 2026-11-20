@@ -598,6 +598,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
             home: nativeInput().home,
             agents: agentCandidates,
             configs: agentConfigs,
+            limits: scanLimits.limits,
             ...(family === undefined ? {} : { family }),
           })
           agents = indexedAgents.agents

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { afterAll, afterEach, describe, expect, it } from "vitest"
-import { CONFIG_DOCUMENT_ORDER, MAX_ID_LENGTH, type AgentCandidate } from "../src/contracts.ts"
+import { CONFIG_DOCUMENT_ORDER, DEFAULT_SCAN_LIMITS, MAX_ID_LENGTH, type AgentCandidate } from "../src/contracts.ts"
 import { agentTokenFor, indexAgents, type IndexedAgent } from "../src/agent-index.ts"
 import { createFamilyPass, type FamilyPass } from "../src/family.ts"
 import { scopeTokenFor, slug } from "../src/indexer.ts"
@@ -54,6 +54,7 @@ async function index(f: ScanFixture | FamilyWorkspace, options: IndexOptions = {
     home: "/home/test",
     agents,
     configs,
+    limits: DEFAULT_SCAN_LIMITS,
     ...(options.family === undefined ? {} : { family: options.family }),
   })
 }
@@ -317,6 +318,23 @@ describe("skips and isolation", () => {
 
     expect(result.agents).toEqual([])
     expect(result.diagnostics).toEqual(["agent-skip: unreadable A/opencode.json: EACCES"])
+  })
+
+  it("keeps an agent whose document references an escaping {file:}", async () => {
+    const f = await fixture()
+    await f.write(
+      "A/opencode.json",
+      JSON.stringify({ agents: { escaper: { description: "{file:../../secret.md}" } } }),
+    )
+
+    const result = await index(f)
+
+    // A10: a rejected reference is not a document failure — the agent publishes empty.
+    expect(result.agents.map((agent) => agent.name)).toEqual(["escaper"])
+    expect(result.agents[0]?.description).toBe("")
+    expect(result.diagnostics).toEqual([
+      "agent-skip: A/opencode.json: file-ref {file:../../secret.md} outside-root",
+    ])
   })
 
   it("carries the error code on an unreadable agent file", async () => {
