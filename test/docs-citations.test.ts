@@ -12,8 +12,8 @@ const pinAvailable = existsSync(PIN)
 /** The repo has no top-level `packages/`, so this prefix resolves only at the pin. */
 const EXTERNAL_PREFIX = "packages/"
 
-/** Measured at the F13 rework head; re-measure both whenever a doc gains or loses a citation. */
-const EXPECTED_IN_REPO = 203
+/** Re-measured at the F15 step 7 head; re-measure both whenever a doc gains or loses a citation. */
+const EXPECTED_IN_REPO = 208
 const EXPECTED_EXTERNAL = 55
 
 const DOCS = [
@@ -137,11 +137,11 @@ const ANCHORS: ReadonlyArray<{
   readonly ranges: string
   readonly marker: string
 }> = [
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "485-738", marker: "const runRefresh = async" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "86-91", marker: "function capDiagnostics" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "95-106", marker: "async function runStage" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "196-205", marker: "export interface RefreshOutcome" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "646-662", marker: 'runStage(diagnostics, "command-audit"' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "487-747", marker: "const runRefresh = async" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "87-92", marker: "function capDiagnostics" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "96-107", marker: "async function runStage" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "197-206", marker: "export interface RefreshOutcome" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "655-671", marker: 'runStage(diagnostics, "command-audit"' },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "40", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "868", marker: "dedupe-deferred: ${reasonOf(error)}" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "673-674", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
