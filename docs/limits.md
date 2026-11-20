@@ -3,9 +3,9 @@
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The five
 scan budgets are **defaults** declared in `src/contracts.ts:179-185` and each one is
 overridable from the plugin entry's `options` object: the registry resolves them once at
-construction (`src/options.ts:34-51`, `src/registry.ts:325`) and hands the same object to the
-skill scan (`src/registry.ts:556-561`) and to the native command-name walk
-(`src/registry.ts:663`). An auto-discovered directory plugin receives `{}`, so zero-config
+construction (`src/options.ts:34-51`, `src/registry.ts:351`) and hands the same object to the
+skill scan (`src/registry.ts:619-624`) and to the native command-name walk
+(`src/registry.ts:747`). An auto-discovered directory plugin receives `{}`, so zero-config
 behaviour is the defaults — apart from the raised directory budget below.
 
 ## Summary
@@ -150,7 +150,7 @@ marker kinds are `src/contracts.ts:249-257`:
 | `hg` | a real `.hg` directory |
 
 Markers nest and never stop the walk: the deepest marker owner wins, and its relative path
-becomes the entry's name prefix (`src/scan.ts:189`, `src/registry.ts:126`). A symlinked
+becomes the entry's name prefix (`src/scan.ts:189`, `src/registry.ts:128`). A symlinked
 skill-root directory is not a marker and is not followed. The project marker is a name test
 on the `Dirent` list the walk already holds (ADR agent A2), so it costs no extra system call
 per directory. The marker never reads a document: the *content* of a subproject's config
@@ -221,12 +221,24 @@ migrated (`src/agent-decode.ts:51-68`).
 | `agent-field: <rel> ignored <key,…>` | a non-legacy agent file carries an unknown key |
 | `agent-merge: <name> (<rel> + …)` | one per merged native name, sources in native order |
 | `agent-index: <reason>` | the agent stage threw; the refresh still succeeds |
+| `agent-skip: disabled <rel>` | the source is disabled; never registered |
+| `agent-skip: id-held <rel>` | the host map already held this ID before the transform registered |
+| `agent-skip: shadowed <rel>` | a previous audit held this ID out; the entry is omitted from the map |
+| `agent-request: <id>` | one per admitted agent that carries a `request` overlay |
+| `agent-shadow-audit: <id>` | the reloaded entry did not match the snapshot; held out of the next |
+| `agent-seed: <reason>` | the pre-registration listing read threw; registration is still attempted |
+| `agent-register: <reason>` | the transform registration rejected; no agent is registered in this instance |
+| `agent-replay: <id>: <reason>` | one entry failed to replay; its siblings still applied |
+| `agent-reload: <reason>` | the agent reload threw; the map keeps whatever the host built |
+| `agent-audit: <reason>` | the post-reload listing read threw; the published map stays |
 | `config-symlink: <rel>` | a config document is a symlink; refused, never followed |
 
 `<doc>` is the document's location-relative POSIX path, the `<rel>` of the other rows.
 `<token>` is the literal `{file:…}` token as written, unexpanded; `<key>` is the `agents` map
-key verbatim — it may contain `/` and is never treated as a path. Nothing is registered from
-either source in this build.
+key verbatim — it may contain `/` and is never treated as a path. Both sources reach the host
+map through one early `ctx.agent.transform`: an admitted entry is inserted only when the map
+does not already hold its ID, the location's own rules are appended after ours, and no entry is
+ever removed — a held-out ID leaves the next snapshot by omission, after one reload.
 
 ## Worktree families
 
@@ -332,10 +344,10 @@ the walk (`src/scan.ts:562-602`, `764-769`). A single file over 128 KiB is skipp
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:564`).
+(`src/registry.ts:627`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:70`, `125-133`, ending
-in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:89-94`),
+in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:91-96`),
 where the overflow is summarised as `truncated: N more diagnostics`. A scan that truncates
 still feeds the outcome budget. Post-reload audit lines share that budget in stage order, so
 a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders them — see
@@ -346,7 +358,7 @@ a scan-diagnostic flood can truncate them. No opencode `v2.0.26` surface renders
 | Field | Cap | Behaviour |
 |---|---|---|
 | name | 80 code points | truncate leading path segments behind `…/`, then cut the last segment (`src/names.ts:32-46`) |
-| skill description | 500 code points | cut (`src/registry.ts:119-123`); a command description is stored verbatim |
+| skill description | 500 code points | cut (`src/registry.ts:121-125`); a command description is stored verbatim |
 | scope slug | 24 | cut, then the path hash keeps the ID unique (`src/indexer.ts:48-50`) |
 | skill slug | 40 | cut, same (`src/indexer.ts:62-64`) |
 
@@ -362,7 +374,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:745-751`, `src/registry.ts:245-261`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:42`, `src/registry.ts:864-920`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:848-854`, `src/registry.ts:247-263`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:44`, `src/registry.ts:969-1025`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | the five scan budgets are plugin options on the `opencode.json` entry (object form); display caps and the command-template ceiling stay constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -385,5 +397,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:846-862`, `src/registry.ts:820-824`, `src/registry.ts:798-825`). Details in
+(`src/registry.ts:951-967`, `src/registry.ts:924-928`, `src/registry.ts:901-929`). Details in
 [architecture.md](architecture.md#refresh-model).

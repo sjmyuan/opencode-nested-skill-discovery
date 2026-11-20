@@ -12,8 +12,8 @@ const pinAvailable = existsSync(PIN)
 /** The repo has no top-level `packages/`, so this prefix resolves only at the pin. */
 const EXTERNAL_PREFIX = "packages/"
 
-/** Re-measured at the F15 step 7 head; re-measure both whenever a doc gains or loses a citation. */
-const EXPECTED_IN_REPO = 220
+/** Re-measured at the F17 step 7 head; re-measure both whenever a doc gains or loses a citation. */
+const EXPECTED_IN_REPO = 227
 const EXPECTED_EXTERNAL = 55
 
 const DOCS = [
@@ -137,14 +137,14 @@ const ANCHORS: ReadonlyArray<{
   readonly ranges: string
   readonly marker: string
 }> = [
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "493-796", marker: "const runRefresh = async" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "89-94", marker: "function capDiagnostics" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "98-109", marker: "async function runStage" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "199-208", marker: "export interface RefreshOutcome" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "711-727", marker: 'runStage(diagnostics, "command-audit"' },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "42", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "917", marker: "dedupe-deferred: ${reasonOf(error)}" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "722-723", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "553-899", marker: "const runRefresh = async" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "91-96", marker: "function capDiagnostics" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "100-111", marker: "async function runStage" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "201-210", marker: "export interface RefreshOutcome" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "814-830", marker: 'runStage(diagnostics, "command-audit"' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "44", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "1022", marker: "dedupe-deferred: ${reasonOf(error)}" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "825-826", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
   { doc: "docs/architecture.md", target: "src/command-audit.ts", ranges: "5-10", marker: "EMPTY_NATIVE_COMMANDS" },
   { doc: "README.md", target: "src/command-execute.ts", ranges: "30-104", marker: "export function createCommandExecutor" },
   { doc: "docs/limits.md", target: "src/command-model.ts", ranges: "58-64", marker: "export function canonicalModelSelection" },
