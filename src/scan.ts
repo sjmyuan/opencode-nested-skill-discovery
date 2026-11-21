@@ -644,7 +644,14 @@ async function collectConfigDocuments(
       continue
     }
     if (!info.isFile()) continue
-    const admitted = await admit(context, path)
+    // A3 (F18): the last component can be a real file while a parent directory is a link
+    // that leaves `d`; confine the resolved document, not only its name.
+    const documentRealPath = await canonical(path)
+    if (documentRealPath !== null && !isInside(owner.realPath, documentRealPath)) {
+      context.emit(`config-symlink: ${joinRel(rel, document)}`)
+      continue
+    }
+    const admitted = await admit(context, path, documentRealPath ?? undefined)
     if (admitted === null) continue
     context.state.agentConfigs.push({
       path,

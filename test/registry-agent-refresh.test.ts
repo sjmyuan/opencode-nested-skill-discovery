@@ -89,7 +89,7 @@ describe("agent-root watcher coverage", () => {
     }
   })
 
-  it("re-scans once for an agent-root event and stays ok", async () => {
+  it("re-scans once for an agent-root event and keeps the fixture's skill and agent published", async () => {
     const h = await harness()
 
     try {
@@ -99,6 +99,13 @@ describe("agent-root watcher coverage", () => {
       await vi.waitFor(() => expect(scanControl.scans).toBe(2), { timeout: 2000 })
       expect(h.registry.outcome.ok).toBe(true)
       expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent"))).toEqual([])
+      // The rescan republishes the same fixture, so the title's "keeps ... published" is asserted,
+      // not implied by a successful outcome.
+      const skills = h.registry.snapshot.snapshots.flatMap((subproject) =>
+        subproject.skills.map((entry) => entry.name),
+      )
+      expect(skills.sort()).toEqual(["A/deploy"])
+      expect((await h.fake.ctx.agent.list()).data.map((entry) => entry.name)).toEqual(["A/translator"])
     } finally {
       await h.dispose()
     }

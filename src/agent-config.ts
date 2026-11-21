@@ -33,7 +33,11 @@ export interface ReadConfigDocumentInput {
   readonly canonicalPath: string
   /** The marked directory `d` of A10: every `{file:}` must resolve inside its realpath. */
   readonly rootRealPath: string
-  /** Never expanded — a `~`-leading reference is refused, so this only proves the refusal. */
+  /**
+   * Never expanded and never consulted: every reference is resolved against the document, and a
+   * `~`-leading one is refused outright. It is threaded through so the `~`-refusal fixture can
+   * supply a real home and prove a home cannot unblock a token.
+   */
   readonly home: string
   /** The location-relative POSIX path every diagnostic carries. */
   readonly display: string
@@ -149,6 +153,7 @@ export interface SubstitutionSource {
   readonly path: string
   /** The marked directory `d`, canonicalised once by {@link substituteConfined}. */
   readonly rootRealPath: string
+  /** Carried for the same reason as {@link ReadConfigDocumentInput.home}: a real home must not help. */
   readonly home: string
   readonly display: string
   readonly limits: SubstitutionLimits

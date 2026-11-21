@@ -203,9 +203,8 @@ describe("agent roots", () => {
     const first = await scanSkills({ location: f.root })
     const second = await scanSkills({ location: f.root })
 
-    expect(first.agents.map((agent) => f.rel(agent.path))).toEqual(
-      [...first.agents].map((agent) => f.rel(agent.path)),
-    )
+    const relPaths = first.agents.map((agent) => f.rel(agent.path))
+    expect(relPaths).toEqual([...relPaths].sort())
     expect(second.agents).toEqual(first.agents)
   })
 })

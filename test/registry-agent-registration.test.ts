@@ -1,8 +1,25 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Permission } from "@opencode/schema/permission"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext, type FakeAgentSeed, type FakeContext } from "./support/fake-context.ts"
 import { createRegistryFixture, type RegistryFixture } from "./support/registry-fixtures.ts"
+
+const replayControl = vi.hoisted(() => ({ payloadError: undefined as Error | undefined }))
+
+vi.mock("../src/replay.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/replay.ts")>()
+  return {
+    ...actual,
+    applyAgents: (editor: Parameters<typeof actual.applyAgents>[0], agents: Parameters<typeof actual.applyAgents>[1]) => {
+      if (replayControl.payloadError !== undefined) throw replayControl.payloadError
+      return actual.applyAgents(editor, agents)
+    },
+  }
+})
+
+beforeEach(() => {
+  replayControl.payloadError = undefined
+})
 
 /**
  * F17 Step 5 (ADR agent G1, G8–G11; C3, C4): one early `ctx.agent.transform` replays a frozen
@@ -375,6 +392,66 @@ describe("isolation", () => {
         "agent-register: transform refused",
       ])
     } finally {
+      await h.dispose()
+    }
+  })
+
+  it("retries a rejected transform on the next refresh and reports the rejection once", async () => {
+    const h = await harness(withBoth, { activate: false })
+    h.fake.fail("agent.transform", new Error("transform refused"))
+
+    try {
+      const first = await h.registry.activate()
+      expect(first.diagnostics.filter((line) => line.startsWith("agent-register:"))).toEqual([
+        "agent-register: transform refused",
+      ])
+      expect(h.fake.agentTransforms).toHaveLength(0)
+      expect(await listing(h.fake)).toEqual([])
+
+      // Reported once per instance, and the attempt is not final: a second failed refresh
+      // registers nothing new and stays silent.
+      const stillFailing = await h.registry.refresh()
+      expect(stillFailing.diagnostics.filter((line) => line.startsWith("agent-register:"))).toEqual([])
+      expect(h.fake.agentTransforms).toHaveLength(0)
+      expect(await listing(h.fake)).toEqual([])
+
+      // The registration is retried, not abandoned: one transient host rejection must not
+      // cost the instance its agents for its whole life.
+      h.fake.clearFailures()
+      const second = await h.registry.refresh()
+
+      expect(second.diagnostics.filter((line) => line.startsWith("agent-register:"))).toEqual([])
+      expect(h.fake.agentTransforms).toHaveLength(1)
+      expect((await listing(h.fake)).map((entry) => entry.name).sort()).toEqual(["A/reviewer", "A/translator"])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("names a whole-payload replay failure in the payload form, once per failing replay", async () => {
+    const h = await harness(withBoth)
+
+    try {
+      // A throw outside one entry (not attributable to an ID) is the payload form; the host
+      // must never see it, because a throw escaping the transform disables the plugin group.
+      replayControl.payloadError = new Error("payload exploded")
+
+      await h.registry.refresh()
+      // Diagnostics raised during a replay surface in the next refresh's outcome, so the error
+      // is cleared before that refresh: the reported replay is the failing one, not this one.
+      replayControl.payloadError = undefined
+      const surfaced = await h.registry.refresh()
+      expect(surfaced.diagnostics.filter((line) => line.startsWith("agent-replay:"))).toEqual([
+        "agent-replay: payload: payload exploded",
+      ])
+      expect(surfaced.ok).toBe(true)
+
+      // Per failing replay, not sticky: a clean refresh reports none and registers no new transform.
+      const clean = await h.registry.refresh()
+      expect(clean.diagnostics.filter((line) => line.startsWith("agent-replay:"))).toEqual([])
+      expect(h.fake.agentTransforms).toHaveLength(1)
+    } finally {
+      replayControl.payloadError = undefined
       await h.dispose()
     }
   })

@@ -90,6 +90,13 @@ const source = (path: string, rootRealPath = dirname(path), home = "/home/test")
 
 const countOfReads = (path: string): number => reads.filter((entry) => entry === path).length
 
+/**
+ * A substituted target is read by its realpath, so a refusal must be compared canonicalised:
+ * a non-canonical spelling would read `0` because it cannot match, not because nothing was read.
+ */
+const countOfReadsCanonical = async (path: string): Promise<number> =>
+  countOfReads(join(await realpath(dirname(path)), path.slice(path.lastIndexOf("/") + 1)))
+
 describe("variable substitution", () => {
   it("substitutes {env:VAR} raw", async () => {
     process.env.F16_DESC = "plain"
@@ -141,7 +148,7 @@ describe("variable substitution", () => {
       "agent-skip: A/opencode.json: file-ref {file:./missing.md} outside-root",
     ])
     expect(result.document?.agents.get("a")?.description).toBe("")
-    expect(countOfReads(join(path, "..", "missing.md"))).toBe(0)
+    expect(await countOfReadsCanonical(join(dirname(path), "missing.md"))).toBe(0)
     const text = await readFile(path, "utf8")
     expect((await substituteConfined(text, source(path))).text).toContain("// {file:./missing.md}")
   })
@@ -183,7 +190,7 @@ describe("A10 confinement", () => {
     expect(result.diagnostics).toEqual([
       "agent-skip: A/opencode.json: file-ref {file:~/snippet.md} outside-root",
     ])
-    expect(countOfReads(join(home, "snippet.md"))).toBe(0)
+    expect(await countOfReadsCanonical(join(home, "snippet.md"))).toBe(0)
   })
 
   it("refuses a symlink whose realpath leaves the marked directory", async () => {
@@ -225,7 +232,7 @@ describe("A10 confinement", () => {
     expect(result.diagnostics).toEqual([
       "agent-skip: A/opencode.json: file-ref {file:./broken.md} outside-root",
     ])
-    expect(countOfReads(join(root, "A/gone.md"))).toBe(0)
+    expect(await countOfReadsCanonical(join(root, "A/gone.md"))).toBe(0)
   })
 
   it("refuses a non-regular target without reading it", async () => {

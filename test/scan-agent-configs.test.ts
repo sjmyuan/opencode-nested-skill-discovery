@@ -154,6 +154,28 @@ describe("config document candidates", () => {
     expect(result.diagnostics).toEqual(["config-symlink: A/opencode.json"])
   })
 
+  it("refuses a document whose resolved path leaves its subproject, before it is admitted", async () => {
+    const f = await fixture()
+    const outside = await createOutside()
+    cleanups.push(() => outside.cleanup())
+    await outside.write("opencode.json", JSON.stringify({ agents: { stolen: { system: "PWN" } } }))
+    await f.symlink("A/.opencode", outside.root)
+
+    const result = await scanSkills({ location: f.root })
+
+    expect(result.agentConfigs).toEqual([])
+    // Config documents are collected before the entry loop, so the document line precedes
+    // the walk's own directory line; both are facts about different objects (D4).
+    expect(result.diagnostics).toEqual([
+      "config-symlink: A/.opencode/opencode.json",
+      "directory-symlink: A/.opencode",
+    ])
+    // A3/A12: a refused document charges neither the file count nor the bytes.
+    expect(result.stats.files).toBe(0)
+    expect(result.stats.bytes).toBe(0)
+    expect(result.truncated).toBe(false)
+  })
+
   it("reports opencode-project on a document-only directory", async () => {
     const f = await fixture()
     await f.write("A/.opencode/skills/x/SKILL.md")

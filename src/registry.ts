@@ -294,8 +294,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let registeringCommand: Promise<void> | undefined
   let agentRegistration: Registration | undefined
   let registeringAgent: Promise<void> | undefined
-  /** A rejected transform is final for this instance: retrying would only repeat the diagnostic. */
-  let agentRegistrationFailed = false
+  /** One-shot `agent-register:` report: a rejected transform is retried on the next refresh. */
+  let agentRegisterReported = false
   let currentAgentPayload: readonly AdmittedAgent[] | undefined
   let agentSeeded = false
   let seeded = false
@@ -454,9 +454,19 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     }
   }
 
-  /** One early agent transform (ADR agent G1; C3). A rejection never blocks skills or commands. */
+  /**
+   * One early agent transform (ADR agent G1; C3). A rejection never blocks skills or commands
+   * and is reported once, not made final: the next refresh retries the registration with the
+   * fresh payload, so one transient host rejection does not cost the instance its agents.
+   */
   const ensureAgentRegistered = async (): Promise<void> => {
-    if (agentRegistration !== undefined || agentRegistrationFailed || disposed) return
+    if (agentRegistration !== undefined || disposed) return
+
+    const reportFailure = (error: unknown): void => {
+      if (agentRegisterReported) return
+      agentRegisterReported = true
+      agentDiagnostics.push(`agent-register: ${reasonOf(error)}`)
+    }
 
     try {
       if (registeringAgent === undefined) {
@@ -466,25 +476,23 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
             try {
               agentDiagnostics.push(...applyAgents(editor, currentAgentPayload))
             } catch (error) {
-              agentDiagnostics.push(`agent-replay: ${reasonOf(error)}`)
+              // Never rethrow: a throw here escapes into the host's replay loop, which disables
+              // the whole plugin group — skills and commands with it.
+              agentDiagnostics.push(`agent-replay: payload: ${reasonOf(error)}`)
             }
           })
         })()
           .then((created) => {
             agentRegistration = created
           })
-          .catch((error) => {
-            agentRegistrationFailed = true
-            agentDiagnostics.push(`agent-register: ${reasonOf(error)}`)
-          })
+          .catch(reportFailure)
           .finally(() => {
             registeringAgent = undefined
           })
       }
       await registeringAgent
-    } catch (error) {
-      agentRegistrationFailed = true
-      agentDiagnostics.push(`agent-register: ${reasonOf(error)}`)
+    } catch (error) { // unreachable: registeringAgent ends in .catch(reportFailure)
+      reportFailure(error)
     }
   }
 
@@ -670,7 +678,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           agentLines = indexedAgents.diagnostics
         }
         // One projection per successful index, frozen before the transform can read it, so the
-        // replay performs no I/O (G1) and a rebuild never mutates what is being replayed.
+        // replay performs no I/O (G1) and a rebuild never mutates what is being replayed. The
+        // freeze is shallow: the array and each entry, not the nested rules array, which the
+        // replay only reads and never edits.
         const projected = admitAgents({
           agents,
           home: nativeInput().home,
@@ -792,8 +802,10 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     const agentReloaded = await runStage(diagnostics, "agent-reload", () => ctx.agent.reload())
 
     // G8, G9: compare the reloaded field set with what we replayed. A mismatch is reported
-    // once and held out of the next projection, which then omits it from the map.
-    if (agentReloaded.ok && currentAgentPayload !== undefined) {
+    // once and held out of the next projection, which then omits it from the map. Never audit
+    // a payload the transform never replayed: with the registration rejected, every entry is
+    // absent, and holding them all out would defeat the retry on the next refresh.
+    if (agentReloaded.ok && currentAgentPayload !== undefined && agentRegistration !== undefined) {
       const payload = currentAgentPayload
       const audited = await runStage(diagnostics, "agent-audit", () =>
         auditReloadedAgents({ agents: payload, shadowed: shadowedAgents, list: () => ctx.agent.list() }),
