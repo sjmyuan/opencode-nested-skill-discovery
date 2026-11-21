@@ -138,17 +138,18 @@ indexed from it, file and config alike, before the agent's own rules
 
 Both agent sources are indexed, family-filtered and minted as
 `nested.<scopeToken>.<agentToken>`. The index stage projects each admitted candidate into one
-frozen payload — qualified sanitized name, sanitized description, the authored `mode` and
-`hidden` verbatim, else the pair of a same-named agent already in the runtime registry, else
-`primary` and visible; `~`/`$HOME` expanded on the three path actions, the subproject's rules
-before the agent's own — and the single early transform replays it insert-on-miss only
-(`src/agent-project.ts:76-99`, `src/replay.ts:54-115`). Native and config entries are never
-written, `default()` and `remove()` are never called, and the location's rules still land last
-because the host appends them after every transform. After the reload the audit compares the
-full field set — `mode`/`hidden` against the authored value, else the inherited pair, else the
-default — and the seed-plus-ours permission prefix; a mismatch is reported once as
-`agent-shadow-audit:` and the ID is held out, so it leaves the next snapshot by omission
-(`src/agent-audit.ts:44-109`). A nested deny stays advisory: the parent's later allow wins.
+frozen payload — qualified sanitized name, sanitized description, each of `mode` and `hidden`
+verbatim when authored, otherwise that field from a same-named agent already in the runtime
+registry, otherwise `primary` and visible; `~`/`$HOME` expanded on the three path actions, the
+subproject's rules before the agent's own — and the single early transform replays it
+insert-on-miss only (`src/agent-project.ts:76-99`, `src/replay.ts:54-115`). Native and config
+entries are never written, `default()` and `remove()` are never called, and the location's
+rules still land last because the host appends them after every transform. After the reload
+the audit compares the full field set — `mode`/`hidden` against the authored value, else the
+inherited field, else the default — and the seed-plus-ours permission prefix; a mismatch is
+reported once as `agent-shadow-audit:` and the ID is held out, so it leaves the next snapshot
+by omission (`src/agent-audit.ts:44-109`). A nested deny stays advisory: the parent's later
+allow wins.
 
 ## Identity
 

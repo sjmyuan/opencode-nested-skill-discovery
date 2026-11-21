@@ -25,7 +25,8 @@ refresh per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:177`); the implementati
 `src/watch.ts` and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
 projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
 ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes
-and scores its claims C1–C10, reporting an unmet claim as `unproven` rather than green.
+and scores its claims C1–C10: a wrong value is `fail`, an unobservable or timing claim is
+`unproven`, and nothing unmet is silently green.
 
 ## Requirements
 
@@ -110,8 +111,8 @@ any depth inside a `.opencode/agent` or `.opencode/agents` directory, and the `a
 the subproject's four config documents — and a pair sharing a native name merges into one
 entry, the earlier source owning the token. Both sources reach the host map through one early
 `agent.transform`, insert-on-miss only: a native or config entry is never written, and no entry
-is ever removed. An authored `mode` or `hidden` is published as written; when neither is
-authored the entry inherits the pair of a same-named agent already in the runtime registry — a
+is ever removed. An authored `mode` or `hidden` is published as written; a field the entry does
+not author is inherited from a same-named agent already in the runtime registry — a
 builtin such as `general` — and otherwise publishes `primary` and visible. `permissions` and
 `request` are carried from both sources, and the location's own rules are appended last, so a
 nested deny is advisory at the parent. `{file:}` substitution and the config document itself

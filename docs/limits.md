@@ -240,10 +240,11 @@ migrated (`src/agent-decode.ts:51-68`).
 key verbatim — it may contain `/` and is never treated as a path. Both sources reach the host
 map through one early `ctx.agent.transform`: an admitted entry is inserted only when the map
 does not already hold its ID, the location's own rules are appended after ours, and no entry is
-ever removed — a held-out ID leaves the next snapshot by omission, after one reload. An absent
-`mode` or `hidden` inherits the pair of a same-named agent already in the runtime registry — a
-builtin such as `general`, or a host/config agent the pre-registration listing carries — and
-otherwise falls back to `primary` and visible; an authored value always wins.
+ever removed — a held-out ID leaves the next snapshot by omission, after one reload. Each of
+`mode` and `hidden` is inherited from a same-named agent already in the runtime registry when
+the entry does not author it — a builtin such as `general`, or a host/config agent the
+pre-registration listing carries — and otherwise falls back to `primary` and visible; an
+authored value always wins.
 
 ## Worktree families
 
