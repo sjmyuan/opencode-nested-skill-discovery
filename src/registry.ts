@@ -34,7 +34,7 @@ import { persistCommands, persistRegistry } from "./manifest.ts"
 import { resolveNativeAgentRoots, resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { resolveScanLimits } from "./options.ts"
-import { applyAgents, applyRegistry, type ModeSeed } from "./replay.ts"
+import { applyAgents, applyRegistry, buildModeSeed, type ModeSeed } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
 import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory } from "./watch.ts"
 
@@ -345,10 +345,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (!listed.ok) return
     const rows = listed.value.data
     for (const entry of rows) heldAgents.add(String(entry.id))
-    agentSeed = new Map(
-      rows
-        .filter((entry) => !String(entry.id).startsWith("nested."))
-        .map((entry) => [String(entry.id), { mode: entry.mode, hidden: entry.hidden }] as const),
+    agentSeed = buildModeSeed(
+      rows,
+      new Set(currentAgents.map((agent) => agent.id)),
     )
     agentSeeded = true
   }
