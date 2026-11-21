@@ -491,7 +491,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           })
       }
       await registeringAgent
-    } catch (error) {
+    } catch (error) { // unreachable: registeringAgent ends in .catch(reportFailure)
       reportFailure(error)
     }
   }
