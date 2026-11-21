@@ -44,10 +44,13 @@ const idsOf = (entries: ReadonlyArray<{ readonly id: unknown }>): readonly strin
 const namesOf = (entries: ReadonlyArray<{ readonly name: unknown }>): readonly string[] =>
   entries.map((entry) => String(entry.name))
 
+// vscode/extensions/copilot is depth 3 from the workspace; depth is not what these cases assert.
+const DEPTH_5 = { maxDepth: 5 }
+
 describe("conformance: one checkout view per repo family", () => {
   it("C1: the family advertises 8 survivor entries, 0 worktree entries, and no duplicate name", async () => {
     const ws = await buildWorkspace()
-    const fake = fakeContext([], { directory: ws.root })
+    const fake = fakeContext([], { directory: ws.root, options: DEPTH_5 })
 
     const outcome = await createRegistry(fake.ctx).activate()
     const entries = fake.editor.list()
@@ -130,7 +133,7 @@ describe("conformance: one checkout view per repo family", () => {
 
   it("C6: a rescan flips suppression both ways", async () => {
     const ws = await buildWorkspace()
-    const fake = fakeContext([], { directory: ws.root })
+    const fake = fakeContext([], { directory: ws.root, options: DEPTH_5 })
     const registry = createRegistry(fake.ctx)
 
     const first = await registry.activate()
@@ -164,7 +167,7 @@ describe("conformance: one checkout view per repo family", () => {
 
   it("C8: distinct subprojects of one repo never collapse", async () => {
     const ws = await buildWorkspace()
-    const fake = fakeContext([], { directory: ws.root })
+    const fake = fakeContext([], { directory: ws.root, options: DEPTH_5 })
 
     const outcome = await createRegistry(fake.ctx).activate()
     const names = namesOf(fake.editor.list())
@@ -178,7 +181,7 @@ describe("conformance: one checkout view per repo family", () => {
   it("C9: one transform registers the nested view and leaves natives byte-identical", async () => {
     const ws = await buildWorkspace()
     const native = nativeSkill("global-review", "/tmp/native-skills/global-review/SKILL.md")
-    const fake = fakeContext([native], { directory: ws.root })
+    const fake = fakeContext([native], { directory: ws.root, options: DEPTH_5 })
 
     await createRegistry(fake.ctx).activate()
     const entries = fake.editor.list()

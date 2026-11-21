@@ -202,7 +202,7 @@ describe("markers and subproject attribution", () => {
     await f.write("one/two/three/CLAUDE.md")
     await f.write("one/two/three/.claude/skills/deep/SKILL.md")
 
-    const result = await scanSkills({ location: f.root })
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 5 } })
 
     expect(result.candidates[0]?.subproject).toBe("one/two/three")
     expect(result.candidates[0]?.subproject).not.toContain("\\")
@@ -210,22 +210,22 @@ describe("markers and subproject attribution", () => {
 })
 
 describe("depth boundary on subprojects", () => {
-  it("discovers a depth-5 subproject whose skill file sits at depth 7", async () => {
+  it("discovers a depth-2 subproject whose skill root sits at depth 4", async () => {
     const f = await fixture()
-    await f.write("L1/L2/L3/L4/L5/.opencode/skills/deep/SKILL.md")
+    await f.write("L1/L2/.opencode/skills/deep/SKILL.md")
 
     const result = await scanSkills({ location: f.root })
 
     expect(result.truncated).toBe(false)
     expect(result.diagnostics).toEqual([])
     expect(result.candidates).toHaveLength(1)
-    expect(result.candidates[0]?.subproject).toBe("L1/L2/L3/L4/L5")
+    expect(result.candidates[0]?.subproject).toBe("L1/L2")
     expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project"])
   })
 
-  it("hides a subproject that sits at depth 6", async () => {
+  it("hides a subproject that sits at depth 3", async () => {
     const f = await fixture()
-    await f.write("L1/L2/L3/L4/L5/L6/.opencode/skills/six/SKILL.md")
+    await f.write("L1/L2/L3/.opencode/skills/three/SKILL.md")
 
     const result = await scanSkills({ location: f.root })
 
@@ -292,6 +292,18 @@ describe("depth boundary on subprojects", () => {
     expect(result.candidates).toHaveLength(1)
     expect(result.candidates[0]?.subproject).toBe("")
     expect(result.candidates[0]?.markers).toEqual(["opencode-skills", "opencode-project", "git"])
+  })
+
+  it("an explicit maxDepth: 5 restores the depth-5 boundary", async () => {
+    const f = await fixture()
+    await f.write("L1/L2/L3/L4/L5/.opencode/skills/five/SKILL.md")
+    await f.write("L1/L2/L3/L4/L5/L6/.opencode/skills/six/SKILL.md")
+
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 5 } })
+
+    expect(result.truncated).toBe(false)
+    expect(result.diagnostics).toEqual([])
+    expect(result.candidates.map((candidate) => candidate.subproject)).toEqual(["L1/L2/L3/L4/L5"])
   })
 })
 

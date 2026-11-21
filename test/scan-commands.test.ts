@@ -90,7 +90,8 @@ describe("command subproject attribution", () => {
     await f.write("A/team/deep/CLAUDE.md")
     await f.write("A/team/deep/.opencode/command/two.md")
 
-    const result = await scanSkills({ location: f.root })
+    // The nearest-marker claim needs the depth-3 subproject visible; the depth value is not what it asserts.
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 5 } })
     const found = result.commands.map((command) => ({
       name: command.name,
       subproject: command.subproject,
@@ -141,17 +142,17 @@ describe("command scope", () => {
     expect(result.diagnostics).toEqual([])
   })
 
-  it("caps subproject depth at five and never caps depth inside a command root", async () => {
+  it("caps subproject depth at two and never caps depth inside a command root", async () => {
     const f = await fixture()
-    await f.write("L1/L2/L3/L4/L5/.opencode/command/deep/deeper/deepest/x.md")
-    await f.write("L1/L2/L3/L4/L5/L6/.opencode/command/six.md")
+    await f.write("L1/L2/.opencode/command/deep/deeper/deepest/x.md")
+    await f.write("L1/L2/L3/.opencode/command/hidden.md")
 
     const result = await scanSkills({ location: f.root })
 
     expect(result.truncated).toBe(false)
     expect(result.diagnostics).toEqual([])
     expect(result.commands.map((command) => `${command.subproject}:${command.name}`)).toEqual([
-      "L1/L2/L3/L4/L5:deep/deeper/deepest/x",
+      "L1/L2:deep/deeper/deepest/x",
     ])
   })
 

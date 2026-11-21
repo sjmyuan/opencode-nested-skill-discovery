@@ -77,7 +77,8 @@ describe("conformance: invocation parity through the registry", () => {
       "---\ndescription: Tidy the app\n---\nTidy $1 then $2\n\n!`pwd`\n",
     )
     const runner = scriptedRunner([ran("/repo/app\n")])
-    const { fake, registry } = open(ws, {}, runner)
+    // main/packages/app is depth 3 from the workspace; the claim is expansion, forwarding and the shell.
+    const { fake, registry } = open(ws, { options: { maxDepth: 5 } }, runner)
     const nested = await realpath(path.join(ws.root, "main/packages/app"))
     const prompt = {
       text: "app --fast extra",

@@ -56,7 +56,8 @@ const buildLocation = async (): Promise<FamilyWorkspace> => {
 }
 
 const open = (ws: FamilyWorkspace): { readonly fake: FakeContext; readonly registry: Registry } => {
-  const fake = fakeContext([], { directory: ws.root })
+  // main/packages/app is depth 3 from the workspace; the published set, not the depth, is what these cases assert.
+  const fake = fakeContext([], { directory: ws.root, options: { maxDepth: 5 } })
   const host = { session: fake.ctx.session, agent: fake.ctx.agent }
   const shell = { env: {}, platform: "darwin", run: scriptedRunner([]).run }
   return { fake, registry: createRegistry(fake.ctx, { executeCommand: createCommandExecutor(host, { shell }) }) }

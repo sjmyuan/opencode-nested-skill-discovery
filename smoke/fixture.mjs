@@ -28,7 +28,7 @@ export const COMMAND_RELEASE_C =
 export const COMMAND_TIDY_D = "---\ndescription: Tidy the deepest nest\n---\nTidy the nest.\n"
 export const NESTED_AGENT = "---\ndescription: Reviews the deepest nest\nmode: subagent\n---\n# Inspector\n\nThe nest reviewer.\n"
 
-export const COMMAND_NAMES = Object.freeze(["pkg-b:deploy", "pkg-c:release", "pkg-d:deep:nest:tidy"])
+export const COMMAND_NAMES = Object.freeze(["pkg-b:deploy", "pkg-c:release", "pkg-d:nest:tidy"])
 
 const LOCATION_CONFIG = `${JSON.stringify({ skills: ["./pkg-a/.opencode/skills"] }, null, 2)}\n`
 
@@ -40,16 +40,16 @@ export const MATRIX = [
   { path: "pkg-b/.claude/skills/deploy/SKILL.md", content: DEPLOY_B },
   { path: "pkg-c/.agents/skills/tidy/SKILL.md", content: TIDY_C },
   { path: "pkg-d/AGENTS.md", content: "# pkg-d\n" },
-  { path: "pkg-d/deep/nest/.opencode/skill/lint/SKILL.md", content: LINT_D },
-  { path: "pkg-d/deep/nest/AGENTS.md", content: PLACEMENT_INSTRUCTIONS },
-  { path: "pkg-d/deep/nest/opencode.json", content: PLACEMENT_AGENT },
-  { path: "pkg-d/deep/nest/.opencode/agent/inspector.md", content: NESTED_AGENT },
-  { path: "pkg-d/deep/nest/cwd-marker.txt", content: PLACEMENT_CWD },
+  { path: "pkg-d/nest/.opencode/skill/lint/SKILL.md", content: LINT_D },
+  { path: "pkg-d/nest/AGENTS.md", content: PLACEMENT_INSTRUCTIONS },
+  { path: "pkg-d/nest/opencode.json", content: PLACEMENT_AGENT },
+  { path: "pkg-d/nest/.opencode/agent/inspector.md", content: NESTED_AGENT },
+  { path: "pkg-d/nest/cwd-marker.txt", content: PLACEMENT_CWD },
   { path: ".opencode/command/pkg-a:native.md", content: COMMAND_NATIVE },
   { path: "pkg-a/.opencode/command/native.md", content: COMMAND_SHADOWED },
   { path: "pkg-b/.opencode/command/deploy.md", content: COMMAND_DEPLOY_B },
   { path: "pkg-c/.opencode/command/release.md", content: COMMAND_RELEASE_C },
-  { path: "pkg-d/deep/nest/.opencode/command/tidy.md", content: COMMAND_TIDY_D },
+  { path: "pkg-d/nest/.opencode/command/tidy.md", content: COMMAND_TIDY_D },
 ]
 
 export const GLOBAL_MATRIX = [{ path: "skills/global-demo/SKILL.md", content: GLOBAL_DEMO }]

@@ -113,12 +113,12 @@ describe("agent roots", () => {
 
   it("scans a subproject at maxDepth but not at maxDepth + 1", async () => {
     const f = await fixture()
-    await f.write("L1/L2/L3/L4/L5/.opencode/agent/five.md")
-    await f.write("M1/M2/M3/M4/M5/M6/.opencode/agent/six.md")
+    await f.write("L1/L2/.opencode/agent/two.md")
+    await f.write("M1/M2/M3/.opencode/agent/three.md")
 
     const result = await scanSkills({ location: f.root })
 
-    expect(result.agents.map((agent) => agent.subproject)).toEqual(["L1/L2/L3/L4/L5"])
+    expect(result.agents.map((agent) => agent.subproject)).toEqual(["L1/L2"])
   })
 
   it("shares the file budget with skills and commands", async () => {

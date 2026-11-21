@@ -177,7 +177,7 @@ export const DEBOUNCE_MS = 250
 export const PROMPT_THROTTLE_MS = 2_000
 
 export const DEFAULT_SCAN_LIMITS: ScanLimits = {
-  maxDepth: 5,
+  maxDepth: 2,
   maxDirectories: 100_000,
   maxFiles: 5_000,
   maxFileBytes: 131_072,
