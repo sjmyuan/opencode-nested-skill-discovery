@@ -709,10 +709,10 @@ async function claimC6(fixture, server) {
   )
 }
 
-async function createSession(server, fixture) {
+async function createSession(server, fixture, directory = fixture.alias) {
   const created = await request(server.base, server.password, "/api/session", {
     method: "POST",
-    body: { location: { directory: fixture.alias } },
+    body: { location: { directory } },
   })
   if (created.status !== 200 && created.status !== 201) {
     throw new Error(`POST /api/session -> HTTP ${created.status}: ${JSON.stringify(created.body).slice(0, 200)}`)
@@ -1096,6 +1096,60 @@ async function claimC9(fixture, isolation) {
   }
 }
 
+const rowsOf = (body) => (Array.isArray(body) ? body : (body?.data ?? []))
+
+async function claimC10(fixture, server) {
+  const evidenceName = "agent-c10.json"
+  const destination = realpathSync(join(fixture.real, "pkg-d/deep/nest"))
+  const at = (directory) => api(server.base, server.password, "/api/agent", { location: directory })
+  let listed, atDestination
+  try {
+    listed = await at(fixture.alias)
+    atDestination = await at(destination)
+  } catch (error) {
+    writeEvidence(evidenceName, { error: String(error?.message ?? error) })
+    return record("C10", "unproven", `GET /api/agent: ${String(error?.message ?? error).slice(0, 120)}`, evidenceName)
+  }
+  const session = await createSession(server, fixture, destination)
+  const location = rowsOf(listed)
+  const nested = location.filter((entry) => String(entry.name) === "pkg-d/deep/nest/inspector")
+  const source = nested[0]
+  const destinationRows = rowsOf(atDestination)
+  // At the destination the source is native, so it is listed once and the ancestor's `nested.` copy
+  // is not part of that location's map (G10).
+  const once = destinationRows.filter((entry) => String(entry.name) === "inspector")
+  const qualifiedAtDestination = destinationRows.filter(
+    (entry) => String(entry.name) === "pkg-d/deep/nest/inspector",
+  )
+  writeEvidence(evidenceName, {
+    session,
+    destination,
+    locationEntry: source ?? null,
+    locationAgents: location.map((entry) => ({ id: entry.id, name: entry.name, mode: entry.mode, hidden: entry.hidden })),
+    destinationRows: destinationRows.map((entry) => ({ id: entry.id, name: entry.name, mode: entry.mode })),
+  })
+  const problems = []
+  if (nested.length !== 1) problems.push(`location entries named pkg-d/deep/nest/inspector: ${nested.length}`)
+  if (source !== undefined) {
+    if (!ID_SHAPE.test(String(source.id))) problems.push(`id shape ${source.id}`)
+    if (source.mode !== "subagent") problems.push(`mode ${String(source.mode)}`)
+    const first = (source.permissions ?? [])[0]
+    if (JSON.stringify(first) !== JSON.stringify({ action: "*", resource: "*", effect: "allow" })) {
+      problems.push(`first rule ${JSON.stringify(first)}`)
+    }
+  }
+  if (once.length !== 1) problems.push(`destination rows named inspector: ${once.length}`)
+  if (qualifiedAtDestination.length !== 0) problems.push("destination also carries the qualified entry")
+  return record(
+    "C10",
+    problems.length === 0 ? "pass" : "fail",
+    problems.length === 0
+      ? "nested agent registered, qualified, subagent, seed rule first; destination shows it once"
+      : problems.slice(0, 4).join("; "),
+    evidenceName,
+  )
+}
+
 async function suiteSmoke(evidence, keep) {
   const fixture = buildAt()
   const isolation = buildIsolation(fixture)
@@ -1118,6 +1172,7 @@ async function suiteSmoke(evidence, keep) {
       record("C7", "unproven", "skipped after a failed settle", "settle.json")
       record("C8", "unproven", "skipped after a failed settle", "settle.json")
       record("C9", "unproven", "skipped after a failed settle", "settle.json")
+      record("C10", "unproven", "skipped after a failed settle", "settle.json")
       return false
     }
 
@@ -1133,6 +1188,7 @@ async function suiteSmoke(evidence, keep) {
     const c7 = await claimC7(fixture, union.server)
     const c8 = await claimC8(fixture, union.server)
     const c9 = await claimC9(fixture, isolation)
+    const c10 = await claimC10(fixture, union.server)
 
     return (
       c1 === "pass" &&
@@ -1143,7 +1199,8 @@ async function suiteSmoke(evidence, keep) {
       c6 === "pass" &&
       c7 === "pass" &&
       c8 !== "fail" &&
-      c9 !== "fail"
+      c9 !== "fail" &&
+      c10 === "pass"
     )
   } finally {
     await union.server.stop()

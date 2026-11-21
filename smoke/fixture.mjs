@@ -26,6 +26,7 @@ export const COMMAND_DEPLOY_B = "---\ndescription: Deploy to a target\n---\nDepl
 export const COMMAND_RELEASE_C =
   "---\ndescription: Release with a mapped model\nmodel: {providerID: deepseek, model: deepseek-flash}\n---\nRelease $ARGUMENTS\n"
 export const COMMAND_TIDY_D = "---\ndescription: Tidy the deepest nest\n---\nTidy the nest.\n"
+export const NESTED_AGENT = "---\ndescription: Reviews the deepest nest\nmode: subagent\n---\n# Inspector\n\nThe nest reviewer.\n"
 
 export const COMMAND_NAMES = Object.freeze(["pkg-b:deploy", "pkg-c:release", "pkg-d:deep:nest:tidy"])
 
@@ -42,6 +43,7 @@ export const MATRIX = [
   { path: "pkg-d/deep/nest/.opencode/skill/lint/SKILL.md", content: LINT_D },
   { path: "pkg-d/deep/nest/AGENTS.md", content: PLACEMENT_INSTRUCTIONS },
   { path: "pkg-d/deep/nest/opencode.json", content: PLACEMENT_AGENT },
+  { path: "pkg-d/deep/nest/.opencode/agent/inspector.md", content: NESTED_AGENT },
   { path: "pkg-d/deep/nest/cwd-marker.txt", content: PLACEMENT_CWD },
   { path: ".opencode/command/pkg-a:native.md", content: COMMAND_NATIVE },
   { path: "pkg-a/.opencode/command/native.md", content: COMMAND_SHADOWED },
