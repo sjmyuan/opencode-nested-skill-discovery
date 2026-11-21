@@ -17,6 +17,8 @@ import { composeName, sanitizeText } from "./names.ts"
 
 export interface AdmittedAgent {
   readonly id: string
+  /** The native name — the `agents` map key, or the file path name; G4's match key. */
+  readonly nativeName: string
   readonly name: string
   readonly description?: string
   readonly system?: string
@@ -75,6 +77,7 @@ export function projectAgent(candidate: IndexedAgent, home: string): AdmittedAge
   const request = candidate.request
   return {
     id: candidate.id,
+    nativeName: candidate.name,
     name: composeName(candidate.subproject, candidate.name),
     ...(candidate.description === undefined
       ? {}

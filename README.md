@@ -25,7 +25,8 @@ refresh per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:177`); the implementati
 `src/watch.ts` and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
 projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
 ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes
-and scores its claims C1–C8, reporting an unmet timing claim as `unproven` rather than green.
+and scores its claims C1–C10: a wrong value is `fail`, an unobservable or timing claim is
+`unproven`, and nothing unmet is silently green.
 
 ## Requirements
 
@@ -101,6 +102,23 @@ after that activation is replaced silently until the next one; a command file th
 later is reported by the audit and leaves the next snapshot. There is no `command` permission
 action, so a published command needs no rule of its own.
 
+## Agents
+
+A subproject is marked the same way a skill subproject is — `AGENTS.md`, `CLAUDE.md`, a `.git`
+or `.hg`, or the `opencode-project` marker: a listed `.opencode` directory, or a file named
+exactly `opencode.json` or `opencode.jsonc`. Agents come from two sources — markdown files at
+any depth inside a `.opencode/agent` or `.opencode/agents` directory, and the `agents` map of
+the subproject's four config documents — and a pair sharing a native name merges into one
+entry, the earlier source owning the token. Both sources reach the host map through one early
+`agent.transform`, insert-on-miss only: a native or config entry is never written, and no entry
+is ever removed. An authored `mode` or `hidden` is published as written; a field the entry does
+not author is inherited from a same-named agent already in the runtime registry — a
+builtin such as `general` — and otherwise publishes `primary` and visible. `permissions` and
+`request` are carried from both sources, and the location's own rules are appended last, so a
+nested deny is advisory at the parent. `{file:}` substitution and the config document itself
+are confined to the subproject: an outward reference substitutes nothing and is named in one
+`agent-skip:` line, and a symlinked document is refused with one `config-symlink:` line.
+
 ## Subagent placement
 
 `subagent` takes an optional `directory`. With it, the child session moves there before this
@@ -130,7 +148,7 @@ all. The `nested.` prefix is a naming convention, not a policy boundary.
 | Limit | Value |
 |---|---|
 | Subproject depth | 5 directories below the workspace at the default; unbounded inside an opened skill root |
-| Scan budgets | 100,000 directories · 5,000 skill and command files · 128 KiB per file · 16 MiB total (defaults) |
+| Scan budgets | 100,000 directories · 5,000 skill, command, agent and config-document files · 128 KiB per file · 16 MiB total (defaults) |
 | Skill display caps | name 80 code points · description 500; a command description is never capped |
 | `autoinvoke: false` | hidden from the model's guidance block, still user-invocable |
 | Composer and prompt | `@<id>` in the menu; `Call tool skill` on approval, ID in **Always allow** |

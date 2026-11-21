@@ -3,9 +3,9 @@
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The five
 scan budgets are **defaults** declared in `src/contracts.ts:179-185` and each one is
 overridable from the plugin entry's `options` object: the registry resolves them once at
-construction (`src/options.ts:34-51`, `src/registry.ts:351`) and hands the same object to the
-skill scan (`src/registry.ts:619-624`) and to the native command-name walk
-(`src/registry.ts:747`). An auto-discovered directory plugin receives `{}`, so zero-config
+construction (`src/options.ts:34-51`, `src/registry.ts:360`) and hands the same object to the
+skill scan (`src/registry.ts:635-642`) and to the native command-name walk
+(`src/registry.ts:766`). An auto-discovered directory plugin receives `{}`, so zero-config
 behaviour is the defaults — apart from the raised directory budget below.
 
 ## Summary
@@ -14,9 +14,9 @@ behaviour is the defaults — apart from the raised directory budget below.
 |---|---|---|
 | Subproject depth | 5 directories below the location (default) | a depth-6 subproject is invisible at the default |
 | Directories scanned | 100,000 (default) | scan stops, partial index advertised |
-| Skill and command files | 5,000 | scan stops, partial index advertised |
-| One skill or command file | 128 KiB | that file is skipped, scan continues |
-| Total skill and command bytes | 16 MiB | scan stops, partial index advertised |
+| Skill, command, agent and config-document files | 5,000 | scan stops, partial index advertised |
+| One skill, command, agent or config-document file | 128 KiB | that file is skipped, scan continues |
+| Total skill, command, agent and config-document bytes | 16 MiB | scan stops, partial index advertised |
 | Diagnostics | 200 in the scan, 200 in the refresh outcome | truncated with a summary line, scan continues |
 | Native command-name walk | shares the directory and file budgets above; reads no content | a truncated walk stops early and reports `budget-*`; its `complete` flag is computed and never surfaced (`src/command-native.ts:129-133`) |
 | Display name | 80 code points | leading path segments dropped behind `…/` |
@@ -66,9 +66,9 @@ form carries them — a bare string names the source but passes no options:
 |---|---|---|
 | `maxDepth` | 5 | subproject directories below the location |
 | `maxDirectories` | 100,000 | directories visited by the scan, and by the native command walk |
-| `maxFiles` | 5,000 | admitted skill and command files, both walks |
-| `maxFileBytes` | 131,072 (128 KiB) | one skill or command file |
-| `maxTotalBytes` | 16,777,216 (16 MiB) | all admitted bytes together |
+| `maxFiles` | 5,000 | admitted skill, command, agent and config-document files, both walks |
+| `maxFileBytes` | 131,072 (128 KiB) | one skill, command, agent or config-document file |
+| `maxTotalBytes` | 16,777,216 (16 MiB) | all admitted skill, command, agent and config-document bytes |
 
 Resolution is fail-safe per key (`src/options.ts:34-51`): a value that is not a finite number
 `>= 0` — a string such as `"100000"`, `null`, `true`, `NaN`, `Infinity`, a negative — falls
@@ -174,7 +174,7 @@ The walk only stats them; the index stage reads them. Reading mirrors native for
 — substituted raw, then re-substituted with the JSON-escaped value when the raw pass leaves
 the document unparseable — and the document is parsed as JSONC. Only three keys are read —
 `agents`, the document's own top-level `permissions`, and `default_agent`
-(`src/agent-config.ts:55-59`). Every other key is ignored silently.
+(`src/agent-config.ts:60-63`). Every other key is ignored silently.
 
 `{file:path}` is confined, not trusted. A reference resolves only inside the realpath of the
 marked directory `d`: a `~`-leading or absolute token, a relative escape, a missing, broken
@@ -194,7 +194,7 @@ Merging follows native document order — `opencode.json` < `opencode.jsonc` <
 (`src/contracts.ts:226-242`). A field applies when the source sets it, so a later source
 overrides and an absent field never erases one; `permissions` append and `request` keys
 assign. One entry remains per (subproject, native name), the first source owns the token, and
-a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:106-206`).
+a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:105-205`).
 
 `default_agent` is never applied: it is decoded only to emit one
 `agent-default-ignored: <document>` line. A document's read set is checked in a fixed order
@@ -240,7 +240,11 @@ migrated (`src/agent-decode.ts:51-68`).
 key verbatim — it may contain `/` and is never treated as a path. Both sources reach the host
 map through one early `ctx.agent.transform`: an admitted entry is inserted only when the map
 does not already hold its ID, the location's own rules are appended after ours, and no entry is
-ever removed — a held-out ID leaves the next snapshot by omission, after one reload.
+ever removed — a held-out ID leaves the next snapshot by omission, after one reload. Each of
+`mode` and `hidden` is inherited from a same-named agent already in the runtime registry when
+the entry does not author it — a builtin such as `general`, or a host/config agent the
+pre-registration listing carries — and otherwise falls back to `primary` and visible; an
+authored value always wins.
 
 ## Worktree families
 
@@ -346,7 +350,7 @@ the walk (`src/scan.ts:562-602`, `771-776`). A single file over 128 KiB is skipp
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:627`).
+(`src/registry.ts:644`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:70`, `125-133`, ending
 in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:91-96`),
@@ -376,7 +380,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:848-854`, `src/registry.ts:247-263`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:44`, `src/registry.ts:969-1025`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:871-873`, `src/registry.ts:247-263`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:44`, `src/registry.ts:977-1052`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | the five scan budgets are plugin options on the `opencode.json` entry (object form); display caps and the command-template ceiling stay constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -399,5 +403,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:951-967`, `src/registry.ts:924-928`, `src/registry.ts:901-929`). Details in
+(`src/registry.ts:909`, `src/registry.ts:927-955`, `src/registry.ts:986-990`). Details in
 [architecture.md](architecture.md#refresh-model).

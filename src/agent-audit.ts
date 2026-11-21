@@ -1,6 +1,7 @@
 import { Agent } from "@opencode/schema/agent"
 import type { Permission } from "@opencode/schema/permission"
 import type { AdmittedAgent } from "./agent-project.ts"
+import type { ModeSeed } from "./replay.ts"
 
 /**
  * The post-reload agent audit (ADR agent G8, G9; C5).
@@ -30,6 +31,8 @@ export interface ListedAgent {
 export interface AuditAgentsInput {
   readonly agents: readonly AdmittedAgent[]
   readonly shadowed: ReadonlySet<string>
+  /** The same pre-registration seed the replay inherited from, so the expectation is not looser. */
+  readonly seed: ModeSeed
   readonly list: () => Promise<{ readonly data: readonly ListedAgent[] }>
 }
 
@@ -48,7 +51,7 @@ export async function auditReloadedAgents(input: AuditAgentsInput): Promise<Audi
     if (input.shadowed.has(agent.id)) continue
 
     const row = byId.get(agent.id)
-    if (row !== undefined && survives(agent, row)) continue
+    if (row !== undefined && survives(agent, row, input.seed)) continue
 
     shadowed.push(agent.id)
     diagnostics.push(`agent-shadow-audit: ${agent.id}`)
@@ -61,10 +64,13 @@ export async function auditReloadedAgents(input: AuditAgentsInput): Promise<Audi
  * The published ruleset starts with the insert seed's four rules, then ours; anything after is
  * the location's own suffix (D7). A rule inserted, removed or reordered inside our prefix is a
  * mismatch, and so is any field a later producer changed (D8 compares `headers`/`body` only).
+ * The expected `mode`/`hidden` follows the replay's own order — authored, then the inherited
+ * pair, then the default — so an entry G4 gave a pair is not reported as edited.
  */
-function survives(agent: AdmittedAgent, row: ListedAgent): boolean {
-  if ((row.mode ?? "primary") !== (agent.mode ?? "primary")) return false
-  if ((row.hidden ?? false) !== (agent.hidden ?? false)) return false
+function survives(agent: AdmittedAgent, row: ListedAgent, seed: ModeSeed): boolean {
+  const inherited = seed.get(agent.nativeName)
+  if ((row.mode ?? "primary") !== (agent.mode ?? inherited?.mode ?? "primary")) return false
+  if ((row.hidden ?? false) !== (agent.hidden ?? inherited?.hidden ?? false)) return false
   if (row.system !== agent.system) return false
   if (row.description !== agent.description) return false
   if (row.steps !== agent.steps) return false

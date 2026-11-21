@@ -45,16 +45,27 @@ export function applyRegistry(
   return diagnostics
 }
 
+/** The pre-registration listing's `mode`/`hidden` per ID; a `nested.` ID is never in it (G4). */
+export type ModeSeed = ReadonlyMap<
+  string,
+  { readonly mode: "subagent" | "primary" | "all"; readonly hidden: boolean }
+>
+
 /**
- * Insert-on-miss replay of the agent payload (ADR agent G1, G8).
+ * Insert-on-miss replay of the agent payload (ADR agent G1, G4, G8).
  *
  * `update` is the only write: the host seeds a missing ID with `Agent.Info.default` and the
  * config plugin appends the location's rules after every transform, so our rules must go last
  * among ours and the parent's stay later still. An ID the map already returns is left alone —
  * native and config entries are never overwritten — and neither `default` nor `remove` is ever
- * called. Verification runs per entry, so one bad row never costs its siblings.
+ * called. Verification runs per entry, so one bad row never costs its siblings. A source that
+ * authors neither `mode` nor `hidden` inherits the pair of the same-named entry the seed carries.
  */
-export function applyAgents(editor: AgentEditor, agents: readonly AdmittedAgent[] | undefined): readonly string[] {
+export function applyAgents(
+  editor: AgentEditor,
+  agents: readonly AdmittedAgent[] | undefined,
+  seed: ModeSeed,
+): readonly string[] {
   if (agents === undefined) return []
 
   const diagnostics: string[] = []
@@ -84,8 +95,13 @@ export function applyAgents(editor: AgentEditor, agents: readonly AdmittedAgent[
             ...(entry.model.variant === undefined ? {} : { variant: entry.model.variant }),
           } as Agent.Info["model"]
         if (entry.steps !== undefined) agent.steps = entry.steps as Agent.Info["steps"]
-        if (entry.mode !== undefined) agent.mode = entry.mode
-        if (entry.hidden !== undefined) agent.hidden = entry.hidden
+        // G4: a source that authors neither inherits the pair of the same-named entry the
+        // pre-registration seed carries; an authored value still wins.
+        const inherited = seed.get(entry.nativeName)
+        const mode = entry.mode ?? inherited?.mode
+        const hidden = entry.hidden ?? inherited?.hidden
+        if (mode !== undefined) agent.mode = mode
+        if (hidden !== undefined) agent.hidden = hidden
         agent.permissions.push(...entry.permissions)
         Object.assign(agent.request.headers, entry.request.headers)
         Object.assign(agent.request.body, entry.request.body)

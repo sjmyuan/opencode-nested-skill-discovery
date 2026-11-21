@@ -10,9 +10,13 @@ vi.mock("../src/replay.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/replay.ts")>()
   return {
     ...actual,
-    applyAgents: (editor: Parameters<typeof actual.applyAgents>[0], agents: Parameters<typeof actual.applyAgents>[1]) => {
+    applyAgents: (
+      editor: Parameters<typeof actual.applyAgents>[0],
+      agents: Parameters<typeof actual.applyAgents>[1],
+      seed: Parameters<typeof actual.applyAgents>[2],
+    ) => {
       if (replayControl.payloadError !== undefined) throw replayControl.payloadError
-      return actual.applyAgents(editor, agents)
+      return actual.applyAgents(editor, agents, seed)
     },
   }
 })
