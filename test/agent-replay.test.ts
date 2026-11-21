@@ -66,7 +66,7 @@ function recordingEditor(initial: readonly Row[] = [], insert: Partial<Row> = {}
 
 function admitted(overrides: Partial<AdmittedAgent> = {}): AdmittedAgent {
   return {
-    id: "nested.one.token-translator",
+    id: "one/translator",
     nativeName: "translator",
     name: "A/translator",
     permissions: [],
@@ -79,9 +79,9 @@ describe("insert on miss", () => {
   it("updates every absent ID in ID order and writes the authored fields", () => {
     const { editor, rows, calls } = recordingEditor()
     const payload = [
-      admitted({ id: "nested.b.token", name: "A/second" }),
+      admitted({ id: "b/second", name: "A/second" }),
       admitted({
-        id: "nested.a.token",
+        id: "a/first",
         name: "A/first",
         system: "own prompt",
         description: "a description",
@@ -95,9 +95,9 @@ describe("insert on miss", () => {
     const diagnostics = applyAgents(editor, payload, new Map())
 
     expect(diagnostics).toEqual([])
-    expect(calls).toEqual(["nested.a.token", "nested.b.token"])
-    expect(rows.get("nested.a.token")).toEqual({
-      id: "nested.a.token",
+    expect(calls).toEqual(["a/first", "b/second"])
+    expect(rows.get("a/first")).toEqual({
+      id: "a/first",
       name: "A/first",
       system: "own prompt",
       description: "a description",
@@ -115,8 +115,8 @@ describe("insert on miss", () => {
 
     applyAgents(editor, [admitted()], new Map())
 
-    expect(rows.get("nested.one.token-translator")?.mode).toBe("primary")
-    expect(rows.get("nested.one.token-translator")?.hidden).toBe(false)
+    expect(rows.get("one/translator")?.mode).toBe("primary")
+    expect(rows.get("one/translator")?.hidden).toBe(false)
   })
 })
 
@@ -128,14 +128,14 @@ describe("inheritance (G4)", () => {
 
     applyAgents(editor, [admitted()], seed)
 
-    expect(rows.get("nested.one.token-translator")?.mode).toBe("subagent")
-    expect(rows.get("nested.one.token-translator")?.hidden).toBe(true)
+    expect(rows.get("one/translator")?.mode).toBe("subagent")
+    expect(rows.get("one/translator")?.hidden).toBe(true)
   })
 })
 
 describe("no overwrite", () => {
   it("skips an ID the editor already returns and leaves it byte-identical", () => {
-    const existing = seedRow("nested.one.token-translator", { name: "native", mode: "subagent" })
+    const existing = seedRow("one/translator", { name: "native", mode: "subagent" })
     const before = JSON.stringify(existing)
     const { editor, calls } = recordingEditor([existing])
 
@@ -153,7 +153,7 @@ describe("authority", () => {
 
     applyAgents(editor, [admitted({ permissions: [{ action: "read", resource: "a/**", effect: "deny" }] })], new Map())
 
-    expect(rows.get("nested.one.token-translator")?.permissions).toEqual([
+    expect(rows.get("one/translator")?.permissions).toEqual([
       ...SEED_RULES,
       { action: "read", resource: "a/**", effect: "deny" },
     ])
@@ -166,11 +166,11 @@ describe("authority", () => {
 
     applyAgents(
       editor,
-      [admitted({ id: "nested.one.token-translator", request: { headers: { "x-a": "1" }, body: { temperature: 0.2 } } })],
+      [admitted({ id: "one/translator", request: { headers: { "x-a": "1" }, body: { temperature: 0.2 } } })],
       new Map(),
     )
 
-    expect(rows.get("nested.one.token-translator")?.request).toEqual({
+    expect(rows.get("one/translator")?.request).toEqual({
       settings: { timeout: 5 },
       headers: { "x-seed": "s", "x-a": "1" },
       body: { top_p: 0.9, temperature: 0.2 },
@@ -185,7 +185,7 @@ describe("robustness", () => {
     const diagnostics = applyAgents(editor, [admitted(), admitted()], new Map())
 
     expect(diagnostics).toEqual([])
-    expect(calls).toEqual(["nested.one.token-translator"])
+    expect(calls).toEqual(["one/translator"])
   })
 
   it("reports one failing entry and still applies its siblings", () => {
@@ -193,20 +193,20 @@ describe("robustness", () => {
     const failing = {
       ...editor,
       update: (id: string, update: (row: Row) => void) => {
-        if (id === "nested.b.token") throw new Error("boom")
+        if (id === "b/second") throw new Error("boom")
         editor.update(id, update)
       },
     } as unknown as AgentEditor
 
     const diagnostics = applyAgents(
       failing,
-      [admitted({ id: "nested.a.token" }), admitted({ id: "nested.b.token" })],
+      [admitted({ id: "a/first" }), admitted({ id: "b/second" })],
       new Map(),
     )
 
-    expect(diagnostics).toEqual(["agent-replay: nested.b.token: boom"])
-    expect(calls).toEqual(["nested.a.token"])
-    expect(rows.get("nested.a.token")?.name).toBe("A/translator")
+    expect(diagnostics).toEqual(["agent-replay: b/second: boom"])
+    expect(calls).toEqual(["a/first"])
+    expect(rows.get("a/first")?.name).toBe("A/translator")
   })
 
   it("does nothing for an undefined payload", () => {
