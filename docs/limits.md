@@ -6,17 +6,17 @@ overridable from the plugin entry's `options` object: the registry resolves them
 construction (`src/options.ts:34-51`, `src/registry.ts:360`) and hands the same object to the
 skill scan (`src/registry.ts:635-642`) and to the native command-name walk
 (`src/registry.ts:766`). An auto-discovered directory plugin receives `{}`, so zero-config
-behaviour is the defaults — apart from the raised directory budget below.
+behaviour is the defaults — apart from the raised directory budget and the lowered depth below.
 
 ## Summary
 
 | Limit | Value | Consequence |
 |---|---|---|
-| Subproject depth | 5 directories below the location (default) | a depth-6 subproject is invisible at the default |
+| Subproject depth | 2 directories below the location (default) | a depth-3 subproject is invisible at the default |
 | Directories scanned | 100,000 (default) | scan stops, partial index advertised |
-| Skill, command, agent and config-document files | 5,000 | scan stops, partial index advertised |
-| One skill, command, agent or config-document file | 128 KiB | that file is skipped, scan continues |
-| Total skill, command, agent and config-document bytes | 16 MiB | scan stops, partial index advertised |
+| Skill, command, agent and config-document files | 5,000 (default) | scan stops, partial index advertised |
+| One skill, command, agent or config-document file | 128 KiB (default) | that file is skipped, scan continues |
+| Total skill, command, agent and config-document bytes | 16 MiB (default) | scan stops, partial index advertised |
 | Diagnostics | 200 in the scan, 200 in the refresh outcome | truncated with a summary line, scan continues |
 | Native command-name walk | shares the directory and file budgets above; reads no content | a truncated walk stops early and reports `budget-*`; its `complete` flag is computed and never surfaced (`src/command-native.ts:129-133`) |
 | Display name | 80 code points | leading path segments dropped behind `…/` |
@@ -64,7 +64,7 @@ form carries them — a bare string names the source but passes no options:
 
 | Option | Default | Bounds |
 |---|---|---|
-| `maxDepth` | 5 | subproject directories below the location |
+| `maxDepth` | 2 | subproject directories below the location |
 | `maxDirectories` | 100,000 | directories visited by the scan, and by the native command walk |
 | `maxFiles` | 5,000 | admitted skill, command, agent and config-document files, both walks |
 | `maxFileBytes` | 131,072 (128 KiB) | one skill, command, agent or config-document file |
@@ -104,12 +104,12 @@ diagnostic cap. Everything else is quiet, and the sharp edges are these:
 Depth counts directories between the location and the **subproject** — a directory that
 carries a marker — not directories between the location and the skill file
 (`src/scan.ts:198`, `213`; `src/contracts.ts:146-152`). The cap is the `maxDepth`
-option, defaulting to 5:
+option, defaulting to 2:
 
-- a subproject at depth 5 is discovered at the default, and its `SKILL.md` may sit many
+- a subproject at depth 2 is discovered at the default, and its `SKILL.md` may sit many
   levels deeper (`test/scan.test.ts:213-224`)
-- a subproject at depth 6 is invisible at the default, silently and without a diagnostic
-  (`test/scan.test.ts:226-236`)
+- a subproject at depth 3 is invisible at the default, silently and without a diagnostic
+  (`test/scan.test.ts:226-235`)
 - inside an opened skill root the walk is unbounded, so
   `A/.opencode/skills/a/b/c/d/e/f/SKILL.md` is still found (`test/scan.test.ts:248-260`)
 
