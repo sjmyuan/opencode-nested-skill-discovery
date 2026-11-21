@@ -111,7 +111,8 @@ describe("conformance: advertised union", () => {
     const { fake } = await run()
 
     expect(byName(fake, "pkg-d/nest/lint")).toBeDefined()
-    expect(byName(fake, "pkg-d/deep/nest/lint")).toBeUndefined()
+    // pkgs/d1/d2/d3 is a depth-4 subproject: invisible at the default 2, so nothing under it is named.
+    expect(nested(fake).filter((entry) => String(entry.name).startsWith("pkgs/"))).toEqual([])
     expect(byName(fake, "pkg-d/lint")).toBeUndefined()
     expect(byName(fake, "lint")).toBeUndefined()
   })

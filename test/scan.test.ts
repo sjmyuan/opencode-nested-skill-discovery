@@ -210,7 +210,7 @@ describe("markers and subproject attribution", () => {
 })
 
 describe("depth boundary on subprojects", () => {
-  it("discovers a depth-2 subproject whose skill file sits at depth 4", async () => {
+  it("discovers a depth-2 subproject whose skill root sits at depth 4", async () => {
     const f = await fixture()
     await f.write("L1/L2/.opencode/skills/deep/SKILL.md")
 
