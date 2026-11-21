@@ -125,7 +125,7 @@ describe("conformance: advertised union", () => {
     expect(tidy?.autoinvoke).toBe(false)
   })
 
-  it("hides the depth-3 subproject and every skill inside a native root", async () => {
+  it("hides the depth-4 subproject and every skill inside a native root", async () => {
     const { fixture, fake } = await run()
     const paths = nested(fake).map((entry) => entry.path)
     const root = fixture.realRoot
