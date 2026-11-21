@@ -137,18 +137,18 @@ const ANCHORS: ReadonlyArray<{
   readonly ranges: string
   readonly marker: string
 }> = [
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "570-925", marker: "const runRefresh = async" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "569-924", marker: "const runRefresh = async" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "91-96", marker: "function capDiagnostics" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "100-111", marker: "async function runStage" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "201-210", marker: "export interface RefreshOutcome" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "840-849", marker: 'runStage(diagnostics, "command-audit"' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "839-848", marker: 'runStage(diagnostics, "command-audit"' },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "44", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "1048", marker: "dedupe-deferred: ${reasonOf(error)}" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "851-852", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "1047", marker: "dedupe-deferred: ${reasonOf(error)}" },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "850-851", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },
   { doc: "docs/architecture.md", target: "src/command-audit.ts", ranges: "5-10", marker: "EMPTY_NATIVE_COMMANDS" },
   { doc: "README.md", target: "src/command-execute.ts", ranges: "30-104", marker: "export function createCommandExecutor" },
   { doc: "docs/limits.md", target: "src/command-model.ts", ranges: "58-64", marker: "export function canonicalModelSelection" },
-  { doc: "docs/architecture.md", target: "src/contracts.ts", ranges: "273-275", marker: "commandVersion: (locationToken: string): string =>" },
+  { doc: "docs/architecture.md", target: "src/contracts.ts", ranges: "272-274", marker: "commandVersion: (locationToken: string): string =>" },
   { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "export async function expandCommand" },
   { doc: "README.md", target: "src/command-expand.ts", ranges: "56-150", marker: "return { text: expanded, diagnostics, shellFailed: diagnostics.length > 0 }" },
   { doc: "docs/architecture.md", target: "src/indexer.ts", ranges: "48-50", marker: "export function scopeTokenFor" },
@@ -159,7 +159,7 @@ const ANCHORS: ReadonlyArray<{
   { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "48-50", marker: "export function scopeTokenFor" },
   { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "62-64", marker: "export function skillTokenFor" },
   { doc: "docs/architecture.md", target: "src/scan.ts", ranges: "627-665", marker: "async function collectConfigDocuments" },
-  { doc: "docs/architecture.md", target: "src/agent-index.ts", ranges: "105-205", marker: "export async function indexAgents" },
+  { doc: "docs/architecture.md", target: "src/agent-index.ts", ranges: "107-207", marker: "export async function indexAgents" },
   { doc: "docs/architecture.md", target: "src/agent-project.ts", ranges: "76-99", marker: "export function projectAgent" },
   {
     doc: "docs/architecture.md",

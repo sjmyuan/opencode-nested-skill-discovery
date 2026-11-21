@@ -76,7 +76,7 @@ alias, so `process.cwd()` cannot canonicalise it away.
 | C7 | `session.command` expands `pkg-b:deploy` to `Deploy prod to --fast now`, switches the session to `deepseek/deepseek-flash` for `pkg-c:release`, and answers 404 for `pkg-a:native` |
 | C8 | the real TUI's composer autocomplete shows `/pkg-b:deploy` for a typed `/pkg-b`, attached to the suite server |
 | C9 | a `subagent({directory})` child's **first** model request carries the destination `AGENTS.md`, skill and same-id agent override, with sibling skills absent; the control without `directory` stays at the fixture root |
-| C10 | `GET /api/agent` lists the nested agent file as `pkg-d/nest/inspector` with a `nested.` ID, `mode: subagent` and the leading `* allow` seed rule; the destination location shows the same source exactly once |
+| C10 | `GET /api/agent` lists the nested agent file as `pkg-d/nest/inspector` with the readable ID `pkg-d/nest/inspector`, `mode: subagent` and the leading `* allow` seed rule; the destination location shows the same source exactly once |
 
 Watcher timing is recorded, never asserted. C1 and C3 are scored on the stable capture
 (`skill-settled.json`); `settle.json` records `{ok, attempts, elapsedMs, stableFor}` and

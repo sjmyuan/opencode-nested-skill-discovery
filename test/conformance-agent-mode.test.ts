@@ -63,11 +63,6 @@ const entry = async (fake: FakeContext): Promise<Record<string, unknown>> => {
   return listed[0] as Record<string, unknown>
 }
 
-/** The id shape every case must leave alone: `nested.<scopeToken>.<agentToken>`. */
-const expectNestedId = (value: unknown): void => {
-  expect(String(value)).toMatch(/^nested\.[a-z0-9-]+\.[a-z0-9-]+$/)
-}
-
 describe("authored mode", () => {
   it("publishes all so the host can offer the agent in both surfaces", async () => {
     const h = await harness(oneAgent({ description: "d", mode: "all" }))
@@ -77,7 +72,7 @@ describe("authored mode", () => {
       expect(published.mode).toBe("all")
       expect(published.hidden).toBe(false)
       expect(published.name).toBe("A/writer")
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/writer")
     } finally {
       await h.dispose()
     }
@@ -90,7 +85,7 @@ describe("authored mode", () => {
       const published = await entry(h.fake)
       expect(published.mode).toBe("primary")
       expect(published.hidden).toBe(false)
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/writer")
     } finally {
       await h.dispose()
     }
@@ -103,7 +98,7 @@ describe("authored mode", () => {
       const published = await entry(h.fake)
       expect(published.mode).toBe("subagent")
       expect(published.hidden).toBe(false)
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/writer")
     } finally {
       await h.dispose()
     }
@@ -118,7 +113,7 @@ describe("authored mode", () => {
       // (`packages/schema/src/agent.ts:38-52`, `agents/mode-surfaces#c5`); we publish no mode.
       expect(published.mode).toBe("primary")
       expect(published.hidden).toBe(false)
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/writer")
     } finally {
       await h.dispose()
     }
@@ -171,7 +166,7 @@ describe("inherited mode and visibility (G4)", () => {
       // keyed on the name would leave this `primary`.
       expect(published.mode).toBe("subagent")
       expect(published.hidden).toBe(false)
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/general")
       expect(auditLines(h)).toEqual([])
     } finally {
       await h.dispose()
@@ -199,7 +194,7 @@ describe("inherited mode and visibility (G4)", () => {
       const published = await byName(h.fake, "A/general")
       expect(published.mode).toBe("primary")
       expect(published.hidden).toBe(false)
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/general")
     } finally {
       await h.dispose()
     }
@@ -230,7 +225,7 @@ describe("inherited mode and visibility (G4)", () => {
       // Per field: the authored `mode` wins and the unauthored `hidden` still inherits.
       expect(published.mode).toBe("primary")
       expect(published.hidden).toBe(true)
-      expectNestedId(published.id)
+      expect(published.id).toBe("A/general")
       expect(auditLines(h)).toEqual([])
 
       // Published but unlisted: both surfaces drop it, yet it stays resolvable by ID.
@@ -261,7 +256,7 @@ describe("inherited mode and visibility (G4)", () => {
     }
   })
 
-  it("never matches a runtime ID that starts with nested.", async () => {
+  it("inherits from a native entry whose id starts with nested.", async () => {
     const h = await harness(
       async (fixture) => {
         await fixture.write("A/.opencode/agent/nested.foo.md", "---\ndescription: d\n---\n# Foo\n")
@@ -271,9 +266,11 @@ describe("inherited mode and visibility (G4)", () => {
 
     try {
       const published = await byName(h.fake, "A/nested.foo")
-      expect(published.mode).toBe("primary")
-      expect(published.hidden).toBe(false)
-      expectNestedId(published.id)
+      // A native ID that happens to start with `nested.` is not ours: the seed excludes the
+      // IDs the published snapshot owns, not a prefix (G4).
+      expect(published.mode).toBe("subagent")
+      expect(published.hidden).toBe(true)
+      expect(published.id).toBe("A/nested.foo")
     } finally {
       await h.dispose()
     }

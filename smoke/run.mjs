@@ -1114,8 +1114,8 @@ async function claimC10(fixture, server) {
   const nested = location.filter((entry) => String(entry.name) === "pkg-d/nest/inspector")
   const source = nested[0]
   const destinationRows = rowsOf(atDestination)
-  // At the destination the source is native, so it is listed once and the ancestor's `nested.` copy
-  // is not part of that location's map (G10).
+  // At the destination the source is native, so it is listed once and the ancestor's copy is not
+  // part of that location's map (G10).
   const once = destinationRows.filter((entry) => String(entry.name) === "inspector")
   const qualifiedAtDestination = destinationRows.filter(
     (entry) => String(entry.name) === "pkg-d/nest/inspector",
@@ -1129,7 +1129,7 @@ async function claimC10(fixture, server) {
   const problems = []
   if (nested.length !== 1) problems.push(`location entries named pkg-d/nest/inspector: ${nested.length}`)
   if (source !== undefined) {
-    if (!ID_SHAPE.test(String(source.id))) problems.push(`id shape ${source.id}`)
+    if (String(source.id) !== "pkg-d/nest/inspector") problems.push(`id ${String(source.id)}, expected pkg-d/nest/inspector`)
     if (source.mode !== "subagent") problems.push(`mode ${String(source.mode)}`)
     const first = (source.permissions ?? [])[0]
     if (JSON.stringify(first) !== JSON.stringify({ action: "*", resource: "*", effect: "allow" })) {

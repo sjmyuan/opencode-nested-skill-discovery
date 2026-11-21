@@ -3,17 +3,17 @@ import { realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { afterAll, afterEach, describe, expect, it } from "vitest"
 import { CONFIG_DOCUMENT_ORDER, DEFAULT_SCAN_LIMITS, MAX_ID_LENGTH, type AgentCandidate } from "../src/contracts.ts"
-import { agentTokenFor, indexAgents, type IndexedAgent } from "../src/agent-index.ts"
+import { agentIdFor, indexAgents, type IndexedAgent } from "../src/agent-index.ts"
 import { createFamilyPass, type FamilyPass } from "../src/family.ts"
-import { scopeTokenFor, slug } from "../src/indexer.ts"
 import { scanSkills } from "../src/scan.ts"
 import { createFamilyWorkspace, type FamilyWorkspace } from "./support/family-fixtures.ts"
 import { createFixture, type ScanFixture } from "./support/scan-fixtures.ts"
 
 /**
- * F16 Step 6 (ADR agent A6, A7, A8, A11, A14): one entry per (subproject, native name)
+ * F16 Step 6 / F20 (ADR agent A6, A7, A8, A11, A14): one entry per (subproject, native name)
  * across both sources, merged in native document order, family-filtered before the ID is
- * minted, and identified by `nested.<scopeToken>.<agentToken>`.
+ * minted, and identified by the readable `<subproject path>/<native name>` — trimmed past 96
+ * characters to an 87-character prefix plus the owner's hash, never ending the prefix on `/`.
  */
 
 const cleanups: Array<() => Promise<void>> = []
@@ -79,7 +79,7 @@ describe("native names and identity", () => {
     expect(result.diagnostics).toEqual([])
   })
 
-  it("hashes a file's realpath and the document's realpath plus the key", async () => {
+  it("mints <subproject>/<native name> from both sources, with no owner hash in the base form", async () => {
     const f = await fixture()
     await f.write("A/opencode.json", JSON.stringify({ agents: { translator: { description: "d" } } }))
     const file = await f.write("A/.opencode/agent/writer.md", "---\ndescription: x\n---\nbody\n")
@@ -88,17 +88,11 @@ describe("native names and identity", () => {
     const config = byName(result.agents).translator
     const fileAgent = byName(result.agents).writer
 
-    const documentReal = await realpath(join(f.root, "A/opencode.json"))
-    expect(config?.id).toBe(
-      `nested.${scopeTokenFor(await realpath(join(f.root, "A")))}.${slug("translator", 40)}-${sha8(`${documentReal}#translator`)}`,
-    )
-    expect(fileAgent?.id).toBe(
-      `nested.${scopeTokenFor(await realpath(join(f.root, "A")))}.${slug("writer", 40)}-${sha8(await realpath(file))}`,
-    )
-    // Same native name, different hash input: the two tokens never collide.
-    expect(agentTokenFor("translator", { kind: "config", configRealPath: documentReal, key: "translator" })).not.toBe(
-      agentTokenFor("translator", { kind: "file", realPath: await realpath(file) }),
-    )
+    expect(config?.id).toBe("A/translator")
+    expect(fileAgent?.id).toBe("A/writer")
+    // A7: the owner hash appears only past 96 characters, so the owner never reaches the base.
+    expect(agentIdFor("A", "translator", await realpath(join(f.root, "A/opencode.json")))).toBe("A/translator")
+    expect(agentIdFor("A", "translator", await realpath(file))).toBe("A/translator")
   })
 
   it("keeps every id inside the grammar and the 96-character bound", async () => {
@@ -112,11 +106,56 @@ describe("native names and identity", () => {
 
     expect(result.agents).toHaveLength(2)
     for (const agent of result.agents) {
-      expect(agent.id).toMatch(/^nested\.[a-z0-9-]+\.[a-z0-9-]+$/)
-      expect(agent.id.length).toBeLessThanOrEqual(MAX_ID_LENGTH)
+      expect(agent.id).toMatch(/^\S+\/\S+$/)
+      expect(agent.id.startsWith("nested.")).toBe(false)
+      expect(Array.from(agent.id).length).toBeLessThanOrEqual(MAX_ID_LENGTH)
       expect(agent.id).not.toContain("*")
       expect(agent.id).not.toContain("?")
     }
+    expect(result.agents.map((agent) => agent.id).sort()).toEqual([
+      `${subproject}/${"a".repeat(40)}`,
+      `${subproject}/${"b".repeat(40)}`,
+    ])
+  })
+
+  it("appends the owner hash only past 96 characters — file owner", async () => {
+    const f = await fixture()
+    const name = "a".repeat(75)
+    const file = await f.write(`pkg-long-name/inner-project/.opencode/agent/${name}.md`, "---\ndescription: d\n---\nbody\n")
+
+    const result = await index(f)
+    const entry = byName(result.agents)[name]
+    const prefix = Array.from(`pkg-long-name/inner-project/${name}`).slice(0, 87).join("")
+
+    expect(entry?.id).toBe(`${prefix}-${sha8(await realpath(file))}`)
+    expect(Array.from(String(entry?.id))).toHaveLength(96)
+  })
+
+  it("appends the owner hash only past 96 characters — config owner", async () => {
+    const f = await fixture()
+    const subproject = "s".repeat(24)
+    const key = "c".repeat(80)
+    const document = await f.write(`${subproject}/opencode.json`, JSON.stringify({ agents: { [key]: { description: "d" } } }))
+
+    const result = await index(f)
+    const prefix = Array.from(`${subproject}/${key}`).slice(0, 87).join("")
+
+    expect(byName(result.agents)[key]?.id).toBe(`${prefix}-${sha8(await realpath(document))}`)
+    expect(Array.from(String(byName(result.agents)[key]?.id))).toHaveLength(96)
+  })
+
+  it("never leaves the trimmed prefix ending on a slash", async () => {
+    const f = await fixture()
+    // 86 characters of subproject path: the naive 87-character slice ends on its `/`.
+    const subproject = `${"p".repeat(43)}/${"q".repeat(42)}`
+    const key = "k".repeat(20)
+    const document = await f.write(`${subproject}/opencode.json`, JSON.stringify({ agents: { [key]: { description: "d" } } }))
+
+    const id = String(byName((await index(f)).agents)[key]?.id)
+
+    expect(id).not.toContain("/-")
+    expect(Array.from(id)).toHaveLength(95)
+    expect(id).toBe(`${Array.from(`${subproject}/${key}`).slice(0, 86).join("")}-${sha8(await realpath(document))}`)
   })
 
   it("gives two subprojects that declare the same name distinct ids", async () => {
@@ -129,9 +168,8 @@ describe("native names and identity", () => {
     expect(result.agents).toHaveLength(2)
     const [first, second] = result.agents
     expect(first?.name).toBe("shared")
-    expect(first?.id).not.toBe(second?.id)
-    expect(first?.id).toContain(scopeTokenFor(await realpath(join(f.root, "A"))))
-    expect(second?.id).toContain(scopeTokenFor(await realpath(join(f.root, "B"))))
+    expect(first?.id).toBe("A/shared")
+    expect(second?.id).toBe("B/shared")
   })
 
   it("sorts by id and is byte-identical for a reversed input", async () => {

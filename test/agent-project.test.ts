@@ -13,7 +13,7 @@ const HOME = "/home/test"
 
 function candidate(overrides: Partial<IndexedAgent> = {}): IndexedAgent {
   return {
-    id: "nested.scope.token-writer",
+    id: "A/writer",
     name: "writer",
     canonicalPath: "/root/A/.opencode/agent/writer.md",
     subproject: "A",
@@ -47,7 +47,7 @@ describe("carried fields", () => {
     )
 
     expect(projected).toEqual({
-      id: "nested.scope.token-writer",
+      id: "A/writer",
       nativeName: "writer",
       name: "A/writer",
       system: "own prompt",
@@ -92,7 +92,7 @@ describe("name", () => {
     expect(Array.from(projected.name)).toHaveLength(80)
     expect(projected.name.startsWith("…/")).toBe(true)
     expect(projected.name).not.toBe(projected.id)
-    expect(projected.id).toBe("nested.scope.token-writer")
+    expect(projected.id).toBe("A/writer")
   })
 })
 
@@ -258,31 +258,80 @@ describe("admission", () => {
   it("does not treat a same-name pair in two subprojects as a skip", () => {
     const result = admitAgents({
       agents: [
-        candidate({ id: "nested.one.token", subproject: "A", subprojectRealPath: "/root/A" }),
-        candidate({ id: "nested.two.token", subproject: "B", subprojectRealPath: "/root/B" }),
+        candidate({ id: "A/one", name: "one", subproject: "A", subprojectRealPath: "/root/A" }),
+        candidate({ id: "B/two", name: "two", subproject: "B", subprojectRealPath: "/root/B" }),
       ],
       home: HOME,
       held,
       display,
     })
 
-    expect(result.admitted.map((agent) => agent.name)).toEqual(["A/writer", "B/writer"])
+    expect(result.admitted.map((agent) => agent.name)).toEqual(["A/one", "B/two"])
     expect(result.diagnostics).toEqual([])
+  })
+
+  it("refuses a wildcard in the composed id", () => {
+    const result = admitAgents({
+      agents: [
+        candidate({ id: "A/star*", name: "star*", canonicalPath: "/root/A/.opencode/agent/star*.md" }),
+        candidate({ id: "A/q?", name: "q?", canonicalPath: "/root/A/.opencode/agent/q?.md" }),
+        candidate({ id: "A/plain", name: "plain", canonicalPath: "/root/A/.opencode/agent/plain.md" }),
+      ],
+      home: HOME,
+      held,
+      display,
+    })
+
+    expect(result.admitted.map((agent) => agent.id)).toEqual(["A/plain"])
+    expect(result.diagnostics).toEqual([
+      "agent-skip: wildcard A/.opencode/agent/q?.md",
+      "agent-skip: wildcard A/.opencode/agent/star*.md",
+    ])
+  })
+
+  it("refuses the later of two sources composing one id", () => {
+    const result = admitAgents({
+      agents: [
+        candidate({
+          id: "A/x/y",
+          name: "x/y",
+          description: "from-A",
+          canonicalPath: "/root/A/opencode.json",
+          source: "config",
+        }),
+        candidate({
+          id: "A/x/y",
+          name: "y",
+          description: "from-A-x",
+          canonicalPath: "/root/A/x/.opencode/agent/y.md",
+          subproject: "A/x",
+          subprojectRealPath: "/root/A/x",
+        }),
+      ],
+      home: HOME,
+      held,
+      display,
+    })
+
+    expect(result.admitted).toHaveLength(1)
+    expect(result.admitted[0]?.id).toBe("A/x/y")
+    expect(result.admitted[0]?.description).toBe("from-A")
+    expect(result.diagnostics).toEqual(["agent-id-collision: A/x/y (A/opencode.json + A/x/.opencode/agent/y.md)"])
   })
 })
 
 describe("determinism", () => {
   it("produces ID-sorted, byte-identical output for the same input", () => {
     const agents = [
-      candidate({ id: "nested.b.token", name: "second", canonicalPath: "/root/A/second.md" }),
-      candidate({ id: "nested.a.token", name: "first", canonicalPath: "/root/A/first.md" }),
+      candidate({ id: "B/second", name: "second", subproject: "B", subprojectRealPath: "/root/B", canonicalPath: "/root/B/second.md" }),
+      candidate({ id: "A/first", name: "first", canonicalPath: "/root/A/first.md" }),
     ]
     const display = (canonicalPath: string): string => canonicalPath.replace("/root/", "")
 
     const first = admitAgents({ agents, home: HOME, held: new Set(), display })
     const second = admitAgents({ agents: [...agents].reverse(), home: HOME, held: new Set(), display })
 
-    expect(first.admitted.map((agent) => agent.id)).toEqual(["nested.a.token", "nested.b.token"])
+    expect(first.admitted.map((agent) => agent.id)).toEqual(["A/first", "B/second"])
     expect(JSON.stringify(first)).toBe(JSON.stringify(second))
   })
 })
