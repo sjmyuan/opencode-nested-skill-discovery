@@ -48,6 +48,7 @@ describe("carried fields", () => {
 
     expect(projected).toEqual({
       id: "nested.scope.token-writer",
+      nativeName: "writer",
       name: "A/writer",
       system: "own prompt",
       description: "a description",

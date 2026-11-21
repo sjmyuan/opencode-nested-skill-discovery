@@ -34,7 +34,7 @@ import { persistCommands, persistRegistry } from "./manifest.ts"
 import { resolveNativeAgentRoots, resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { resolveScanLimits } from "./options.ts"
-import { applyAgents, applyRegistry } from "./replay.ts"
+import { applyAgents, applyRegistry, type ModeSeed } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
 import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory } from "./watch.ts"
 
@@ -298,6 +298,8 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   let agentRegisterReported = false
   let currentAgentPayload: readonly AdmittedAgent[] | undefined
   let agentSeeded = false
+  /** The same read's `mode`/`hidden` per native name; never re-read after the transform (G4). */
+  let agentSeed: ModeSeed = new Map()
   let seeded = false
   let inFlight: Promise<RefreshOutcome> | undefined
   let disposed = false
@@ -334,13 +336,20 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
   /**
    * The pre-registration agent listing (ADR agent G8, C4): read once, before the transform
    * exists. A post-registration read would hold our own entries, so it is never re-read —
-   * the audit grows the set afterwards instead (D6).
+   * the audit grows the set afterwards instead (D6). This read also seeds G4's native-name
+   * map, because a later read would offer our own entries as inherit targets.
    */
   const seedHeldAgents = async (): Promise<void> => {
     if (agentSeeded) return
     const listed = await runStage(agentDiagnostics, "agent-seed", () => ctx.agent.list())
     if (!listed.ok) return
-    for (const entry of listed.value.data) heldAgents.add(String(entry.id))
+    const rows = listed.value.data
+    for (const entry of rows) heldAgents.add(String(entry.id))
+    agentSeed = new Map(
+      rows
+        .filter((entry) => !String(entry.id).startsWith("nested."))
+        .map((entry) => [String(entry.id), { mode: entry.mode, hidden: entry.hidden }] as const),
+    )
     agentSeeded = true
   }
 
@@ -474,7 +483,7 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
           await seedHeldAgents()
           return ctx.agent.transform((editor) => {
             try {
-              agentDiagnostics.push(...applyAgents(editor, currentAgentPayload))
+              agentDiagnostics.push(...applyAgents(editor, currentAgentPayload, agentSeed))
             } catch (error) {
               // Never rethrow: a throw here escapes into the host's replay loop, which disables
               // the whole plugin group — skills and commands with it.
@@ -808,7 +817,12 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (agentReloaded.ok && currentAgentPayload !== undefined && agentRegistration !== undefined) {
       const payload = currentAgentPayload
       const audited = await runStage(diagnostics, "agent-audit", () =>
-        auditReloadedAgents({ agents: payload, shadowed: shadowedAgents, list: () => ctx.agent.list() }),
+        auditReloadedAgents({
+          agents: payload,
+          shadowed: shadowedAgents,
+          seed: agentSeed,
+          list: () => ctx.agent.list(),
+        }),
       )
       if (audited.ok) {
         diagnostics.push(...audited.value.diagnostics)

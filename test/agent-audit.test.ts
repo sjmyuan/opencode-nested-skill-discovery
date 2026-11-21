@@ -3,6 +3,7 @@ import { Agent } from "@opencode/schema/agent"
 import type { Permission } from "@opencode/schema/permission"
 import type { AdmittedAgent } from "../src/agent-project.ts"
 import { auditReloadedAgents } from "../src/agent-audit.ts"
+import type { ModeSeed } from "../src/replay.ts"
 
 /**
  * F17 Step 6 (ADR agent G8, G9, G11; C5): after the reload settles, the listing is compared
@@ -30,6 +31,7 @@ interface ListedRow {
 function admitted(overrides: Partial<AdmittedAgent> = {}): AdmittedAgent {
   return {
     id: ID,
+    nativeName: "translator",
     name: "A/translator",
     mode: "subagent",
     hidden: true,
@@ -73,8 +75,12 @@ function published(agent: AdmittedAgent, overrides: Partial<ListedRow> = {}): Li
 
 const listingOf = (...rows: ListedRow[]) => async () => ({ data: rows })
 
-const audit = (agents: readonly AdmittedAgent[], shadowed: readonly string[], rows: ListedRow[]) =>
-  auditReloadedAgents({ agents, shadowed: new Set(shadowed), list: listingOf(...rows) })
+const audit = (
+  agents: readonly AdmittedAgent[],
+  shadowed: readonly string[],
+  rows: ListedRow[],
+  seed: ModeSeed = new Map(),
+) => auditReloadedAgents({ agents, shadowed: new Set(shadowed), seed, list: listingOf(...rows) })
 
 describe("a matching entry", () => {
   it("reports nothing when every field and the permission prefix match", async () => {
@@ -191,5 +197,26 @@ describe("dedupe and scope", () => {
 
     expect(result.shadowed).toEqual([first.id, second.id])
     expect(result.diagnostics).toEqual([`agent-shadow-audit: ${first.id}`, `agent-shadow-audit: ${second.id}`])
+  })
+})
+
+describe("the inherited pair", () => {
+  const seed: ModeSeed = new Map([["translator", { mode: "subagent", hidden: true }]])
+
+  it("matches a row that published the same-named entry's pair", async () => {
+    const agent = admitted({ mode: undefined, hidden: undefined })
+
+    const result = await audit([agent], [], [published(agent, { mode: "subagent", hidden: true })], seed)
+
+    expect(result).toEqual({ shadowed: [], diagnostics: [] })
+  })
+
+  it("reports the entry once when the inherited pair did not survive", async () => {
+    const agent = admitted({ mode: undefined, hidden: undefined })
+
+    // Without the seed the expected pair is the default, so the fix would report itself.
+    const result = await audit([agent], [], [published(agent)], seed)
+
+    expect(result).toEqual({ shadowed: [ID], diagnostics: [`agent-shadow-audit: ${ID}`] })
   })
 })
