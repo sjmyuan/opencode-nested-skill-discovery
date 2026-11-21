@@ -187,8 +187,9 @@ and exact-ID examples: [docs/permissions.md](docs/permissions.md).
   (`.opencode/skills`, `.opencode/skill`, `.claude/skills`, `.agents/skills`,
   `.opencode/command`, `.opencode/commands`, `AGENTS.md`, `CLAUDE.md`, `.git`, `.hg`),
   that it sits at most 2 directories below the workspace (the default `maxDepth`; raise it as a
-  plugin option — [docs/limits.md](docs/limits.md#configuring-the-limits); a monorepo package
-  one level below a checkout in the workspace still qualifies), and
+  plugin option — [docs/limits.md](docs/limits.md#configuring-the-limits); a directory one level
+  below a checkout (depth 2) qualifies, while `checkout/packages/app` is depth 3 and needs a
+  raised `maxDepth`), and
   that no directory in the path is pruned (`node_modules`, `dist`, `vendor`, …). Only
   `*.md` directly under a skill root and `SKILL.md` below it count.
 - **A skill never appears even though it exists on disk.** A `skill` rule that denies its
