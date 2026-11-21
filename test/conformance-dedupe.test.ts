@@ -35,7 +35,7 @@ describe("conformance: symlinked location dedupe", () => {
       await fixture.write("A/.opencode/skills/foo.md", FOO)
       await fixture.write("B/.claude/skills/deploy/SKILL.md", DEPLOY)
       await fixture.write("C/.agents/skills/tidy/SKILL.md", TIDY)
-      await fixture.write("D/deep/nest/.opencode/skill/lint/SKILL.md", LINT)
+      await fixture.write("D/nest/.opencode/skill/lint/SKILL.md", LINT)
       await fixture.write(".opencode/skills/native-root/SKILL.md", DEPLOY)
       await fixture.write("global/skills/global-demo/SKILL.md", TIDY)
 
@@ -55,7 +55,7 @@ describe("conformance: symlinked location dedupe", () => {
       const expected = [
         await nestedId(fixture, "B", "deploy", "B/.claude/skills/deploy/SKILL.md"),
         await nestedId(fixture, "C", "tidy", "C/.agents/skills/tidy/SKILL.md"),
-        await nestedId(fixture, "D/deep/nest", "lint", "D/deep/nest/.opencode/skill/lint/SKILL.md"),
+        await nestedId(fixture, "D/nest", "lint", "D/nest/.opencode/skill/lint/SKILL.md"),
       ]
       const suppressed = [
         await nestedId(fixture, "A", "deploy", "A/.opencode/skills/deploy/SKILL.md"),

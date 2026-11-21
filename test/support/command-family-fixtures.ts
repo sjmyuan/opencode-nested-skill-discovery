@@ -1,5 +1,5 @@
 import path from "node:path"
-import type { CommandCandidate } from "../../src/contracts.ts"
+import type { CommandCandidate, ScanLimits } from "../../src/contracts.ts"
 import { scanSkills } from "../../src/scan.ts"
 import type { FamilyWorkspace } from "./family-fixtures.ts"
 import type { Workspace } from "./indexer-fixtures.ts"
@@ -32,7 +32,8 @@ export async function writeCommandDoc(
 export async function scanCommands(
   ws: FamilyWorkspace,
   location: string = ws.root,
+  limits?: ScanLimits,
 ): Promise<readonly CommandCandidate[]> {
-  const scanned = await scanSkills({ location })
+  const scanned = await scanSkills({ location, ...(limits === undefined ? {} : { limits }) })
   return scanned.commands
 }

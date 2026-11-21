@@ -1,6 +1,7 @@
 import { chmod, realpath } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, describe, expect, it, vi } from "vitest"
+import { DEFAULT_SCAN_LIMITS, type ScanLimits } from "../src/contracts.ts"
 import { filterCommandFamilies } from "../src/command-family.ts"
 import { createFamilyPass } from "../src/family.ts"
 import { indexCandidates, type IndexedSkill } from "../src/indexer.ts"
@@ -41,6 +42,9 @@ afterAll(async () => {
 
 const absolute = (ws: FamilyWorkspace, relativePath: string): string => path.join(ws.root, relativePath)
 
+// The workspace-in-checkouts shape puts <checkout>/packages/app at depth 3; depth is not what these cases assert.
+const DEPTH_5: ScanLimits = { ...DEFAULT_SCAN_LIMITS, maxDepth: 5 }
+
 const gitTrace = async <T>(run: () => Promise<T>): Promise<{ stats: number; opens: number }> => {
   trace.gitStats = 0
   trace.gitOpens = 0
@@ -78,7 +82,7 @@ describe("one memo per refresh across the skill and command stages", () => {
   it("M1: the skill and command passes share one checkout memo: no extra .git lstat or read", async () => {
     const ws = await buildWorkspace()
     const candidates = await skillCandidates(ws)
-    const commands = await scanCommands(ws)
+    const commands = await scanCommands(ws, ws.root, DEPTH_5)
 
     const skillOnly = await gitTrace(async () => {
       await indexCandidates(candidates, { location: ws.root, family: await createFamilyPass(ws.root) })
@@ -110,7 +114,7 @@ describe("one memo per refresh across the skill and command stages", () => {
       [await ws.candidate("wt/.opencode/skills/deploy/SKILL.md", "wt")],
       { location: ws.root, family: pass },
     )
-    const filtered = await filterCommandFamilies(await scanCommands(ws), { family: pass })
+    const filtered = await filterCommandFamilies(await scanCommands(ws, ws.root, DEPTH_5), { family: pass })
 
     expect([...indexed.diagnostics, ...filtered.diagnostics].filter((line) => line.startsWith("family:"))).toEqual([
       `family: ${wtReal}: unreadable .git: EACCES`,
@@ -121,7 +125,7 @@ describe("one memo per refresh across the skill and command stages", () => {
   it("M3: sharing the pass leaves the skill result byte-identical", async () => {
     const ws = await buildWorkspace()
     const candidates = await skillCandidates(ws)
-    const commands = await scanCommands(ws)
+    const commands = await scanCommands(ws, ws.root, DEPTH_5)
 
     const standalone = await indexCandidates(candidates, { location: ws.root })
     const pass = await createFamilyPass(ws.root)

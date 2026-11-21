@@ -8,6 +8,8 @@ import { createFixture } from "./support/scan-fixtures.ts"
 
 const DOC = (name: string): string => `---\nname: ${name}\ndescription: ${name}.\n---\n# ${name}\n`
 
+const AGENT_DOC = (name: string): string => `---\ndescription: ${name}.\n---\n# ${name}\n`
+
 const cleanups: Array<() => Promise<void>> = []
 
 afterEach(async () => {
@@ -292,5 +294,58 @@ describe("native command walk", () => {
     expect(plainOutcome.diagnostics).toEqual([])
     expect(plainFake.commandDefinitions.map((entry) => entry.name)).toEqual(["A:x"])
     expect(limitedFake.commandDefinitions.map((entry) => entry.name)).toEqual(["A:x"])
+  })
+})
+
+describe("shared subproject depth default", () => {
+  const agentNames = async (fake: ReturnType<typeof fakeContext>): Promise<readonly unknown[]> =>
+    (await fake.ctx.agent.list()).data.map((entry) => entry.name)
+
+  it("advertises the depth-2 subproject and hides the depth-3 one for every kind", async () => {
+    const fixture = await createRegistryFixture()
+    cleanups.push(() => fixture.cleanup())
+    await fixture.write("pkg/two/.opencode/skills/two.md", DOC("two"))
+    await fixture.write("pkg/two/.opencode/command/two.md", DOC("two"))
+    await fixture.write("pkg/two/.opencode/agent/two.md", AGENT_DOC("two"))
+    await fixture.write("pkg/two/three/.opencode/skills/three.md", DOC("three"))
+    await fixture.write("pkg/two/three/.opencode/command/three.md", DOC("three"))
+    await fixture.write("pkg/two/three/.opencode/agent/three.md", AGENT_DOC("three"))
+    const fake = fakeContext([], { directory: fixture.root })
+    const registry = createRegistry(fake.ctx)
+    cleanups.push(() => registry.dispose())
+
+    const outcome = await registry.activate()
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.skills).toBe(1)
+    expect(outcome.commands).toBe(1)
+    expect(outcome.diagnostics).toEqual([])
+    expect(fake.editor.list().map((entry) => String(entry.name))).toEqual(["pkg/two/two"])
+    expect(fake.commandDefinitions.map((entry) => entry.name)).toEqual(["pkg:two:two"])
+    expect(await agentNames(fake)).toEqual(["pkg/two/two"])
+  })
+
+  it("advertises the depth-5 subproject for every kind under an explicit maxDepth: 5", async () => {
+    const fixture = await createRegistryFixture()
+    cleanups.push(() => fixture.cleanup())
+    await fixture.write("L1/L2/L3/L4/L5/.opencode/skills/five.md", DOC("five"))
+    await fixture.write("L1/L2/L3/L4/L5/.opencode/command/five.md", DOC("five"))
+    await fixture.write("L1/L2/L3/L4/L5/.opencode/agent/five.md", AGENT_DOC("five"))
+    await fixture.write("L1/L2/L3/L4/L5/L6/.opencode/skills/six.md", DOC("six"))
+    await fixture.write("L1/L2/L3/L4/L5/L6/.opencode/command/six.md", DOC("six"))
+    await fixture.write("L1/L2/L3/L4/L5/L6/.opencode/agent/six.md", AGENT_DOC("six"))
+    const fake = fakeContext([], { directory: fixture.root, options: { maxDepth: 5 } })
+    const registry = createRegistry(fake.ctx)
+    cleanups.push(() => registry.dispose())
+
+    const outcome = await registry.activate()
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.skills).toBe(1)
+    expect(outcome.commands).toBe(1)
+    expect(outcome.diagnostics).toEqual([])
+    expect(fake.editor.list().map((entry) => String(entry.name))).toEqual(["L1/L2/L3/L4/L5/five"])
+    expect(fake.commandDefinitions.map((entry) => entry.name)).toEqual(["L1:L2:L3:L4:L5:five"])
+    expect(await agentNames(fake)).toEqual(["L1/L2/L3/L4/L5/five"])
   })
 })

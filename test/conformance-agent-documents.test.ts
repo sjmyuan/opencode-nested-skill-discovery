@@ -27,7 +27,8 @@ async function harness(seed: (fixture: RegistryFixture, outside: string) => Prom
   const fixture = await createRegistryFixture()
   const outside = await mkdtemp(join(tmpdir(), "nested-conformance-outside-"))
   await seed(fixture, outside)
-  const fake = fakeContext([], { directory: fixture.root })
+  // The document-boundary pins sit under A/real/.opencode-doc at depth 3; depth is not what they assert.
+  const fake = fakeContext([], { directory: fixture.root, options: { maxDepth: 5 } })
   const registry = createRegistry(fake.ctx, { now: () => 0 })
   await registry.activate()
 

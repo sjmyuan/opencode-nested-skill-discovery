@@ -66,7 +66,7 @@ const ADR_COMMAND_ROOT_DIRECTORIES = ["opencode-command", "opencode-commands"]
 describe("scan budgets", () => {
   it("matches the ADR defaults", () => {
     expect(DEFAULT_SCAN_LIMITS).toEqual({
-      maxDepth: 5,
+      maxDepth: 2,
       maxDirectories: 100_000,
       maxFiles: 5_000,
       maxFileBytes: 131_072,

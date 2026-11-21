@@ -1,6 +1,7 @@
 import { realpath, rm } from "node:fs/promises"
 import path from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import { DEFAULT_SCAN_LIMITS, type ScanLimits } from "../src/contracts.ts"
 import { createFamilyPass } from "../src/family.ts"
 import { filterCommandFamilies } from "../src/command-family.ts"
 import { only } from "./support/indexer-fixtures.ts"
@@ -26,8 +27,11 @@ const absolute = (ws: FamilyWorkspace, relativePath: string): string => path.joi
 const familyDiagnostics = (diagnostics: readonly string[]): readonly string[] =>
   diagnostics.filter((line) => line.startsWith("family:"))
 
+// The workspace-in-checkouts shape puts <checkout>/packages/app at depth 3; depth is not what these cases assert.
+const DEPTH_5: ScanLimits = { ...DEFAULT_SCAN_LIMITS, maxDepth: 5 }
+
 const filtered = async (ws: FamilyWorkspace, location: string = ws.root) =>
-  filterCommandFamilies(await scanCommands(ws, location), { family: await createFamilyPass(location) })
+  filterCommandFamilies(await scanCommands(ws, location, DEPTH_5), { family: await createFamilyPass(location) })
 
 describe("command candidates reuse the repo-family rule", () => {
   it("C1: drops a worktree-root command and keeps the survivor name byte-identical", async () => {

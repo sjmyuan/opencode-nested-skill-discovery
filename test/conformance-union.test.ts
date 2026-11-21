@@ -26,8 +26,8 @@ async function seedWorkspace(fixture: RegistryFixture): Promise<void> {
   await fixture.write("pkg-b/.claude/skills/deploy/SKILL.md", DEPLOY_B)
   await fixture.write("pkg-c/.agents/skills/tidy/SKILL.md", TIDY_C)
   await fixture.write("pkg-d/AGENTS.md", "# pkg-d\n")
-  await fixture.write("pkg-d/deep/nest/.opencode/skill/lint/SKILL.md", LINT_D)
-  await fixture.write("pkgs/d1/d2/d3/d4/d5/d6/.opencode/skills/hidden/SKILL.md", LINT_D)
+  await fixture.write("pkg-d/nest/.opencode/skill/lint/SKILL.md", LINT_D)
+  await fixture.write("pkgs/d1/d2/d3/.opencode/skills/hidden/SKILL.md", LINT_D)
 }
 
 const nested = (fake: FakeContext) => fake.editor.list().filter((entry) => String(entry.id).startsWith("nested."))
@@ -80,11 +80,11 @@ describe("conformance: advertised union", () => {
       "pkg-a/foo": await expectedId(fixture, "pkg-a", "foo", "pkg-a/.opencode/skills/foo.md"),
       "pkg-b/deploy": await expectedId(fixture, "pkg-b", "deploy", "pkg-b/.claude/skills/deploy/SKILL.md"),
       "pkg-c/tidy": await expectedId(fixture, "pkg-c", "tidy", "pkg-c/.agents/skills/tidy/SKILL.md"),
-      "pkg-d/deep/nest/lint": await expectedId(
+      "pkg-d/nest/lint": await expectedId(
         fixture,
-        "pkg-d/deep/nest",
+        "pkg-d/nest",
         "lint",
-        "pkg-d/deep/nest/.opencode/skill/lint/SKILL.md",
+        "pkg-d/nest/.opencode/skill/lint/SKILL.md",
       ),
     }
 
@@ -110,7 +110,8 @@ describe("conformance: advertised union", () => {
   it("names a deeply nested skill after its deepest marker", async () => {
     const { fake } = await run()
 
-    expect(byName(fake, "pkg-d/deep/nest/lint")).toBeDefined()
+    expect(byName(fake, "pkg-d/nest/lint")).toBeDefined()
+    expect(byName(fake, "pkg-d/deep/nest/lint")).toBeUndefined()
     expect(byName(fake, "pkg-d/lint")).toBeUndefined()
     expect(byName(fake, "lint")).toBeUndefined()
   })
@@ -123,7 +124,7 @@ describe("conformance: advertised union", () => {
     expect(tidy?.autoinvoke).toBe(false)
   })
 
-  it("hides the depth-6 subproject and every skill inside a native root", async () => {
+  it("hides the depth-3 subproject and every skill inside a native root", async () => {
     const { fixture, fake } = await run()
     const paths = nested(fake).map((entry) => entry.path)
     const root = fixture.realRoot

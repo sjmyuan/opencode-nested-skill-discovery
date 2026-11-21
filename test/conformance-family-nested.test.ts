@@ -26,6 +26,10 @@ const absolute = (ws: FamilyWorkspace, relativePath: string): string => path.joi
 const namesOf = (entries: ReadonlyArray<{ readonly name: unknown }>): readonly string[] =>
   entries.map((entry) => String(entry.name))
 
+// The workspace-in-checkouts shape puts <checkout>/packages/app and vscode/extensions/copilot at depth 3;
+// depth is not what these cases assert, so each registry that owns one of those fixtures pins it.
+const DEPTH_5 = { maxDepth: 5 }
+
 const buildNestedWorkspace = async (): Promise<FamilyWorkspace> => {
   const ws = await workspace()
   await ws.repo("main")
@@ -47,6 +51,7 @@ describe("conformance: nested subprojects share one checkout view", () => {
     const locationToken = locationTokenFor(await realpath(ws.root))
     const fake = fakeContext([], {
       directory: ws.root,
+      options: DEPTH_5,
       storage: [
         [
           `nested/${locationToken}/manifest/${nestedToken}`,
@@ -96,7 +101,7 @@ describe("conformance: nested subprojects share one checkout view", () => {
     await local.worktree("wt", "main", "linked")
     await nestedCheckoutSkill(local, "wt", NESTED, "tidy")
 
-    const atRoot = fakeContext([], { directory: ws.root })
+    const atRoot = fakeContext([], { directory: ws.root, options: DEPTH_5 })
     const rootRegistry = createRegistry(atRoot.ctx)
     const atWorktree = fakeContext([], { directory: await realpath(absolute(local, "wt")) })
     const worktreeRegistry = createRegistry(atWorktree.ctx)
