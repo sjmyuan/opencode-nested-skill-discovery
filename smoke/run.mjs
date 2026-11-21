@@ -1110,7 +1110,6 @@ async function claimC10(fixture, server) {
     writeEvidence(evidenceName, { error: String(error?.message ?? error) })
     return record("C10", "unproven", `GET /api/agent: ${String(error?.message ?? error).slice(0, 120)}`, evidenceName)
   }
-  const session = await createSession(server, fixture, destination)
   const location = rowsOf(listed)
   const nested = location.filter((entry) => String(entry.name) === "pkg-d/deep/nest/inspector")
   const source = nested[0]
@@ -1122,7 +1121,6 @@ async function claimC10(fixture, server) {
     (entry) => String(entry.name) === "pkg-d/deep/nest/inspector",
   )
   writeEvidence(evidenceName, {
-    session,
     destination,
     locationEntry: source ?? null,
     locationAgents: location.map((entry) => ({ id: entry.id, name: entry.name, mode: entry.mode, hidden: entry.hidden })),
