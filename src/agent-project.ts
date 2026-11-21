@@ -115,6 +115,14 @@ export function admitAgents(input: AdmitAgentsInput): AdmitAgentsResult {
       diagnostics.push(`agent-skip: disabled ${display}`)
       continue
     }
+    // A7/G12, source level: the ID doubles as a wildcard permission resource — the subagent
+    // tool saves it (`subagent.ts:147-151`) and a saved rule replays it as the pattern side
+    // (`permission.ts:94-101`), so `sub/*` would allow every agent under `sub/`. Refused, never
+    // stripped or escaped into a different name.
+    if (candidate.id.includes("*") || candidate.id.includes("?")) {
+      diagnostics.push(`agent-skip: wildcard ${display}`)
+      continue
+    }
     if (input.held.has(candidate.id)) {
       // `shadowed` is reachable only after the audit has grown the held set; before that, every
       // held ID came from the pre-registration listing and is reported as `id-held`.
