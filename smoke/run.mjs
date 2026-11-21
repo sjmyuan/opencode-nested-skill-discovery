@@ -1294,8 +1294,8 @@ function claimReal(capture) {
   const problems = []
 
   if (new Set(names).size !== names.length) problems.push("duplicate nested name")
-  // maxDepth (default 2): 15 skill candidates over /Users/ganggang/work measured 2026-11-21; floor = 15 − 10 % absorbs dedupe and workspace drift.
-  if (nested.length < 13) problems.push(`nested count ${nested.length} < 13`)
+  // maxDepth (default 2): 15 candidates → 11 advertised after family suppression over /Users/ganggang/work, measured 2026-11-21; floor = the advertised count (the line below counts nested.* entries, i.e. post-suppression, not candidates).
+  if (nested.length < 11) problems.push(`nested count ${nested.length} < 11`)
   for (const entry of nested) {
     if (!ID_SHAPE.test(String(entry.id))) problems.push(`id shape ${entry.id}`)
     if (!String(entry.name).includes("/")) problems.push(`unqualified name ${entry.name}`)
