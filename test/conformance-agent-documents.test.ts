@@ -175,7 +175,7 @@ describe("markers", () => {
       // so `A` is a subproject; the linked root itself is never walked (`src/scan.ts:203-206`).
       // Its document is read only because `realpath(A/.opencode/opencode.json)` stays inside
       // `realpath(A)`; a target outside the subproject is refused with `config-symlink:` and
-      // never opened (`src/scan.ts:641-654`). The file agent beside the document is inside the
+      // never opened (`src/scan.ts:647-653`). The file agent beside the document is inside the
       // linked root, so it stays invisible while the document it shares a directory with does not.
       expect(Object.keys(entries).sort()).toEqual(["A/linked", "A/real/.opencode-doc/linked"])
       expect(entries["A/linked"]?.system).toBeUndefined()
