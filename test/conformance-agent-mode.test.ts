@@ -220,6 +220,27 @@ describe("inherited mode and visibility (G4)", () => {
     }
   })
 
+  it("inherits only the field the source does not author", async () => {
+    const h = await harness(documentAgent("general", { mode: "primary" }), {
+      agents: [{ id: "general", name: "General", mode: "subagent", hidden: true }],
+    })
+
+    try {
+      const published = await byName(h.fake, "A/general")
+      // Per field: the authored `mode` wins and the unauthored `hidden` still inherits.
+      expect(published.mode).toBe("primary")
+      expect(published.hidden).toBe(true)
+      expectNestedId(published.id)
+      expect(auditLines(h)).toEqual([])
+
+      // Published but unlisted: both surfaces drop it, yet it stays resolvable by ID.
+      const resolved = await h.fake.ctx.agent.get({ agentID: String(published.id) })
+      expect(resolved.data).toEqual(published)
+    } finally {
+      await h.dispose()
+    }
+  })
+
   it("leaves the same-named native row byte-identical across activation", async () => {
     const h = await harness(documentAgent("general"), {
       agents: [{ id: "general", name: "General", system: "builtin prompt", mode: "primary", hidden: false }],
@@ -231,8 +252,9 @@ describe("inherited mode and visibility (G4)", () => {
       await h.registry.activate()
       const after = await h.fake.ctx.agent.get({ agentID: "general" })
 
-      // A seed keyed on the listing's `name` would write the builtin's display title, and this
-      // is the case that says so; keyed on the ID, the native row is never a write target.
+      // Insert-on-miss is what protects this row (`src/replay.ts:80`); a seed keyed on the
+      // listing's `name` would instead miss ("general" ≠ "General"), leaving this `primary`,
+      // which the inheritance case above catches. No seed key writes the builtin's title here.
       expect(after.data).toEqual(before.data)
     } finally {
       await h.dispose()
