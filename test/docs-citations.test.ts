@@ -141,7 +141,7 @@ const ANCHORS: ReadonlyArray<{
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "91-96", marker: "function capDiagnostics" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "100-111", marker: "async function runStage" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "201-210", marker: "export interface RefreshOutcome" },
-  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "826-842", marker: 'runStage(diagnostics, "command-audit"' },
+  { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "826-835", marker: 'runStage(diagnostics, "command-audit"' },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "44", marker: "DEDUPE_DEFERRED_DELAYS_MS = [1500, 4000]" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "1034", marker: "dedupe-deferred: ${reasonOf(error)}" },
   { doc: "docs/architecture.md", target: "src/registry.ts", ranges: "837-838", marker: 'runStage(diagnostics, "reload", () => ctx.skill.reload())' },

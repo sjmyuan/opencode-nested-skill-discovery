@@ -46,7 +46,7 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 
 | # | Stage | Where |
 |---|---|---|
-| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:46-52`, `576-577` |
+| 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:46-52`, `575-576` |
 | 2 | Resolve the native skill and agent roots to exclude | `src/registry.ts:577`, `src/native.ts:51-53` |
 | 3 | Scan the location for skill, command, agent and config-document candidates, then reconcile the watcher set from them | `src/registry.ts:626-639`, `src/scan.ts:107-176` |
 | 4 | Read, parse and dedupe candidates, substitute each config document within its confinement and caps, decode its read set per entry, index both agent sources and project the admitted ones into a frozen payload, then drop every non-survivor checkout of a repo family | `src/registry.ts:650-719`, `src/indexer.ts:205-258`, `src/agent-index.ts:106-206`, `src/agent-project.ts:74-126`, `src/family.ts:276-304` |
@@ -113,16 +113,18 @@ is in [limits.md](limits.md).
 The walk carries a third agent source beside skills and commands. A directory that holds an
 `opencode.json`, an `opencode.jsonc`, or a `.opencode` entry is an `opencode-project`
 subproject, and the marker is read from the listing the walk already holds, so nothing extra
-is stat'ed or resolved (`src/scan.ts:745-752`, `src/contracts.ts:249-257`). Its
+is stat'ed or resolved (`src/scan.ts:752-757`, `src/contracts.ts:249-257`). Its
 `.opencode/{agent,agents}` is then an agent root: claimed like a command root, every `.md`
 below it a candidate, no depth cap inside it (`src/scan.ts:387-419`). The location's own
 agent roots are claimed and never scanned, and a candidate whose realpath is inside a
 native agent root — `<ancestor>/.opencode/{agent,agents}` or the config directory's — is
-skipped before it is admitted (`src/native.ts:38-48`, `src/scan.ts:660-672`).
+skipped before it is admitted (`src/native.ts:38-48`, `src/scan.ts:667-679`).
 
 The same owning directory contributes its **config documents** — `opencode.json`,
 `opencode.jsonc`, `.opencode/opencode.json` and `.opencode/opencode.jsonc` — as candidates
-of a second kind (`src/scan.ts:627-658`, `src/contracts.ts:226-242`). Reading one is
+of a second kind (`src/scan.ts:627-665`, `src/contracts.ts:226-242`). A document is admitted
+only when its realpath stays inside the subproject's own (A3): a linked `.opencode` whose
+target leaves `d` contributes one `config-symlink:` line and no read. Reading one is
 substitution (the `{env:}` escaped retry, then `{file:}` confined to the marked directory's
 realpath with the two R8 caps and one read per token), the JSONC parse, and the three-key
 read set; an unreadable or malformed document is dropped whole with one `agent-skip:` line,
@@ -369,7 +371,7 @@ advertised list is whatever the last completed step produced.
 | A command stage throws (index, snapshot, persist, reload, audit) | one `command-<stage>:` diagnostic; the previous command snapshot stays on a persist failure, and the single `skill.reload()` still runs | `src/registry.ts:750-834` |
 | A command file is malformed, unreadable, or over the budget | dropped with `command-frontmatter:`, `unreadable:` or `command-oversize:`; its siblings still publish | `src/command-snapshot.ts:72-110` |
 | A shell interpolation fails during an invocation | that invocation rejects with the joined diagnostics; the registry, the snapshot, and every later invocation are unaffected | `src/command-execute.ts:55-57` |
-| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:826-842`, `src/command-shadow.ts:86-117` |
+| A published command never appears | a native file shadows it, or its name was an MCP prompt the host already held when the transform was registered and it was dropped as `native-shadow:` before publication, or a repo family suppresses it before publication, or the reloaded listing holds it under a different description; the last case is the one the audit reports as `native-shadow-audit:`, and the entry leaves the next snapshot, while an identical description is indistinguishable | `src/registry.ts:826-835`, `src/command-shadow.ts:86-117` |
 
 When the pre-drop stage never ran, the audit is handed `EMPTY_NATIVE_COMMANDS`
 (`src/command-audit.ts:5-10`): its `complete: true` asserts only that **no walk happened**, so

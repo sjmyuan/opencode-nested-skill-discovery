@@ -167,7 +167,8 @@ A subproject that owns itself and is a strict descendant also contributes its co
 documents: `opencode.json`, `opencode.jsonc`, `.opencode/opencode.json` and
 `.opencode/opencode.jsonc` (ADR agent A3). The location's own four belong to native
 discovery and are never collected. A symlinked document is refused, not followed, with one
-`config-symlink:` line.
+`config-symlink:` line — and so is a document whose realpath leaves `d`: a linked `.opencode`
+cannot contribute a document from outside the subproject.
 
 The walk only stats them; the index stage reads them. Reading mirrors native for `{env:VAR}`
 — substituted raw, then re-substituted with the JSON-escaped value when the raw pass leaves
@@ -232,7 +233,7 @@ migrated (`src/agent-decode.ts:51-68`).
 | `agent-replay: payload: <reason>` | the whole payload failed to replay; nothing is applied and the transform never rethrows, so the group stays enabled |
 | `agent-reload: <reason>` | the agent reload threw; the map keeps whatever the host built |
 | `agent-audit: <reason>` | the post-reload listing read threw; the published map stays |
-| `config-symlink: <rel>` | a config document is a symlink; refused, never followed |
+| `config-symlink: <rel>` | a config document is a symlink, or resolves outside its subproject; refused, never opened |
 
 `<doc>` is the document's location-relative POSIX path, the `<rel>` of the other rows.
 `<token>` is the literal `{file:…}` token as written, unexpanded; `<key>` is the `agents` map
@@ -340,7 +341,7 @@ boundary.
 The scan counts directories, accepted files, and bytes against the budgets in
 `src/contracts.ts:179-185`. Hitting a directory, file-count, or total-byte budget sets
 `truncated`, emits `budget-directories` / `budget-files` / `budget-total-bytes`, and stops
-the walk (`src/scan.ts:562-602`, `764-769`). A single file over 128 KiB is skipped with
+the walk (`src/scan.ts:562-602`, `771-776`). A single file over 128 KiB is skipped with
 `budget-file-bytes` while the walk continues (`src/scan.ts:584-590`).
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
