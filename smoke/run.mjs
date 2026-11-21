@@ -24,7 +24,7 @@ const WALL_CLOCK_MS = 10 * 60 * 1000
 const STABLE_FOR = 3
 const SUITES = ["fixture", "smoke", "real", "all"]
 const ID_SHAPE = /^nested\.[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{8}\.[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{8}$/
-const SETTLED_NESTED = ["pkg-b/deploy", "pkg-c/tidy", "pkg-d/deep/nest/lint"]
+const SETTLED_NESTED = ["pkg-b/deploy", "pkg-c/tidy", "pkg-d/nest/lint"]
 const SUPPRESSED_NESTED = ["pkg-a/deploy", "pkg-a/foo"]
 const FIXTURE_NATIVE_IDS = ["global-demo", "deploy", "foo", "native-root"]
 const BUILTIN = (entry) => String(entry.path).startsWith("/builtin/")
@@ -901,7 +901,7 @@ async function claimC9(fixture, isolation) {
   const evidenceName = "placement-c9.json"
   const canonical = {
     root: realpathSync(fixture.real),
-    destination: realpathSync(join(fixture.real, "pkg-d/deep/nest")),
+    destination: realpathSync(join(fixture.real, "pkg-d/nest")),
   }
   const local = await createLocalModel()
   const config = join(fixture.root, "config-c9")
@@ -998,7 +998,7 @@ async function claimC9(fixture, isolation) {
       agent: "general",
       description: "placement probe",
       prompt: "Reply CHILD_OK",
-      directory: "pkg-d/deep/nest",
+      directory: "pkg-d/nest",
     })
     const negative = await run({ agent: "general", description: "native probe", prompt: "Reply CHILD_OK" })
 
@@ -1100,7 +1100,7 @@ const rowsOf = (body) => (Array.isArray(body) ? body : (body?.data ?? []))
 
 async function claimC10(fixture, server) {
   const evidenceName = "agent-c10.json"
-  const destination = realpathSync(join(fixture.real, "pkg-d/deep/nest"))
+  const destination = realpathSync(join(fixture.real, "pkg-d/nest"))
   const at = (directory) => api(server.base, server.password, "/api/agent", { location: directory })
   let listed, atDestination
   try {
@@ -1111,14 +1111,14 @@ async function claimC10(fixture, server) {
     return record("C10", "unproven", `GET /api/agent: ${String(error?.message ?? error).slice(0, 120)}`, evidenceName)
   }
   const location = rowsOf(listed)
-  const nested = location.filter((entry) => String(entry.name) === "pkg-d/deep/nest/inspector")
+  const nested = location.filter((entry) => String(entry.name) === "pkg-d/nest/inspector")
   const source = nested[0]
   const destinationRows = rowsOf(atDestination)
   // At the destination the source is native, so it is listed once and the ancestor's `nested.` copy
   // is not part of that location's map (G10).
   const once = destinationRows.filter((entry) => String(entry.name) === "inspector")
   const qualifiedAtDestination = destinationRows.filter(
-    (entry) => String(entry.name) === "pkg-d/deep/nest/inspector",
+    (entry) => String(entry.name) === "pkg-d/nest/inspector",
   )
   writeEvidence(evidenceName, {
     destination,
@@ -1127,7 +1127,7 @@ async function claimC10(fixture, server) {
     destinationRows: destinationRows.map((entry) => ({ id: entry.id, name: entry.name, mode: entry.mode })),
   })
   const problems = []
-  if (nested.length !== 1) problems.push(`location entries named pkg-d/deep/nest/inspector: ${nested.length}`)
+  if (nested.length !== 1) problems.push(`location entries named pkg-d/nest/inspector: ${nested.length}`)
   if (source !== undefined) {
     if (!ID_SHAPE.test(String(source.id))) problems.push(`id shape ${source.id}`)
     if (source.mode !== "subagent") problems.push(`mode ${String(source.mode)}`)
