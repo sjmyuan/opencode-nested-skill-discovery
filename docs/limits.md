@@ -97,7 +97,8 @@ diagnostic cap. Everything else is quiet, and the sharp edges are these:
   (`src/command-snapshot.ts:88-91`): raise the option and a >128 KiB command file is scanned
   and then dropped with `command-oversize:`; lower it and the scan drops the file first.
 - **A directory plugin gets no options.** Discovery by folder passes `{}`, so an installed
-  checkout behaves exactly as before, at the raised 100,000 directory budget.
+  checkout behaves exactly as before, at the raised 100,000 directory budget,
+  and at the lowered depth default.
 
 ## Depth
 
