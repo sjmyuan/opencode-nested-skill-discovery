@@ -1,11 +1,11 @@
 # Limits
 
 Every bound the plugin accepts, what triggers it, and what you see when it bites. The five
-scan budgets are **defaults** declared in `src/contracts.ts:179-185` and each one is
+scan budgets are **defaults** declared in `src/contracts.ts:178-184` and each one is
 overridable from the plugin entry's `options` object: the registry resolves them once at
-construction (`src/options.ts:34-51`, `src/registry.ts:360`) and hands the same object to the
-skill scan (`src/registry.ts:635-642`) and to the native command-name walk
-(`src/registry.ts:766`). An auto-discovered directory plugin receives `{}`, so zero-config
+construction (`src/options.ts:34-51`, `src/registry.ts:359`) and hands the same object to the
+skill scan (`src/registry.ts:634-641`) and to the native command-name walk
+(`src/registry.ts:765`). An auto-discovered directory plugin receives `{}`, so zero-config
 behaviour is the defaults — apart from the raised directory budget and the lowered depth below.
 
 ## Summary
@@ -23,11 +23,12 @@ behaviour is the defaults — apart from the raised directory budget and the low
 | Command name | 160 code points (`MAX_COMMAND_NAME_LENGTH`, `src/command-names.ts`) | never truncated: a longer name is kept whole and logged as `name-too-long:`, while skill display names still cut at 80 |
 | Skill description | 500 code points | truncated; a command description is stored verbatim and never capped (native parity) |
 | Scope slug / skill slug | 24 / 40 characters | slug truncated, hash keeps the ID unique |
-| Entry ID | 96 characters declared | structural maximum is 90, so no ID is ever cut |
+| Skill ID | 96 characters declared | structural maximum is 90, so no skill ID is ever cut |
+| Agent ID | 96 code points | the readable `<subproject path>/<native name>`; past 96 the prefix is cut to 87 code points (86 when the cut would end on `/`) plus `-<hex8>` of the owning source's realpath |
 | Command template | the file body, so the same 128 KiB per-file limit | the whole command file is skipped with `command-oversize:`; the command snapshot adds no new budget |
 
 The command template is the file body after the closing fence, so it is bounded by the shared
-128 KiB per-file limit (`src/contracts.ts:179-185`) rather than by a budget of its own. The
+128 KiB per-file limit (`src/contracts.ts:178-184`) rather than by a budget of its own. The
 snapshot reader re-checks the limit on the bytes it read, because a file can grow between the
 scan and the read (`src/command-snapshot.ts:88-91`), and the template is then stored in
 `nested/<locationToken>/commands/<scopeToken>` with `description`, `agent`, `model` and `subagent`.
@@ -122,7 +123,7 @@ The location itself is a depth-0 subproject: skills directly under
 
 The walk skips these names at every level, before classifying the entry, so a pruned symlink
 is skipped as silently as a pruned directory (`src/scan.ts:202`,
-`src/contracts.ts:187-201`):
+`src/contracts.ts:186-200`):
 
 `node_modules`, `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `target`, `dist`,
 `build`, `.next`, `.cache`, `vendor`
@@ -134,7 +135,7 @@ copied plugin checkout or an installed dependency from flooding the registry.
 ## Markers
 
 A marker makes a directory a subproject and gives it a scope token and a name prefix. The
-marker kinds are `src/contracts.ts:249-257`:
+marker kinds are `src/contracts.ts:248-256`:
 
 | Kind | Detected as |
 |---|---|
@@ -192,10 +193,10 @@ so substituted text is untrusted prompt and display text, sanitized downstream.
 
 Merging follows native document order — `opencode.json` < `opencode.jsonc` <
 `.opencode/opencode.json` < `.opencode/opencode.jsonc` < agent files sorted
-(`src/contracts.ts:226-242`). A field applies when the source sets it, so a later source
+(`src/contracts.ts:225-241`). A field applies when the source sets it, so a later source
 overrides and an absent field never erases one; `permissions` append and `request` keys
 assign. One entry remains per (subproject, native name), the first source owns the token, and
-a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:105-205`).
+a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:107-207`).
 
 `default_agent` is never applied: it is decoded only to emit one
 `agent-default-ignored: <document>` line. A document's read set is checked in a fixed order
@@ -221,11 +222,13 @@ migrated (`src/agent-decode.ts:51-68`).
 | `agent-skip: markdown <rel>` | agent frontmatter that never parses, even after the sanitize retry |
 | `agent-default-ignored: <rel>` | the document sets `default_agent`; never applied |
 | `agent-field: <rel> ignored <key,…>` | a non-legacy agent file carries an unknown key |
+| `agent-id-collision: <id> (<source> + <source>)` | two sources composed one ID; the later in the index's order is refused, the earlier stands, and both location-relative paths are named |
 | `agent-merge: <name> (<rel> + …)` | one per merged native name, sources in native order |
 | `agent-index: <reason>` | the agent stage threw; the last good agent list and payload stay published and the refresh still succeeds |
 | `agent-skip: disabled <rel>` | the source is disabled; never registered |
 | `agent-skip: id-held <rel>` | the host map already held this ID before the transform registered |
 | `agent-skip: shadowed <rel>` | a previous audit held this ID out; the entry is omitted from the map |
+| `agent-skip: wildcard <rel>` | the subproject path or native name would put `*` or `?` in the ID, which is a wildcard permission resource; refused at admission, never stripped or escaped |
 | `agent-request: <id>` | one per admitted agent that carries a `request` overlay |
 | `agent-shadow-audit: <id>` | the reloaded entry did not match the snapshot; held out of the next |
 | `agent-seed: <reason>` | the pre-registration listing read threw; registration is still attempted |
@@ -344,14 +347,14 @@ boundary.
 ## Budgets and truncation
 
 The scan counts directories, accepted files, and bytes against the budgets in
-`src/contracts.ts:179-185`. Hitting a directory, file-count, or total-byte budget sets
+`src/contracts.ts:178-184`. Hitting a directory, file-count, or total-byte budget sets
 `truncated`, emits `budget-directories` / `budget-files` / `budget-total-bytes`, and stops
 the walk (`src/scan.ts:562-602`, `771-776`). A single file over 128 KiB is skipped with
 `budget-file-bytes` while the walk continues (`src/scan.ts:584-590`).
 
 A truncated scan is still advertised: the registry records `scan-truncated` and swaps the
 partial snapshot, so a huge tree degrades into a smaller list rather than an empty one
-(`src/registry.ts:644`).
+(`src/registry.ts:643`).
 
 Diagnostics have two independent budgets: 200 in the scan (`src/scan.ts:70`, `125-133`, ending
 in a `diagnostics-truncated` line) and 200 in the refresh outcome (`src/registry.ts:91-96`),
@@ -381,7 +384,7 @@ characters are removed, whitespace is collapsed, and trailing space is trimmed
 | Loader | a loaded skill renders as `<skill_content name="<qualified name>">` with its absolute base directory (`packages/core/src/skill.ts:36-46`) |
 | Composer | the `@` menu lists `@<id>`, not the qualified name (`packages/tui/src/component/prompt/autocomplete.tsx:429-431`) |
 | Permission prompt | generic body (`Call tool skill`); the exact `nested.<scope>.<skill>` pattern appears in the **Always allow** option (`packages/tui/src/util/permission.ts:139-143`, `154-160`, `packages/tui/src/routes/session/permission.tsx:223-231`) |
-| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:871-873`, `src/registry.ts:247-263`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:44`, `src/registry.ts:977-1052`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
+| Duplicate | a nested entry is suppressed when its `canonicalPath` equals the **realpath** of a foreign entry's `path` (`src/registry.ts:870-872`, `src/registry.ts:247-263`); while the foreign tier still looks incomplete the check is re-run at 1.5 s and 4 s (`src/registry.ts:44`, `src/registry.ts:976-1051`), so a duplicate can survive up to about 4 s then — otherwise it waits for the next refresh |
 | Config | the five scan budgets are plugin options on the `opencode.json` entry (object form); display caps and the command-template ceiling stay constants |
 
 `autoinvoke: false` comes from `metadata.opencode/autoinvoke` in the skill's frontmatter, or
@@ -404,5 +407,5 @@ filesystem events into one refresh, and a prompt-triggered refresh runs at most 
 2000 ms window. Each refresh is a full bounded scan, so a very large tree costs one scan per
 burst, not one scan per event. A refresh can also schedule a deferred dedupe check at 1.5 s
 and 4 s; that check runs after `refresh()` has returned and never delays it
-(`src/registry.ts:909`, `src/registry.ts:927-955`, `src/registry.ts:986-990`). Details in
+(`src/registry.ts:908`, `src/registry.ts:926-954`, `src/registry.ts:985-989`). Details in
 [architecture.md](architecture.md#refresh-model).
