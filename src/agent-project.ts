@@ -100,12 +100,14 @@ export function projectAgent(candidate: IndexedAgent, home: string): AdmittedAge
 
 /**
  * Admission drops what must not enter the map — a disabled source, an ID the host already
- * holds, an ID a previous audit held out — and names each drop relative to the location.
- * A same-name pair in two subprojects is admitted twice: the IDs differ by scope (G12).
+ * holds, an ID a previous audit held out, and a second source composing an ID an earlier one
+ * already claimed — and names each drop relative to the location. A same-name pair in two
+ * subprojects is admitted twice: the IDs differ by the subproject path (G12).
  */
 export function admitAgents(input: AdmitAgentsInput): AdmitAgentsResult {
   const admitted: AdmittedAgent[] = []
   const diagnostics: string[] = []
+  const claimed = new Map<string, string>()
 
   for (const candidate of input.agents) {
     const display = input.display(candidate.canonicalPath)
@@ -120,6 +122,15 @@ export function admitAgents(input: AdmitAgentsInput): AdmitAgentsResult {
       diagnostics.push(`agent-skip: ${reason} ${display}`)
       continue
     }
+    // A7/G12: a native name may contain `/`, so `A` + `x/y` and `A/x` + `y` compose one ID.
+    // The index's own order decides: the earlier admitted entry stands, the later is refused
+    // and both location-relative paths are named, so the drop is never silent.
+    const earlier = claimed.get(candidate.id)
+    if (earlier !== undefined) {
+      diagnostics.push(`agent-id-collision: ${candidate.id} (${earlier} + ${display})`)
+      continue
+    }
+    claimed.set(candidate.id, display)
     admitted.push(projectAgent(candidate, input.home))
   }
 
