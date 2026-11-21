@@ -171,12 +171,12 @@ describe("markers", () => {
     try {
       const entries = byName(await listing(h.fake))
 
-      // Pinned behaviour, recorded as an A3 amendment candidate (not changed here):
-      // `.opencode` matches the marker by name with no type test (`src/scan.ts:745-750`), so
-      // `A` is a subproject; `collectConfigDocuments` then reads `A/.opencode/opencode.json`
-      // through the link, because only the document's own final component is symlink-tested
-      // (`src/scan.ts:639-650`). The linked root itself is never walked (`:203-206`), so the
-      // file agent inside it is invisible while the document it holds is not.
+      // A3: `.opencode` matches the marker by name with no type test (`src/scan.ts:752-757`),
+      // so `A` is a subproject; the linked root itself is never walked (`src/scan.ts:203-206`).
+      // Its document is read only because `realpath(A/.opencode/opencode.json)` stays inside
+      // `realpath(A)`; a target outside the subproject is refused with `config-symlink:` and
+      // never opened (`src/scan.ts:641-654`). The file agent beside the document is inside the
+      // linked root, so it stays invisible while the document it shares a directory with does not.
       expect(Object.keys(entries).sort()).toEqual(["A/linked", "A/real/.opencode-doc/linked"])
       expect(entries["A/linked"]?.system).toBeUndefined()
       // The document inside the linked root is not scanned as an agent file, so the file agent
@@ -189,6 +189,30 @@ describe("markers", () => {
 
       expect(h.registry.outcome.diagnostics).toContain("directory-symlink: A/.opencode")
       expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-skip:"))).toEqual([])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("refuses a document reached through a linked .opencode that leaves the subproject", async () => {
+    const h = await harness(async (fixture, outside) => {
+      await writeFile(
+        join(outside, "opencode.json"),
+        JSON.stringify({ agents: { stolen: { system: "PWN", mode: "subagent" } } }),
+      )
+      await fixture.mkdirp("A")
+      await symlink(outside, join(fixture.root, "A/.opencode"))
+    })
+
+    try {
+      expect(await listing(h.fake)).toEqual([])
+      expect(h.registry.agents).toEqual([])
+      expect(
+        h.registry.outcome.diagnostics.filter((line) => line === "config-symlink: A/.opencode/opencode.json"),
+      ).toHaveLength(1)
+      expect(h.registry.outcome.diagnostics).toContain("directory-symlink: A/.opencode")
+      expect(refusals(h.registry)).toEqual([])
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("budget-"))).toEqual([])
     } finally {
       await h.dispose()
     }
