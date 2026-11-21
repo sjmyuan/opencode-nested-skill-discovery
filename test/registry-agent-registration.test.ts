@@ -408,6 +408,13 @@ describe("isolation", () => {
       expect(h.fake.agentTransforms).toHaveLength(0)
       expect(await listing(h.fake)).toEqual([])
 
+      // Reported once per instance, and the attempt is not final: a second failed refresh
+      // registers nothing new and stays silent.
+      const stillFailing = await h.registry.refresh()
+      expect(stillFailing.diagnostics.filter((line) => line.startsWith("agent-register:"))).toEqual([])
+      expect(h.fake.agentTransforms).toHaveLength(0)
+      expect(await listing(h.fake)).toEqual([])
+
       // The registration is retried, not abandoned: one transient host rejection must not
       // cost the instance its agents for its whole life.
       h.fake.clearFailures()
@@ -421,7 +428,7 @@ describe("isolation", () => {
     }
   })
 
-  it("names a whole-payload replay failure once, in the payload form", async () => {
+  it("names a whole-payload replay failure in the payload form, once per failing replay", async () => {
     const h = await harness(withBoth)
 
     try {
@@ -430,12 +437,19 @@ describe("isolation", () => {
       replayControl.payloadError = new Error("payload exploded")
 
       await h.registry.refresh()
-      // Diagnostics raised during a reload surface in the next refresh's outcome.
-      const outcome = await h.registry.refresh()
-      expect(outcome.diagnostics.filter((line) => line.startsWith("agent-replay:"))).toEqual([
+      // Diagnostics raised during a replay surface in the next refresh's outcome, so the error
+      // is cleared before that refresh: the reported replay is the failing one, not this one.
+      replayControl.payloadError = undefined
+      const surfaced = await h.registry.refresh()
+      expect(surfaced.diagnostics.filter((line) => line.startsWith("agent-replay:"))).toEqual([
         "agent-replay: payload: payload exploded",
       ])
-      expect(outcome.ok).toBe(true)
+      expect(surfaced.ok).toBe(true)
+
+      // Per failing replay, not sticky: a clean refresh reports none and registers no new transform.
+      const clean = await h.registry.refresh()
+      expect(clean.diagnostics.filter((line) => line.startsWith("agent-replay:"))).toEqual([])
+      expect(h.fake.agentTransforms).toHaveLength(1)
     } finally {
       replayControl.payloadError = undefined
       await h.dispose()
