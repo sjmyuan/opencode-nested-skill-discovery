@@ -46,7 +46,8 @@ describe("command candidates reuse the repo-family rule", () => {
     const result = await filtered(ws)
 
     await rm(absolute(ws, "wt/.opencode/command/deploy.md"))
-    const survivorOnly = await scanCommands(ws)
+    // Same depth regime as filtered(): the control must not depend on the default.
+    const survivorOnly = await scanCommands(ws, ws.root, DEPTH_5)
 
     expect(result.commands).toEqual(survivorOnly)
     expect(only(result.commands).name).toBe("deploy")
