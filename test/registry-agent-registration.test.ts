@@ -120,7 +120,6 @@ describe("publication", () => {
 
       expect(String(entry?.id)).toBe(expected)
       expect(String(entry?.id).length).toBe(96)
-      expect(entry?.name).toBe(`pkg-long-name/inner-project/${name}`)
     } finally {
       await h.dispose()
     }

@@ -4,8 +4,7 @@ import { relative, sep } from "node:path"
 import { Permission } from "@opencode/schema/permission"
 import {
   CONFIG_DOCUMENT_ORDER,
-  ID_PREFIX,
-  MAX_AGENT_SLUG_LENGTH,
+  MAX_ID_LENGTH,
   type AgentCandidate,
   type AgentConfigCandidate,
   type AgentRootKind,
@@ -15,16 +14,18 @@ import { readConfigDocument, errorCode, type ConfigDocument } from "./agent-conf
 import { decodeAgentFile, toFields, type AgentFields } from "./agent-decode.ts"
 import { filterAgentFamilies, type AgentFamilyEntry } from "./agent-family.ts"
 import { createFamilyPass, type FamilyPass } from "./family.ts"
-import { scopeTokenFor, slug } from "./indexer.ts"
 
 /**
  * The agent index (ADR agent A6–A8, A11, A14; contract C4/C5 config arms).
  *
  * One entry per (subproject, native name) across both sources, merged in A8 order —
  * `opencode.json` < `opencode.jsonc` < `.opencode/opencode.json` < `.opencode/opencode.jsonc`
- * < agent files sorted — then family-filtered and minted as
- * `nested.<scopeToken>.<agentToken>`. The first source owns the token; a document decodes
- * as a unit, so a failed document contributes neither agents nor permissions.
+ * < agent files sorted — then family-filtered and minted as the readable
+ * `<location-relative subproject path>/<native name>`. A8's `merge` keeps a name intact, so an
+ * inner `/` survives; past 96 code points the prefix is cut to 87 and the owner's hash is
+ * appended, never leaving the cut prefix ending on `/` (A7). The first source owns the
+ * identity; a document decodes as a unit, so a failed document contributes neither agents nor
+ * permissions.
  *
  * Nothing here registers, projects or reloads: the result is data for a later cell.
  */
@@ -80,17 +81,18 @@ const compareText = (left: string, right: string): number => (left < right ? -1 
 const hash8 = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 8)
 
 /**
- * A7: a file token hashes the file's realpath; a config token hashes the document's
- * realpath joined to the map key, so a same-name pair never collides.
+ * A7: the readable ID — `<subproject path>/<native name>` (bare when the path is empty), with a
+ * native name's inner `/` intact. Only an ID past `MAX_ID_LENGTH` falls back: the prefix is cut
+ * to 87 code points, one fewer when that cut would end on `/`, and the owning source's hash is
+ * appended. Total: it never throws, strips or renames.
  */
-export function agentTokenFor(
-  name: string,
-  source:
-    | { readonly kind: "file"; readonly realPath: string }
-    | { readonly kind: "config"; readonly configRealPath: string; readonly key: string },
-): string {
-  const input = source.kind === "file" ? source.realPath : `${source.configRealPath}#${source.key}`
-  return `${slug(name, MAX_AGENT_SLUG_LENGTH)}-${hash8(input)}`
+export function agentIdFor(subprojectPath: string, nativeName: string, ownerRealPath: string): string {
+  const base = [...subprojectPath.split("/").filter((segment) => segment !== ""), nativeName].join("/")
+  const characters = Array.from(base)
+  if (characters.length <= MAX_ID_LENGTH) return base
+  const cut = characters.slice(0, MAX_ID_LENGTH - 9)
+  const prefix = cut[cut.length - 1] === "/" ? cut.slice(0, -1) : cut
+  return `${prefix.join("")}-${hash8(ownerRealPath)}`
 }
 
 interface Candidate extends AgentFamilyEntry {
@@ -274,18 +276,10 @@ function mergeFields(sources: readonly AgentSource[]): AgentFields {
 
 function indexOne(candidate: Candidate): IndexedAgent {
   const owner = candidate.owner
-  const token =
-    owner.kind === "file"
-      ? agentTokenFor(candidate.name, { kind: "file", realPath: owner.canonicalPath })
-      : agentTokenFor(candidate.name, {
-          kind: "config",
-          configRealPath: owner.canonicalPath,
-          key: candidate.name,
-        })
 
   return {
     ...candidate.fields,
-    id: `${ID_PREFIX}${scopeTokenFor(candidate.subprojectRealPath)}.${token}`,
+    id: agentIdFor(candidate.subproject, candidate.name, owner.canonicalPath),
     name: candidate.name,
     canonicalPath: owner.canonicalPath,
     subproject: owner.subproject,
