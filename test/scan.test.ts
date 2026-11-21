@@ -202,7 +202,7 @@ describe("markers and subproject attribution", () => {
     await f.write("one/two/three/CLAUDE.md")
     await f.write("one/two/three/.claude/skills/deep/SKILL.md")
 
-    const result = await scanSkills({ location: f.root })
+    const result = await scanSkills({ location: f.root, limits: { ...DEFAULT_SCAN_LIMITS, maxDepth: 5 } })
 
     expect(result.candidates[0]?.subproject).toBe("one/two/three")
     expect(result.candidates[0]?.subproject).not.toContain("\\")
