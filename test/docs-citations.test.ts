@@ -159,7 +159,7 @@ const ANCHORS: ReadonlyArray<{
   { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "48-50", marker: "export function scopeTokenFor" },
   { doc: "docs/limits.md", target: "src/indexer.ts", ranges: "62-64", marker: "export function skillTokenFor" },
   { doc: "docs/architecture.md", target: "src/scan.ts", ranges: "627-665", marker: "async function collectConfigDocuments" },
-  { doc: "docs/architecture.md", target: "src/agent-index.ts", ranges: "107-207", marker: "export async function indexAgents" },
+  { doc: "docs/architecture.md", target: "src/agent-index.ts", ranges: "109-209", marker: "export async function indexAgents" },
   { doc: "docs/architecture.md", target: "src/agent-project.ts", ranges: "76-99", marker: "export function projectAgent" },
   {
     doc: "docs/architecture.md",

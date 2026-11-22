@@ -196,7 +196,7 @@ Merging follows native document order — `opencode.json` < `opencode.jsonc` <
 (`src/contracts.ts:225-241`). A field applies when the source sets it, so a later source
 overrides and an absent field never erases one; `permissions` append and `request` keys
 assign. One entry remains per (subproject, native name), the first source owns the identity, and
-a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:107-207`).
+a merge emits one `agent-merge: <name>` line (`src/agent-index.ts:109-209`).
 
 `default_agent` is never applied: it is decoded only to emit one
 `agent-default-ignored: <document>` line. A document's read set is checked in a fixed order

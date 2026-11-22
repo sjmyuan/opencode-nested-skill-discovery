@@ -49,7 +49,7 @@ leaves the new snapshot in place (see [Failure model](#failure-model)).
 | 1 | Canonicalise the location (`realpath`, falling back to `resolve`) | `src/registry.ts:46-52`, `575-576` |
 | 2 | Resolve the native skill and agent roots to exclude | `src/registry.ts:585`, `src/native.ts:51-53` |
 | 3 | Scan the location for skill, command, agent and config-document candidates, then reconcile the watcher set from them | `src/registry.ts:634-647`, `src/scan.ts:107-176` |
-| 4 | Read, parse and dedupe candidates, substitute each config document within its confinement and caps, decode its read set per entry, index both agent sources and project the admitted ones into a frozen payload, then drop every non-survivor checkout of a repo family | `src/registry.ts:658-727`, `src/indexer.ts:205-258`, `src/agent-index.ts:107-207`, `src/agent-project.ts:76-149`, `src/family.ts:276-304` |
+| 4 | Read, parse and dedupe candidates, substitute each config document within its confinement and caps, decode its read set per entry, index both agent sources and project the admitted ones into a frozen payload, then drop every non-survivor checkout of a repo family | `src/registry.ts:658-727`, `src/indexer.ts:205-258`, `src/agent-index.ts:109-209`, `src/agent-project.ts:76-151`, `src/family.ts:276-304` |
 | 5 | Compose display names and assemble frozen entries | `src/registry.ts:735-737`, `src/registry.ts:117-136` |
 | 6 | Group entries by scope token and freeze the snapshot | `src/registry.ts:148-199` |
 | 7 | Persist manifest, cache, and version | `src/registry.ts:741-753`, `src/manifest.ts:132-213` |
@@ -132,9 +132,9 @@ read set; an unreadable or malformed document is dropped whole with one `agent-s
 while a bad `agents.<key>` drops that key alone and keeps its siblings and the document's
 top-level rules (`src/agent-config.ts:61-146`, `src/agent-decode.ts:51-68`). Merging follows
 native document order, then agent files sorted; the first source owns the identity
-(`src/agent-index.ts:89-208`). A subproject's top-level `permissions` apply to every agent
+(`src/agent-index.ts:90-209`). A subproject's top-level `permissions` apply to every agent
 indexed from it, file and config alike, before the agent's own rules
-(`src/agent-index.ts:115-183`).
+(`src/agent-index.ts:117-185`).
 
 Both agent sources are indexed, family-filtered and identified by the readable
 `<location-relative subproject path>/<native name>`: a config entry's name is its `agents` key
