@@ -84,8 +84,8 @@ const hash8 = (value: string): string => createHash("sha256").update(value).dige
  * A7: the readable ID — `<subproject path>/<native name>` (bare when the path is empty), with a
  * native name's inner `/` intact. Only an ID past `MAX_ID_LENGTH` falls back: the prefix is cut
  * to 87 code points, every trailing `/` is dropped from that cut so the fallback never reads
- * `…/-<hex8>`, and the owning source's hash is appended. Total: it never throws, strips or
- * renames.
+ * `…/-<hex8>`, and the owning source's hash is appended. It never throws, and it never
+ * normalizes, strips or escapes a name — the trim above touches separators only.
  */
 export function agentIdFor(subprojectPath: string, nativeName: string, ownerRealPath: string): string {
   const base = [...subprojectPath.split("/").filter((segment) => segment !== ""), nativeName].join("/")
