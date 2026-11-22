@@ -335,9 +335,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
   /**
    * The pre-registration agent listing (ADR agent G8, C4): read once, before the transform
-   * exists. A post-registration read would hold our own entries, so it is never re-read —
-   * the audit grows the set afterwards instead (D6). This read also seeds G4's native-name
-   * map, because a later read would offer our own entries as inherit targets.
+   * exists, so a later read never offers our own entries as inherit targets (D6). G4's set is
+   * empty on this call by construction (`currentAgents` unassigned, `agentSeeded` latches), so
+   * the filter is the contract `test/agent-seed.test.ts` proves, never an active one.
    */
   const seedHeldAgents = async (): Promise<void> => {
     if (agentSeeded) return
