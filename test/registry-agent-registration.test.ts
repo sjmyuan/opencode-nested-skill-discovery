@@ -308,6 +308,47 @@ describe("admission diagnostics", () => {
     }
   })
 
+  it("refuses a wildcard that only the subproject path introduces", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write("sub*/.opencode/agent/plain.md", "---\ndescription: d\nmode: subagent\n---\n# Plain\n")
+    })
+
+    try {
+      expect(await listing(h.fake)).toEqual([])
+      // A6/A7: the index composed the id `sub*/plain` from the subproject path alone.
+      expect(h.registry.agents.map((agent) => agent.id)).toContain("sub*/plain")
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-skip:"))).toEqual([
+        "agent-skip: wildcard sub*/.opencode/agent/plain.md",
+      ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("refuses the later of two file sources composing one id", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write(
+        "A/.opencode/agent/x/y.md",
+        "---\ndescription: from-A-nested-path\nmode: subagent\n---\n# X\n",
+      )
+      await fixture.write("A/x/AGENTS.md", "# x\n")
+      await fixture.write("A/x/.opencode/agent/y.md", "---\ndescription: from-A-x\nmode: subagent\n---\n# Y\n")
+    })
+
+    try {
+      const rows = (await listing(h.fake)).filter((entry) => String(entry.id) === "A/x/y")
+      expect(rows).toHaveLength(1)
+      // The canonicalPath-earlier file source wins: `A/.opencode/…` sorts before `A/x/…`.
+      expect(rows[0]?.description).toBe("from-A-nested-path")
+      expect((await listing(h.fake)).some((entry) => entry.description === "from-A-x")).toBe(false)
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-id-collision:"))).toEqual([
+        "agent-id-collision: A/x/y (A/.opencode/agent/x/y.md + A/x/.opencode/agent/y.md)",
+      ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
   it("emits no agent diagnostic for a plain agent document", async () => {
     const h = await harness(async (fixture) => {
       await fixture.write("A/.opencode/skills/deploy/SKILL.md", "---\nname: deploy\n---\n# Deploy\n")

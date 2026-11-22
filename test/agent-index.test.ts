@@ -158,6 +158,44 @@ describe("native names and identity", () => {
     expect(id).toBe(`${Array.from(`${subproject}/${key}`).slice(0, 86).join("")}-${sha8(await realpath(document))}`)
   })
 
+  it("strips a run of slashes so the trimmed prefix never ends on /", async () => {
+    const f = await fixture()
+    // The cut lands on a doubled separator: one character less still ends on `/`.
+    const subproject = "z".repeat(85)
+    const key = `/${"k".repeat(85)}`
+    const document = await f.write(`${subproject}/opencode.json`, JSON.stringify({ agents: { [key]: { description: "d" } } }))
+
+    const id = String(byName((await index(f)).agents)[key]?.id)
+
+    expect(id).not.toContain("/-")
+    expect(Array.from(id)).toHaveLength(94)
+    expect(id).toBe(`${subproject}-${sha8(await realpath(document))}`)
+  })
+
+  it("keeps an id of exactly 96 code points in the base form", async () => {
+    const f = await fixture()
+    const name = "n".repeat(94)
+    await f.write(`A/.opencode/agent/${name}.md`, "---\ndescription: d\n---\nbody\n")
+
+    const id = String(byName((await index(f)).agents)[name]?.id)
+
+    expect(id).toBe(`A/${name}`)
+    expect(Array.from(id)).toHaveLength(96)
+    expect(id).not.toMatch(/-[0-9a-f]{8}$/)
+  })
+
+  it("hashes an id of 97 code points into exactly 96", async () => {
+    const f = await fixture()
+    const name = "m".repeat(95)
+    const file = await f.write(`A/.opencode/agent/${name}.md`, "---\ndescription: d\n---\nbody\n")
+    const prefix = Array.from(`A/${name}`).slice(0, 87).join("")
+
+    const id = String(byName((await index(f)).agents)[name]?.id)
+
+    expect(id).toBe(`${prefix}-${sha8(await realpath(file))}`)
+    expect(Array.from(id)).toHaveLength(96)
+  })
+
   it("gives two subprojects that declare the same name distinct ids", async () => {
     const f = await fixture()
     await f.write("A/opencode.json", JSON.stringify({ agents: { shared: { description: "a" } } }))
