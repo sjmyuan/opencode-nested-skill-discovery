@@ -11,7 +11,7 @@ import type { ModeSeed } from "../src/replay.ts"
  * is reported once and the ID is held out of the next snapshot.
  */
 
-const ID = "nested.one.token-translator"
+const ID = "one/translator"
 const SEED: readonly Permission.Rule[] = Agent.Info.default(ID as Agent.ID).permissions
 const PARENT: Permission.Rule = { action: "bash", resource: "*", effect: "deny" }
 
@@ -184,14 +184,14 @@ describe("dedupe and scope", () => {
 
   it("ignores rows for other IDs", async () => {
     const agent = admitted()
-    const other = published(agent, { id: "nested.two.other", request: { settings: {}, headers: { "x-z": "9" }, body: {} } })
+    const other = published(agent, { id: "two/other", request: { settings: {}, headers: { "x-z": "9" }, body: {} } })
 
     expect(await audit([agent], [], [published(agent), other])).toEqual({ shadowed: [], diagnostics: [] })
   })
 
   it("reports every mismatched ID in one pass", async () => {
     const first = admitted()
-    const second = admitted({ id: "nested.two.other" })
+    const second = admitted({ id: "two/other" })
 
     const result = await audit([first, second], [], [])
 

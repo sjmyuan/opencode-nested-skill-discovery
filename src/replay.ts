@@ -45,11 +45,31 @@ export function applyRegistry(
   return diagnostics
 }
 
-/** The pre-registration listing's `mode`/`hidden` per ID; a `nested.` ID is never in it (G4). */
+/** The pre-registration listing's `mode`/`hidden` per ID, minus the IDs the snapshot owns (G4). */
 export type ModeSeed = ReadonlyMap<
   string,
   { readonly mode: "subagent" | "primary" | "all"; readonly hidden: boolean }
 >
+
+/** What the seed needs from a listed row; the host's `agent.list()` carries more. */
+export interface ModeSeedRow {
+  readonly id: string
+  readonly mode: "subagent" | "primary" | "all"
+  readonly hidden: boolean
+}
+
+/**
+ * G4: the inheritance seed holds the rows the published snapshot does not own. Membership in
+ * those IDs, never a `nested.` prefix test — a native row may legitimately start with `nested.`
+ * and must still be an inheritance target.
+ */
+export function buildModeSeed(rows: readonly ModeSeedRow[], owned: ReadonlySet<string>): ModeSeed {
+  return new Map(
+    rows
+      .filter((row) => !owned.has(String(row.id)))
+      .map((row) => [String(row.id), { mode: row.mode, hidden: row.hidden }] as const),
+  )
+}
 
 /**
  * Insert-on-miss replay of the agent payload (ADR agent G1, G4, G8).

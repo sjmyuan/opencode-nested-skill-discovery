@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createHash } from "node:crypto"
 import type { Permission } from "@opencode/schema/permission"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext, type FakeAgentSeed, type FakeContext } from "./support/fake-context.ts"
@@ -98,10 +99,58 @@ describe("publication", () => {
       expect(entries["A/translator"]?.system).toBe("# Translator")
       expect(entries["A/reviewer"]?.mode).toBe("all")
       expect(entries["A/reviewer"]?.hidden).toBe(false)
-      for (const entry of Object.values(entries)) {
-        expect(String(entry.id)).toMatch(/^nested\.[a-z0-9-]+\.[a-z0-9-]+$/)
-      }
+      expect(Object.values(entries).map((entry) => String(entry.id)).sort()).toEqual(["A/reviewer", "A/translator"])
       expect(h.registry.outcome.ok).toBe(true)
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("registers a readable id longer than 96 characters under the trimmed form", async () => {
+    const name = "a".repeat(75)
+    const h = await harness(async (fixture) => {
+      await fixture.write(`pkg-long-name/inner-project/.opencode/agent/${name}.md`, "---\ndescription: d\n---\nbody\n")
+    })
+
+    try {
+      const [entry] = await listing(h.fake)
+      const prefix = Array.from(`pkg-long-name/inner-project/${name}`).slice(0, 87).join("")
+      const file = await h.fixture.realpathOf(`pkg-long-name/inner-project/.opencode/agent/${name}.md`)
+      const expected = `${prefix}-${createHash("sha256").update(file).digest("hex").slice(0, 8)}`
+
+      expect(String(entry?.id)).toBe(expected)
+      expect(String(entry?.id).length).toBe(96)
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("refuses the later source and publishes the earlier one", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write(
+        "A/opencode.json",
+        JSON.stringify({ agents: { "x/y": { description: "from-A", mode: "subagent" } } }),
+      )
+      await fixture.write("A/x/AGENTS.md", "# x\n")
+      await fixture.write("A/x/.opencode/agent/y.md", "---\ndescription: from-file-A-x\nmode: subagent\n---\n# Y\n")
+    })
+
+    const collision = "agent-id-collision: A/x/y (A/opencode.json + A/x/.opencode/agent/y.md)"
+
+    try {
+      const rows = (await listing(h.fake)).filter((entry) => String(entry.id) === "A/x/y")
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.description).toBe("from-A")
+      expect((await listing(h.fake)).some((entry) => entry.description === "from-file-A-x")).toBe(false)
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-id-collision:"))).toEqual([collision])
+      // The index still lists both candidates: the refusal is admission's, not the index's.
+      expect(h.registry.agents.filter((agent) => agent.id === "A/x/y")).toHaveLength(2)
+
+      const before = JSON.stringify(await listing(h.fake))
+      const second = await h.registry.refresh()
+
+      expect(second.diagnostics.filter((line) => line.startsWith("agent-id-collision:"))).toEqual([collision])
+      expect(JSON.stringify(await listing(h.fake))).toBe(before)
     } finally {
       await h.dispose()
     }
@@ -253,6 +302,47 @@ describe("admission diagnostics", () => {
       expect(entry?.request).toEqual({ settings: {}, headers: { "x-a": "1" }, body: { temperature: 0.2 } })
       expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-request:"))).toEqual([
         `agent-request: ${String(entry?.id)}`,
+      ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("refuses a wildcard that only the subproject path introduces", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write("sub*/.opencode/agent/plain.md", "---\ndescription: d\nmode: subagent\n---\n# Plain\n")
+    })
+
+    try {
+      expect(await listing(h.fake)).toEqual([])
+      // A6/A7: the index composed the id `sub*/plain` from the subproject path alone.
+      expect(h.registry.agents.map((agent) => agent.id)).toContain("sub*/plain")
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-skip:"))).toEqual([
+        "agent-skip: wildcard sub*/.opencode/agent/plain.md",
+      ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("refuses the later of two file sources composing one id", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write(
+        "A/.opencode/agent/x/y.md",
+        "---\ndescription: from-A-nested-path\nmode: subagent\n---\n# X\n",
+      )
+      await fixture.write("A/x/AGENTS.md", "# x\n")
+      await fixture.write("A/x/.opencode/agent/y.md", "---\ndescription: from-A-x\nmode: subagent\n---\n# Y\n")
+    })
+
+    try {
+      const rows = (await listing(h.fake)).filter((entry) => String(entry.id) === "A/x/y")
+      expect(rows).toHaveLength(1)
+      // The canonicalPath-earlier file source wins: `A/.opencode/…` sorts before `A/x/…`.
+      expect(rows[0]?.description).toBe("from-A-nested-path")
+      expect((await listing(h.fake)).some((entry) => entry.description === "from-A-x")).toBe(false)
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-id-collision:"))).toEqual([
+        "agent-id-collision: A/x/y (A/.opencode/agent/x/y.md + A/x/.opencode/agent/y.md)",
       ])
     } finally {
       await h.dispose()

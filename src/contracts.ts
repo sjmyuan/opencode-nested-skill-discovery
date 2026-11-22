@@ -168,7 +168,6 @@ export const ID_PREFIX = "nested."
 export const MAX_ID_LENGTH = 96
 export const MAX_SCOPE_SLUG_LENGTH = 24
 export const MAX_SKILL_SLUG_LENGTH = 40
-export const MAX_AGENT_SLUG_LENGTH = 40
 export const MAX_NAME_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 500
 export const DEBOUNCE_MS = 250

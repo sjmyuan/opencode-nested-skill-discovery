@@ -100,17 +100,27 @@ export function projectAgent(candidate: IndexedAgent, home: string): AdmittedAge
 
 /**
  * Admission drops what must not enter the map — a disabled source, an ID the host already
- * holds, an ID a previous audit held out — and names each drop relative to the location.
- * A same-name pair in two subprojects is admitted twice: the IDs differ by scope (G12).
+ * holds, an ID a previous audit held out, and a second source composing an ID an earlier one
+ * already claimed — and names each drop relative to the location. A same-name pair in two
+ * subprojects is admitted twice: the IDs differ by the subproject path (G12).
  */
 export function admitAgents(input: AdmitAgentsInput): AdmitAgentsResult {
   const admitted: AdmittedAgent[] = []
   const diagnostics: string[] = []
+  const claimed = new Map<string, string>()
 
   for (const candidate of input.agents) {
     const display = input.display(candidate.canonicalPath)
     if (candidate.disabled === true) {
       diagnostics.push(`agent-skip: disabled ${display}`)
+      continue
+    }
+    // A7/G12, source level: the ID doubles as a wildcard permission resource — the subagent
+    // tool saves it (`subagent.ts:147-151`) and a saved rule replays it as the pattern side
+    // (`permission.ts:94-101`), so `sub/*` would allow every agent under `sub/`. Refused, never
+    // stripped or escaped into a different name.
+    if (candidate.id.includes("*") || candidate.id.includes("?")) {
+      diagnostics.push(`agent-skip: wildcard ${display}`)
       continue
     }
     if (input.held.has(candidate.id)) {
@@ -120,6 +130,17 @@ export function admitAgents(input: AdmitAgentsInput): AdmitAgentsResult {
       diagnostics.push(`agent-skip: ${reason} ${display}`)
       continue
     }
+    // A7/G12: a native name may contain `/`, so `A` + `x/y` and `A/x` + `y` compose one ID.
+    // The index's own order decides: config sources before files, then `compareAgents`'
+    // canonicalPath order, which `indexAgents`' stable id sort preserves — never re-derived
+    // here. The earlier admitted entry stands, the later is refused, and both location-relative
+    // paths are named, so the drop is never silent.
+    const earlier = claimed.get(candidate.id)
+    if (earlier !== undefined) {
+      diagnostics.push(`agent-id-collision: ${candidate.id} (${earlier} + ${display})`)
+      continue
+    }
+    claimed.set(candidate.id, display)
     admitted.push(projectAgent(candidate, input.home))
   }
 

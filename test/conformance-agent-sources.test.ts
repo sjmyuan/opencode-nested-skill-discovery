@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest"
 import type { Permission } from "@opencode/schema/permission"
-import { agentTokenFor } from "../src/agent-index.ts"
-import { scopeTokenFor } from "../src/indexer.ts"
 import { createRegistry } from "../src/registry.ts"
 import { fakeContext, type FakeContext } from "./support/fake-context.ts"
 import { createRegistryFixture, type RegistryFixture } from "./support/registry-fixtures.ts"
@@ -88,15 +86,9 @@ describe("both sources", () => {
 
       const [published] = entries
       // A8: the file ranks after the document, so it wins the fields it sets and the
-      // document keeps the ones it alone declares. `opencode.json` owns the token.
+      // document keeps the ones it alone declares. `opencode.json` owns the identity.
       expect(published?.name).toBe("A/shared")
-      expect(published?.id).toBe(
-        `nested.${scopeTokenFor(await h.fixture.realpathOf("A"))}.${agentTokenFor("shared", {
-          kind: "config",
-          configRealPath: await h.fixture.realpathOf("A/opencode.json"),
-          key: "shared",
-        })}`,
-      )
+      expect(published?.id).toBe("A/shared")
       expect(published?.description).toBe("from file")
       expect(published?.mode).toBe("all")
       expect(published?.system).toBe("# From file")
@@ -107,6 +99,27 @@ describe("both sources", () => {
       ])
       expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-merge:"))).toEqual([
         "agent-merge: shared (A/opencode.json + A/.opencode/agent/shared.md)",
+      ])
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it("refuses a config agent whose key would put a wildcard in its id", async () => {
+    const h = await harness(async (fixture) => {
+      await fixture.write(
+        "A/opencode.json",
+        JSON.stringify({ agents: { "star*": { description: "d" }, kept: { description: "d" } } }),
+      )
+    })
+
+    try {
+      const entries = await listing(h.fake)
+      expect(entries.map((entry) => entry.name)).toEqual(["A/kept"])
+      expect(entries.map((entry) => String(entry.id))).toEqual(["A/kept"])
+      expect(entries.some((entry) => String(entry.id).includes("*"))).toBe(false)
+      expect(h.registry.outcome.diagnostics.filter((line) => line.startsWith("agent-skip: wildcard"))).toEqual([
+        "agent-skip: wildcard A/opencode.json",
       ])
     } finally {
       await h.dispose()
@@ -179,12 +192,8 @@ describe("held ID", () => {
     const fixture = await createRegistryFixture()
     await fixture.write("A/.opencode/agent/translator.md", "---\ndescription: Translates\n---\n# Translator\n")
 
-    // The literal ID the index mints for this file, computed from the same fixture root so
-    // the token cannot differ from what the scan hashes.
-    const id = `nested.${scopeTokenFor(await fixture.realpathOf("A"))}.${agentTokenFor("translator", {
-      kind: "file",
-      realPath: await fixture.realpathOf("A/.opencode/agent/translator.md"),
-    })}`
+    // The literal ID the index mints for this file: the readable path, no hash in the base form.
+    const id = "A/translator"
 
     const fake = fakeContext([], {
       directory: fixture.root,

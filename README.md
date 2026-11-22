@@ -20,8 +20,8 @@ display names, add-only advertisement (the transform appends; a nested entry tha
 a native skill's path is suppressed), manifest/cache persistence, and refresh. Refresh
 means a watcher set derived from the last good scan — every discovered skill and command
 root — so an added, edited, or deleted command file republishes within one coalescing timer
-at `DEBOUNCE_MS = 250` (`src/contracts.ts:174`), with a prompt backstop throttled to one
-refresh per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:177`); the implementation is
+at `DEBOUNCE_MS = 250` (`src/contracts.ts:173`), with a prompt backstop throttled to one
+refresh per 2 s (`PROMPT_THROTTLE_MS`, `src/contracts.ts:176`); the implementation is
 `src/watch.ts` and `src/backstop.ts`. The suite includes in-process conformance tests for the union,
 projection, and dedupe claims (`test/conformance-*.test.ts`), and a live conformance harness
 ships separately in `smoke/`: `npm run smoke:check` boots private `opencode serve` processes
@@ -109,7 +109,7 @@ or `.hg`, or the `opencode-project` marker: a listed `.opencode` directory, or a
 exactly `opencode.json` or `opencode.jsonc`. Agents come from two sources — markdown files at
 any depth inside a `.opencode/agent` or `.opencode/agents` directory, and the `agents` map of
 the subproject's four config documents — and a pair sharing a native name merges into one
-entry, the earlier source owning the token. Both sources reach the host map through one early
+entry, the earlier source owning the identity. Both sources reach the host map through one early
 `agent.transform`, insert-on-miss only: a native or config entry is never written, and no entry
 is ever removed. An authored `mode` or `hidden` is published as written; a field the entry does
 not author is inherited from a same-named agent already in the runtime registry — a
@@ -118,6 +118,13 @@ builtin such as `general` — and otherwise publishes `primary` and visible. `pe
 nested deny is advisory at the parent. `{file:}` substitution and the config document itself
 are confined to the subproject: an outward reference substitutes nothing and is named in one
 `agent-skip:` line, and a symlinked document is refused with one `config-symlink:` line.
+
+An agent's ID is the readable `<subproject path>/<native name>` — this workspace's one live
+nested agent is `opencode/translator` — trimmed only past 96 code points to an 87-character
+prefix plus the owning source's hash, never left ending on `/`. A `*` or `?` is refused at
+admission instead of escaped, because the ID is a wildcard permission resource, and two sources
+composing one ID are refused at publication with both paths named. A session that held an ID
+issued before this grammar falls back to the host's default agent once.
 
 ## Subagent placement
 

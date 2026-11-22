@@ -34,7 +34,7 @@ import { persistCommands, persistRegistry } from "./manifest.ts"
 import { resolveNativeAgentRoots, resolveNativeRoots, type NativeRootInput } from "./native.ts"
 import { composeName, sanitizeText } from "./names.ts"
 import { resolveScanLimits } from "./options.ts"
-import { applyAgents, applyRegistry, type ModeSeed } from "./replay.ts"
+import { applyAgents, applyRegistry, buildModeSeed, type ModeSeed } from "./replay.ts"
 import { scanSkills } from "./scan.ts"
 import { createDebouncer, createWatchSet, deriveWatchTargets, type WatchFactory } from "./watch.ts"
 
@@ -335,9 +335,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
 
   /**
    * The pre-registration agent listing (ADR agent G8, C4): read once, before the transform
-   * exists. A post-registration read would hold our own entries, so it is never re-read —
-   * the audit grows the set afterwards instead (D6). This read also seeds G4's native-name
-   * map, because a later read would offer our own entries as inherit targets.
+   * exists, so a later read never offers our own entries as inherit targets (D6). G4's set is
+   * empty on this call by construction (`currentAgents` unassigned, `agentSeeded` latches), so
+   * the filter is the contract `test/agent-seed.test.ts` proves, never an active one.
    */
   const seedHeldAgents = async (): Promise<void> => {
     if (agentSeeded) return
@@ -345,10 +345,9 @@ export function createRegistry(ctx: Plugin.Context, options: RegistryOptions = {
     if (!listed.ok) return
     const rows = listed.value.data
     for (const entry of rows) heldAgents.add(String(entry.id))
-    agentSeed = new Map(
-      rows
-        .filter((entry) => !String(entry.id).startsWith("nested."))
-        .map((entry) => [String(entry.id), { mode: entry.mode, hidden: entry.hidden }] as const),
+    agentSeed = buildModeSeed(
+      rows,
+      new Set(currentAgents.map((agent) => agent.id)),
     )
     agentSeeded = true
   }
