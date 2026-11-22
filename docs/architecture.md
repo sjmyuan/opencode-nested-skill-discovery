@@ -131,7 +131,7 @@ realpath with the two R8 caps and one read per token), the JSONC parse, and the 
 read set; an unreadable or malformed document is dropped whole with one `agent-skip:` line,
 while a bad `agents.<key>` drops that key alone and keeps its siblings and the document's
 top-level rules (`src/agent-config.ts:61-146`, `src/agent-decode.ts:51-68`). Merging follows
-native document order, then agent files sorted; the first source owns the token
+native document order, then agent files sorted; the first source owns the identity
 (`src/agent-index.ts:89-208`). A subproject's top-level `permissions` apply to every agent
 indexed from it, file and config alike, before the agent's own rules
 (`src/agent-index.ts:115-183`).

@@ -109,7 +109,7 @@ or `.hg`, or the `opencode-project` marker: a listed `.opencode` directory, or a
 exactly `opencode.json` or `opencode.jsonc`. Agents come from two sources — markdown files at
 any depth inside a `.opencode/agent` or `.opencode/agents` directory, and the `agents` map of
 the subproject's four config documents — and a pair sharing a native name merges into one
-entry, the earlier source owning the token. Both sources reach the host map through one early
+entry, the earlier source owning the identity. Both sources reach the host map through one early
 `agent.transform`, insert-on-miss only: a native or config entry is never written, and no entry
 is ever removed. An authored `mode` or `hidden` is published as written; a field the entry does
 not author is inherited from a same-named agent already in the runtime registry — a

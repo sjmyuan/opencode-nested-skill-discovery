@@ -197,6 +197,13 @@ destination's indexed `nested.*` IDs through this same action before the child m
 refuses the placement. What that gate does not cover is listed in
 [docs/limits.md](limits.md#placement).
 
+An agent-facing rule matches the nested **agent**'s ID — the readable
+`<subproject path>/<native name>`, e.g. `opencode/translator` — never its display name: the
+`subagent` tool lists that ID and a call asserts the `subagent` action against it. A rule can
+therefore be pinned per subproject (`opencode/*`), and a source whose native name or subproject
+path carries `*` or `?` is refused at admission rather than sanitised, because the ID would
+otherwise act as a pattern of its own (A7/G12).
+
 ## Commands
 
 A published nested command has no permission action of its own: the invocation host is two
