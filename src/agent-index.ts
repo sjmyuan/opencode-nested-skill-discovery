@@ -83,16 +83,18 @@ const hash8 = (value: string): string => createHash("sha256").update(value).dige
 /**
  * A7: the readable ID — `<subproject path>/<native name>` (bare when the path is empty), with a
  * native name's inner `/` intact. Only an ID past `MAX_ID_LENGTH` falls back: the prefix is cut
- * to 87 code points, one fewer when that cut would end on `/`, and the owning source's hash is
- * appended. Total: it never throws, strips or renames.
+ * to 87 code points, every trailing `/` is dropped from that cut so the fallback never reads
+ * `…/-<hex8>`, and the owning source's hash is appended. Total: it never throws, strips or
+ * renames.
  */
 export function agentIdFor(subprojectPath: string, nativeName: string, ownerRealPath: string): string {
   const base = [...subprojectPath.split("/").filter((segment) => segment !== ""), nativeName].join("/")
   const characters = Array.from(base)
   if (characters.length <= MAX_ID_LENGTH) return base
   const cut = characters.slice(0, MAX_ID_LENGTH - 9)
-  const prefix = cut[cut.length - 1] === "/" ? cut.slice(0, -1) : cut
-  return `${prefix.join("")}-${hash8(ownerRealPath)}`
+  let end = cut.length
+  while (end > 0 && cut[end - 1] === "/") end -= 1
+  return `${cut.slice(0, end).join("")}-${hash8(ownerRealPath)}`
 }
 
 interface Candidate extends AgentFamilyEntry {
