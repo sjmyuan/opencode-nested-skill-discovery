@@ -113,7 +113,6 @@ describe("placement: the accepted-risk wording", () => {
 
   it("promises no pre-move `skill` check in any placement doc", () => {
     const permissions = normalise(read("docs/permissions.md"))
-    const architecture = normalise(read("docs/architecture.md"))
 
     for (const doc of ["README.md", "docs/limits.md", "docs/permissions.md"]) {
       expect(normalise(read(doc)), doc).toContain("runs no `skill` permission check before the move")
@@ -131,10 +130,10 @@ describe("placement: the accepted-risk wording", () => {
       )
     }
 
-    for (const text of [permissions, architecture, normalise(GUIDANCE)]) {
-      expect(text).not.toContain("refuses the placement")
-      expect(text).not.toContain("pre-placement")
-      expect(text).not.toContain("asserts the destination's")
+    for (const [name, text] of surfaces) {
+      expect(text, name).not.toContain("refuses the placement")
+      expect(text, name).not.toContain("pre-placement")
+      expect(text, name).not.toContain("asserts the destination's")
     }
   })
 })
