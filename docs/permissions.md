@@ -73,7 +73,7 @@ Deny every nested entry, allow one subproject. Native skills stay allowed:
 ```
 
 A `nested.*` rule states something about the parent's advertised union, not about the skill
-content: the same file is a native skill at a destination that ships it, under an ID with no
+content: the same file is a native skill at a destination that contains it, under an ID with no
 `nested.` prefix, so the pattern stops matching there. A rule meant to cover a placed child must
 match the destination-native ID too (`"skill": "deny"` and `"*": "deny"` do).
 
@@ -197,12 +197,12 @@ Session-level rules, where a host or another plugin sets them, merge after the a
 therefore win over both (`packages/core/src/permission.ts:158-164`,
 `packages/core/src/session/context.ts:130-131`).
 
-A `directory` placement runs no check before the move. The destination's `Skill.available`
-advertisement and the `skill` assert both resolve there, against the destination's rules and the
-child's same-id agent. A `nested.*` pattern stops matching where the file becomes a native skill
-at the destination, so a rule meant to follow a placed child must match the destination-native ID
-(`"skill": "deny"` and `"*": "deny"` do; a `nested.`-prefixed pattern does not). Limits and
-consequences: [docs/limits.md](limits.md#placement).
+A `directory` placement runs no `skill` permission check before the move. The destination's
+`Skill.available` advertisement and the `skill` assert both resolve there, against the
+destination's rules and the child's same-id agent. A `nested.*` pattern stops matching where the
+file becomes a native skill at the destination, so a rule meant to follow a placed child must
+match the destination-native ID (`"skill": "deny"` and `"*": "deny"` do; a `nested.`-prefixed
+pattern does not). Limits and consequences: [docs/limits.md](limits.md#placement).
 
 An agent-facing rule matches the nested **agent**'s ID — the readable
 `<subproject path>/<native name>`, e.g. `opencode/translator` — never its display name: the

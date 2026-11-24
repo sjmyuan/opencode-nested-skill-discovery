@@ -333,8 +333,8 @@ serving the call, or a `~/` path; the resolved value is `realpath`-normalised an
 - this is a context boundary, not a security boundary: the model can still read outside it,
   and the native `opencode_session_move` tool is unchanged
 
-A `directory` call runs no check before the move: the host evaluates `skill` in the child at the
-destination. Placement widens the child's skill surface wherever a rule does not follow it. A
+A `directory` call runs no `skill` permission check before the move.
+Placement widens the child's skill surface wherever a rule does not follow it. A
 `skill` rule is matched against the skill ID at the location that evaluates it, and the move
 changes that location: a rule keyed on a `nested.*` pattern stops matching where the file becomes
 a native skill at the destination, and the child is offered it under its native ID. The plugin runs

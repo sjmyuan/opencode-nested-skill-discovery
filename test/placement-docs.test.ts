@@ -111,12 +111,25 @@ describe("placement: the accepted-risk wording", () => {
     expect(limits).toContain("not a security boundary")
   })
 
-  it("promises no pre-move check in the permission or architecture docs", () => {
+  it("promises no pre-move `skill` check in any placement doc", () => {
     const permissions = normalise(read("docs/permissions.md"))
     const architecture = normalise(read("docs/architecture.md"))
 
-    expect(permissions).toContain("runs no check before the move")
+    for (const doc of ["README.md", "docs/limits.md", "docs/permissions.md"]) {
+      expect(normalise(read(doc)), doc).toContain("runs no `skill` permission check before the move")
+    }
     expect(permissions).toContain("[docs/limits.md](limits.md#placement)")
+
+    const surfaces: Array<[string, string]> = [
+      ...DOCS.map((doc) => [doc, normalise(read(doc))] as [string, string]),
+      ["GUIDANCE", normalise(GUIDANCE)],
+    ]
+
+    for (const [name, text] of surfaces) {
+      expect(text.split(normalise(ACCEPTED_RISK)).join(""), name).not.toContain(
+        "runs no check before the move",
+      )
+    }
 
     for (const text of [permissions, architecture, normalise(GUIDANCE)]) {
       expect(text).not.toContain("refuses the placement")

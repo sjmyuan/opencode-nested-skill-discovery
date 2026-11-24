@@ -139,8 +139,8 @@ outside this project and its worktrees) creates no child. A placement that fails
 exists leaves it created and unprompted; nothing is rolled back. Limits and consequences:
 [docs/limits.md](docs/limits.md).
 
-A `directory` call runs no check before the move: the host evaluates `skill` in the child at the
-destination. Placement widens the child's skill surface wherever a rule does not follow it. A
+A `directory` call runs no `skill` permission check before the move.
+Placement widens the child's skill surface wherever a rule does not follow it. A
 `skill` rule is matched against the skill ID at the location that evaluates it, and the move
 changes that location: a rule keyed on a `nested.*` pattern stops matching where the file becomes
 a native skill at the destination, and the child is offered it under its native ID. The plugin runs
