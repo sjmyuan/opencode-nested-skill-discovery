@@ -4,18 +4,15 @@ import type { JsonSchema } from "effect"
 import { realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
-import { compareText } from "./contracts.ts"
-import type { RegistrySnapshot } from "./contracts.ts"
 import { isPathInside } from "./path.ts"
 
 /**
  * Placement narrows the child to its destination, so the host stays cut down to the domains
- * placement needs. The pre-placement `skill` assert is one of them (ADR-exposure-02 D3); the
- * gate it runs is policy on the `directory` argument, not a boundary.
+ * placement needs. Permission is not one of them: the host evaluates `skill` in the child at the
+ * destination (ADR-exposure-02 D3), and this wrapper asserts nothing before the move.
  */
 export interface PlacementHost {
   readonly location: Pick<Plugin.Context["location"], "directory" | "project">
-  readonly permission: Pick<Plugin.Context["permission"], "assert">
   readonly tool: Pick<Plugin.Context["tool"], "transform">
   readonly session: Pick<Plugin.Context["session"], "get" | "move">
   readonly worktree: Pick<Plugin.Context["worktree"], "list">
@@ -27,9 +24,6 @@ type PlacementExecute = PlacementTool["execute"]
 type PlacementContext = Parameters<PlacementExecute>[1]
 type SessionID = Parameters<PlacementHost["session"]["get"]>[0]["sessionID"]
 type SessionDirectory = Parameters<PlacementHost["session"]["move"]>[0]["directory"]
-type AgentID = NonNullable<Parameters<Plugin.Context["permission"]["assert"]>[0]["agent"]>
-
-const EMPTY_SNAPSHOT: RegistrySnapshot = { location: "", snapshots: [] }
 
 export interface PlacementOptions {
   readonly timeoutMs?: number
@@ -37,7 +31,6 @@ export interface PlacementOptions {
   readonly sleep?: (ms: number) => Promise<void>
   readonly now?: () => number
   readonly home?: string
-  readonly readSnapshot?: () => RegistrySnapshot
 }
 
 export interface Placement {
@@ -142,19 +135,6 @@ export function withinBoundary(input: BoundaryInput): boolean {
   return input.worktrees.some((worktree) => isPathInside(worktree, input.destination))
 }
 
-/**
- * The indexed nested entries the destination owns: scopes at the destination or below it.
- * A containing scope is excluded, because its entries are advertised natively there.
- */
-export function nestedIDsUnder(snapshot: RegistrySnapshot, destination: string): readonly string[] {
-  const ids = new Set<string>()
-  for (const scope of snapshot.snapshots) {
-    if (!isPathInside(destination, scope.directory)) continue
-    for (const skill of scope.skills) ids.add(skill.id)
-  }
-  return [...ids].sort(compareText)
-}
-
 const PLACEMENT_TIMEOUT_MS = 120_000
 const MOVE_POLL_MS = 50
 
@@ -212,21 +192,6 @@ const placeFailure = (child: string, requested: string, observed: string, detail
     cause === undefined ? undefined : { cause },
   )
 
-const placeDenied = (child: string, requested: string, observed: string, count: number, cause: unknown): Error =>
-  new Error(
-    `Subagent placement denied (child session: ${child}, requested directory: ${requested}, observed location: ${observed}). The destination's ${count} indexed nested skill${count === 1 ? "" : "s"} ${count === 1 ? "was" : "were"} asserted as a batch and at least one is denied by this session's rules. The child stays created and unprompted; nothing was rolled back.`,
-    { cause },
-  )
-
-/**
- * A deny rule arrives as `Tool.Error` wrapping `Permission.BlockedError`; a decline is a defect,
- * a correction is feedback, and anything else belongs to another failure.
- */
-export function isPermissionDenial(error: unknown): boolean {
-  if (!isObject(error) || error._tag !== "Tool.Error") return false
-  return isObject(error.error) && error.error._tag === "Permission.BlockedError"
-}
-
 export function createPlacement(host: PlacementHost, options: PlacementOptions = {}): Placement {
   const diagnostics: string[] = []
   const timeoutMs = options.timeoutMs ?? PLACEMENT_TIMEOUT_MS
@@ -234,7 +199,6 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
   const sleep = options.sleep ?? defaultSleep
   const now = options.now ?? Date.now
   const home = options.home ?? process.env.HOME ?? homedir()
-  const readSnapshot = options.readSnapshot ?? (() => EMPTY_SNAPSHOT)
   let registration: { dispose: () => Promise<void> | void } | undefined
   let disposed = false
 
@@ -260,40 +224,9 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
     }
   }
 
-  const assertPlacementSkill = async (
-    child: string,
-    destination: string,
-    observed: string,
-    childAgent: AgentID | undefined,
-    context: PlacementContext,
-  ): Promise<void> => {
-    if (childAgent === undefined) {
-      skip("gate skipped: the child agent is not known")
-      return
-    }
-    const ids = nestedIDsUnder(readSnapshot(), destination)
-    if (ids.length === 0) {
-      skip(`gate skipped: no indexed nested entries under ${destination}`)
-      return
-    }
-    try {
-      await host.permission.assert({
-        sessionID: context.sessionID,
-        agent: childAgent,
-        action: "skill",
-        resources: [...ids],
-        source: { type: "tool", messageID: context.messageID, id: context.id },
-      })
-    } catch (error) {
-      if (!isPermissionDenial(error)) throw error
-      throw placeDenied(child, destination, observed, ids.length, error)
-    }
-  }
-
   const placeChild = async (
     childSessionID: string,
     destination: string,
-    childAgent: AgentID | undefined,
     beforeBusy: unknown,
     beforeKnown: boolean,
     context: PlacementContext,
@@ -310,7 +243,6 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
           : "The child's state could not be read before the task started, so placement could not confirm it was still unprompted.",
       )
     }
-    await assertPlacementSkill(childSessionID, destination, observed, childAgent, context)
     if (observed === destination) return
 
     // The deadline starts before `move`: probing and booting the destination graph happens inside it.
@@ -395,8 +327,6 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
 
     const continuation =
       typeof source.sessionID === "string" && source.sessionID !== "" ? source.sessionID : undefined
-    const childAgent =
-      typeof source.agent === "string" && source.agent !== "" ? (source.agent as AgentID) : undefined
     const before = continuation === undefined ? undefined : await readSession(continuation)
     const beforeKnown = continuation === undefined || before !== undefined
     const beforeBusy = busyOf(before)
@@ -405,7 +335,7 @@ export function createPlacement(host: PlacementHost, options: PlacementOptions =
     const progress: PlacementContext["progress"] = async (update) => {
       const child = placed ? undefined : childOf(update)
       if (child !== undefined) {
-        await placeChild(child, destination, childAgent, beforeBusy, beforeKnown, context)
+        await placeChild(child, destination, beforeBusy, beforeKnown, context)
         placed = true
       }
       await context.progress(update)
