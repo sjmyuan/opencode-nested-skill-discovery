@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { Permission } from "@opencode/schema/permission"
 import { describe, expect, it } from "vitest"
 import { createPlacement } from "../src/placement.ts"
 import type { FakeContext, FakeSessionSeed, FakeToolSeed } from "./support/fake-context.ts"
@@ -28,6 +29,7 @@ const executeOf = (fake: FakeContext): Execute => (fake.tool("subagent") as { ex
 
 interface HarnessOptions {
   readonly sessions?: readonly FakeSessionSeed[]
+  readonly agentConfigRules?: readonly Permission.Rule[]
 }
 
 interface Harness {
@@ -74,6 +76,7 @@ const harness = async (options: HarnessOptions = {}): Promise<Harness> => {
     directory: root,
     tools: [tool],
     ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
+    ...(options.agentConfigRules === undefined ? {} : { agentConfigRules: options.agentConfigRules }),
     onSessionOperation: (operation) => events.push(operation),
   })
   const placement = createPlacement(fake.ctx)
@@ -169,6 +172,20 @@ describe("placement: the child moves inside the awaited progress", () => {
     const before = h.fake.moves.length
     await h.execute({ agent: "general", description: "task", prompt: "plain", sessionID: "child-9" })
     expect(h.fake.moves).toHaveLength(before)
+  })
+
+  it("places the child without consulting a permission domain, even when the location denies nested IDs", async () => {
+    const h = await harness({ agentConfigRules: [{ action: "skill", resource: "nested.*", effect: "deny" }] })
+
+    expect("permission" in h.fake.ctx).toBe(false)
+
+    const result = await h.execute({ agent: "general", description: "task", prompt: "do it", directory: h.destination })
+
+    expect(h.fake.moves).toEqual([{ sessionID: "child-1", directory: h.destination }])
+    expect(h.forwarded).toEqual([{ sessionID: "child-1", status: "running" }])
+    expect(h.fake.prompts.map((prompt) => prompt.text)).toEqual(["do it"])
+    expect(result).toBe(h.results[0])
+    expect(h.placement.diagnostics.filter((line) => line.includes("gate"))).toEqual([])
   })
 
   it("passes an empty or omitted directory to the native tool unchanged", async () => {
