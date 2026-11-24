@@ -50,7 +50,6 @@ const GUIDANCE_ROWS = [
   { line: "A placed child narrows", phrase: "loses sibling subprojects", docs: ["docs/limits.md"] },
   { line: "With sessionID a different", phrase: "not rewritten", docs: ["docs/limits.md"] },
   { line: "A refused destination creates no child", phrase: "creates no child", docs: ["README.md"] },
-  { line: "A skill deny rule that targets", phrase: "not a boundary", docs: ["README.md", "docs/limits.md"] },
   { line: "ACCEPTED_RISK", phrase: ACCEPTED_RISK, docs: ["README.md", "docs/limits.md"] },
 ]
 
@@ -87,20 +86,20 @@ describe("placement guidance: every bullet is carried by the docs", () => {
   })
 })
 
-describe("placement gate: the accepted-risk wording", () => {
+describe("placement: the accepted-risk wording", () => {
   it("appears once and identically on the tool description, the README and the limits", () => {
     expect(GUIDANCE).toContain(ACCEPTED_RISK)
     expect(occurrences(read("README.md"), ACCEPTED_RISK)).toBe(1)
     expect(occurrences(read("docs/limits.md"), ACCEPTED_RISK)).toBe(1)
   })
 
-  it("names the four gaps the decision records", () => {
+  it("names what the accepted risk turns on", () => {
     const passage = normalise(ACCEPTED_RISK)
 
-    for (const gap of ["never indexed", "native IDs", "permission configuration", "opencode_session_move"]) {
-      expect(passage).toContain(gap)
-    }
-    expect(passage).toContain("not a policy boundary")
+    expect(passage).toContain("the move changes that location")
+    expect(passage).toContain("`Skill.available` for advertisement and the `skill` assert for invocation")
+    expect(passage).toContain("moves any session with no skill-permission check at all")
+    expect(passage).toContain("a `nested.`-prefixed pattern does not")
   })
 
   it("never claims a security boundary", () => {
@@ -112,12 +111,29 @@ describe("placement gate: the accepted-risk wording", () => {
     expect(limits).toContain("not a security boundary")
   })
 
-  it("points at the gate from the permission and architecture docs", () => {
+  it("promises no pre-move `skill` check in any placement doc", () => {
     const permissions = normalise(read("docs/permissions.md"))
 
-    expect(permissions).toContain("asserts the destination's indexed `nested.*` IDs")
-    expect(permissions).toContain("refuses the placement")
+    for (const doc of ["README.md", "docs/limits.md", "docs/permissions.md"]) {
+      expect(normalise(read(doc)), doc).toContain("runs no `skill` permission check before the move")
+    }
     expect(permissions).toContain("[docs/limits.md](limits.md#placement)")
-    expect(normalise(read("docs/architecture.md"))).toContain("the pre-placement `skill` gate")
+
+    const surfaces: Array<[string, string]> = [
+      ...DOCS.map((doc) => [doc, normalise(read(doc))] as [string, string]),
+      ["GUIDANCE", normalise(GUIDANCE)],
+    ]
+
+    for (const [name, text] of surfaces) {
+      expect(text.split(normalise(ACCEPTED_RISK)).join(""), name).not.toContain(
+        "runs no check before the move",
+      )
+    }
+
+    for (const [name, text] of surfaces) {
+      expect(text, name).not.toContain("refuses the placement")
+      expect(text, name).not.toContain("pre-placement")
+      expect(text, name).not.toContain("asserts the destination's")
+    }
   })
 })

@@ -415,7 +415,7 @@ fallbacks are the guidance block, the `@` menu, and storage keys.
 |---|---|
 | `index.ts` | default export for the host loader |
 | `src/plugin.ts` | plugin ID, `setup`, placement activation, cleanup, empty snapshot |
-| `src/placement.ts` | native `subagent` extension: `directory` schema and guidance, destination resolution and project/worktree boundary, move-and-confirm inside the native awaited progress, and the pre-placement `skill` gate |
+| `src/placement.ts` | native `subagent` extension: `directory` schema and guidance, destination resolution and project/worktree boundary, move-and-confirm inside the native awaited progress |
 | `src/contracts.ts` | entry/snapshot/storage shapes, caps, budgets, prune list, markers, skill/command/agent root kinds, candidate and command-snapshot shapes, the four config-document names and their native order |
 | `src/options.ts` | the five scan budgets resolved from `ctx.options`: per-key fail-safe, one `option-invalid: <key>=<value>` line per rejected key, unknown keys ignored, no path echoed |
 | `src/scan.ts` | bounded DFS, markers, skill roots, command roots, agent roots and config-document candidates, budgets, refusals |
